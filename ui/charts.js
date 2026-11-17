@@ -25,7 +25,7 @@ export function bars(days, { height = 150 } = {}) {
   const max = Math.max(3, ...days.map((d) => d.ok + d.failed + d.neutral)), bw = iw / days.length, gap = Math.min(10, bw * 0.28);
   const tip = h('div', { class: 'tip', hidden: true }); const wrap = h('div', { class: 'chart' }, tip);
   const svg = s('svg', { viewBox: `0 0 ${W} ${height}`, class: 'bars', role: 'img', 'aria-label': 'Runs per day' });
-  [0, 0.5, 1].forEach((f) => { const y = pad.t + ih - f * ih; svg.append(s('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: 'grid' }), s('text', { x: pad.l - 6, y: y + 3, class: 'ax', 'text-anchor': 'end' }, Math.round(max * f))); });
+  [0, 0.5, 1].forEach((f) => { const y = pad.t + ih - f * ih; svg.append(s('line', { x1: pad.l, x2: W - pad.r, y1: y, y2: y, class: 'gl' }), s('text', { x: pad.l - 6, y: y + 3, class: 'ax', 'text-anchor': 'end' }, Math.round(max * f))); });
   days.forEach((d, i) => {
     const x = pad.l + i * bw + gap / 2, w = bw - gap; let y = pad.t + ih;
     const seg = (n, cls) => { if (!n) return; const hh = (n / max) * ih; y -= hh; svg.append(s('rect', { x, y, width: w, height: hh, rx: Math.min(4, w / 3), class: `bar ${cls}` })); };

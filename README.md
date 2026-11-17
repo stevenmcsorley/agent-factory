@@ -6,7 +6,7 @@ Label a GitHub issue `agent-ready` (or queue one from the web UI). Agent Factory
 
 - **Bring your own agent**: Claude Code or Codex, on a subscription or an API key. Others can be added behind a small adapter.
 - **Runs on your machine**: no hosted service, no telemetry.
-- **Web UI**: see every project, the ticket queue, PRs and runs; queue work; pause everything; add an existing repo or create a brand-new project from a template.
+- **Prompt it, or click it**: a mission-control web UI *and* an MCP server, so you can say "create a project that…" or "fix the login bug" from Claude and watch it happen.
 - **Safe by default**: agents run in containers with no route to the internet except an allowlisted proxy, tickets from strangers are ignored, CI/config files are protected, and daily caps stop runaway use.
 
 > **Status: v0.1, early.** It works end to end on real repositories (see [What's verified](#whats-verified)), but it is young software that runs code written by an AI. Read [Security](#security-model) before pointing it at anything you care about, and start with a throwaway repo.
@@ -52,15 +52,37 @@ Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-rev
 
 ## The web UI
 
-| Page | What you can do |
+![Overview: prompt bar, KPIs, live status, 14-day chart, projects](docs/img/overview.jpg)
+
+![A run: pipeline, timed phases, changed files, the agent's summary and verification output](docs/img/run.jpg)
+
+| Page | What you get |
 |---|---|
-| Overview | Today's usage vs. caps, every project's health, recent runs, Run now / Pause |
-| Project | Ticket queue with states, open agent PRs, run history, live log, **queue a new ticket** (with a live "is this clear enough?" hint), pause or remove the project |
-| Add a project | Add an existing repo, **or create a new GitHub repo** from a template (blank, node, python) and queue your description as its first ticket |
-| Runs | Every agent run and feedback round |
-| Health | The same checks as `npm run doctor`, each with a fix |
+| **Overview** | A prompt bar ("tell the factory what to do") with a live clarity check; KPI rings (runs today vs cap, success rate, time to PR, what is waiting on you); a **live pipeline** for every run in flight (claim → sandbox → agent → verify → push → PR) with a ticking timer; a 14-day activity chart; project cards with sparklines and queue chips; an activity feed |
+| **Project** | A **ticket board** (Queued / Working / In review / Needs attention), open agent PRs, run history, live log, and a new-ticket form |
+| **Run** | The full story of one run: timed phases, files changed, tokens, what the agent said, and the verification output |
+| **Connect AI** | Copy-paste setup for Claude and other MCP clients, plus the measured token cost of each mode |
+| **Health** | The same checks as `npm run doctor`, each with a fix |
+
+Press **Ctrl/⌘ K** anywhere for a command palette (jump to a project, pause, run now, add a project).
 
 It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
+
+## Drive it by prompt (MCP)
+
+The factory is also an MCP server, so an AI can run it for you: *"create a project that does X"*, *"what is the factory doing?"*, *"queue a fix for the login bug and tell me when the PR is up"*.
+
+```bash
+# Claude Code (the UI's Connect page shows this with your token filled in)
+claude mcp add --transport http agent-factory http://127.0.0.1:7777/mcp-code --header "Authorization: Bearer <your-token>"
+```
+
+| Endpoint | Tools | Context cost per session |
+|---|---|---|
+| `/mcp-code` (recommended) | `search` + `execute`: the AI writes a few lines of JavaScript that run in a free in-process **QuickJS sandbox** (no network or filesystem) and calls `factory.*` | ~270 tokens |
+| `/mcp` | 16 direct tools (`create_ticket`, `create_project`, `get_run`, `activity`, `metrics`, …) | ~1,700 tokens |
+
+Vague requests are refused with advice (`create_ticket` runs the clarity check), and the factory still never merges. Code Mode needs the optional `quickjs-emscripten` dependency (installed by `npm install`). Bearer-token auth only for now: ChatGPT connectors need a public HTTPS URL plus OAuth, which this local server does not provide.
 
 ## Configuration
 
@@ -110,18 +132,20 @@ All of this was run for real, not just unit-tested:
 - Failing GitHub Actions CI → log fetched → agent fix pushed → CI green. Review comment → follow-up commit.
 - Crash recovery, daily caps, protected paths, repo allowlist, clarity gate.
 - The egress proxy blocking direct access and non-allowlisted hosts (real Docker test).
-- The web UI driven through its API and viewed in a browser; project creation against GitHub is covered by tests with a fake GitHub, not yet end to end.
+- The web UI used in a real browser: a ticket typed into the prompt bar became a PR while the live pipeline view tracked it; run detail, board, charts and Connect pages checked against real runs.
+- Creating a brand-new GitHub repo from a template, building it from a one-paragraph spec, answering a review comment on it, and bouncing a vague ticket; all against real GitHub and re-verified independently (clone, run its tests).
+- The MCP server driven by the official MCP SDK client against the running app (handshake, tools, Code Mode execute, error handling).
 
 **Not done yet:** a long unattended soak (days), non-Node repos end to end (detection exists; images/egress hosts are yours to set), GitLab/other forges, webhooks instead of polling, SQLite state (it is JSON files), multi-user auth for the UI.
 
 ## Development
 
 ```bash
-npm test                          # ~46 tests, no network needed
+npm test                          # ~53 tests, no network needed
 FACTORY_DOCKER_TESTS=1 npm test   # also runs the real Docker egress-proxy test
 ```
 
-Zero runtime dependencies. Layout: `src/factory.mjs` (ticket loop), `src/feedback.mjs` (CI/review loop), `src/engine.mjs` (projects, limits), `src/server.mjs` + `ui/` (API and UI), `src/adapters/` (tickets, sandbox, agents, git host). Design notes: [docs/design.md](docs/design.md); the landscape and why this exists: [docs/landscape.md](docs/landscape.md).
+One optional dependency (QuickJS, for MCP Code Mode); everything else is plain Node. Layout: `src/factory.mjs` (ticket loop), `src/feedback.mjs` (CI/review loop), `src/engine.mjs` (projects, limits), `src/server.mjs` + `ui/` (API, UI and MCP), `src/ops.mjs` (every operation, defined once and served as REST, MCP tools and Code Mode), `src/adapters/` (tickets, sandbox, agents, git host). Design notes: [docs/design.md](docs/design.md); the landscape and why this exists: [docs/landscape.md](docs/landscape.md).
 
 ## License
 
