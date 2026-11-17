@@ -77,6 +77,7 @@ export function createServer(engine, { token, allowedHosts }) {
       const host = (req.headers.host ?? '').toLowerCase();
       if (!allowedHosts.includes(host)) return send(res, 421, { error: 'Unrecognised Host header' });
       const url = new URL(req.url, `http://${host}`);
+      if (url.pathname === '/healthz' && req.method === 'GET') return send(res, 200, { ok: true, paused: engine.paused() }); // for uptime monitors: no secrets, no data
       const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/mcp' || url.pathname === '/mcp-code';
       if (!protectedPath) {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });

@@ -48,6 +48,13 @@ test('auth: every /api route needs the bearer token; static UI does not; wrong h
   close();
 });
 
+test('/healthz answers without a token for uptime monitors, exposes nothing else, and still checks the Host header', async () => {
+  const { call, close, port } = await boot();
+  const r = await call('/healthz', { token: null }); assert.equal(r.status, 200); assert.deepEqual(Object.keys(await r.json()).sort(), ['ok', 'paused']);
+  const hostile = await new Promise((resolve) => { const q = http.request({ host: '127.0.0.1', port, path: '/healthz', headers: { Host: 'evil.test' } }, (x) => { x.resume(); resolve(x.statusCode); }); q.end(); }); assert.equal(hostile, 421);
+  close();
+});
+
 test('writes: JSON only, bounded, same-origin only', async () => {
   const { call, close, port } = await boot();
   const raw = (p, init) => fetch(`http://127.0.0.1:${port}${p}`, { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, ...init.headers }, body: init.body });

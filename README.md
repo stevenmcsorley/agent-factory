@@ -1,6 +1,10 @@
 # Agent Factory
 
+<p align="center"><img src="docs/guide/img/hero-line.svg" alt="A ticket rides the assembly line from the hopper through six stations to the shipped chute" width="100%"></p>
+
 **Self-hosted software delivery on autopilot: tickets in, reviewed pull requests out.**
+
+📖 **New here? Read the [illustrated guide](docs/GUIDE.md)**: install in five minutes, a tour of every screen, connecting your tools, safety, and an honest production-readiness checklist.
 
 Label a GitHub issue `agent-ready` (or queue one from the web UI). Agent Factory claims it, runs a coding agent in a locked-down Docker sandbox, runs your tests, and opens a **draft pull request**. If CI fails or you leave review comments, it goes back and pushes fixes. **It never merges: you do.**
 

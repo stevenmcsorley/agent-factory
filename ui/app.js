@@ -95,7 +95,7 @@ async function openPalette() {
   if (palette || !session.token) return;
   let projects = []; try { projects = await api('/projects'); } catch { /* ignore */ }
   const items = [
-    ...NAV.map(([, href, label, ic]) => ({ label: `Go to ${label}`, ic, run: () => { location.hash = href; } })),
+    ...NAV.map(([k, href, label]) => ({ label: `Go to ${label}`, ic: { overview: 'pulse', inbox: 'alert', projects: 'folder', runs: 'git', connect: 'plug', health: 'shield' }[k], run: () => { location.hash = href; } })),
     ...projects.map((p) => ({ label: `Open project ${p.id}`, ic: 'folder', hint: p.repo, run: () => { location.hash = `#/project/${p.id}`; } })),
     { label: 'Add or create a project', ic: 'plus', run: () => { location.hash = '#/new'; } },
     { label: status?.paused ? 'Resume the factory' : 'Pause the factory', ic: status?.paused ? 'play' : 'pause', run: () => api(`/control/${status?.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }).then(() => refresh(true)).catch((e) => toast(e.message, 'bad')) },
