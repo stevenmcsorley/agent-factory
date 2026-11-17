@@ -129,3 +129,22 @@ test('destroyDir never throws, even for read-only trees; removes them via chmod 
   assert.equal(destroyDir(d), true); assert.ok(!fs.existsSync(d));
   assert.doesNotThrow(() => destroyDir('/nonexistent/path/zzz'));
 });
+
+import { githubTickets } from '../src/adapters/tickets-github.mjs';
+test('github tickets read via the REST issues endpoint (no search lag), drop PRs and strangers, keep labels/state', async () => {
+  const calls = [];
+  const raw = [
+    { number: 1, title: 'mine', body: 'b', labels: [{ name: 'agent-ready' }], user: { login: 'me' }, html_url: 'https://github.com/o/r/issues/1', state: 'open', updated_at: 'T' },
+    { number: 2, title: 'a PR', labels: [{ name: 'agent-ready' }], user: { login: 'me' }, pull_request: {}, state: 'open' },
+    { number: 3, title: 'stranger', labels: [{ name: 'agent-ready' }], user: { login: 'evil' }, state: 'open' },
+    { number: 4, title: 'busy', labels: [{ name: 'agent-ready' }, { name: 'agent-working' }], user: { login: 'me' }, state: 'open' },
+    { number: 5, title: 'done', labels: [{ name: 'agent-review' }], user: { login: 'me' }, html_url: 'u', state: 'closed', updated_at: 'T' },
+    { number: 6, title: 'unrelated', labels: [{ name: 'bug' }], user: { login: 'me' }, state: 'open' },
+  ];
+  const t = githubTickets({ repo: 'o/r', allowedAuthors: ['me'], exec: async (cmd, args) => { calls.push(args.join(' ')); return { code: 0, out: JSON.stringify(raw) }; } });
+  assert.deepEqual((await t.poll()).map((x) => x.id), [1]);
+  assert.match(calls[0], /^api repos\/o\/r\/issues -X GET -f state=open -f per_page=100 -f labels=agent-ready$/);
+  assert.deepEqual((await t.listWorking()).map((x) => x.id), [4]);
+  const all = await t.listAgentTickets();
+  assert.deepEqual(all.map((x) => [x.id, x.state]), [[1, 'OPEN'], [4, 'OPEN'], [5, 'CLOSED']]);
+});

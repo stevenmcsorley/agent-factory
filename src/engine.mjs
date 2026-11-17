@@ -12,6 +12,7 @@ import { gitVcs } from './adapters/vcs.mjs';
 import { startEgress } from './egress.mjs';
 import { spentToday, runsToday } from './budget.mjs';
 import { validateConfig, saveConfig } from './config.mjs';
+import { stateOf } from './ops.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
@@ -65,7 +66,9 @@ export class Engine {
   feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
-    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); } catch (e) { console.error('cycle failed:', e.message); } this.timer = setTimeout(cycle, ms); };
+    this.pollMs = ms;
+    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); } catch (e) { console.error('cycle failed:', e.message); } this.nextAt = Date.now() + ms; this.timer = setTimeout(cycle, ms); };
+    this.nextAt = Date.now() + 1000;
     this.timer = setTimeout(cycle, 1000);
   }
   halt() { clearTimeout(this.timer); }
@@ -119,11 +122,20 @@ export class Engine {
     const per = Object.fromEntries(this.cfg.projects.map((p) => [p.id, { project: p.id, repo: p.repo, paused: !!p.paused, runs: 0, ok: 0, failed: 0, lastRun: null }]));
     for (const r of runs) { const s = per[r.project]; if (!s) continue; s.runs++; if (r.status === 'ok') s.ok++; else if (!['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued'].includes(r.status)) s.failed++; s.lastRun ??= r; }
     const l = this.cfg.limits;
-    return { paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, agent: this.cfg.agent.kind,
+    return { paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, nextAt: this.nextAt ? new Date(this.nextAt).toISOString() : null, pollMs: this.pollMs ?? null, agent: this.cfg.agent.kind,
       today: { runs: runsToday(this.cfg.stateDir), maxRuns: l.maxRunsPerDay ?? null, costUsd: Number(spentToday(this.cfg.stateDir).toFixed(4)), maxCostUsd: l.dailyBudgetUsd ?? null },
       projects: Object.values(per) };
   }
   async _cached(key, ttl, fn) { const c = this.cache.get(key); if (c && Date.now() - c.at < ttl) return c.v; const v = await fn(); this.cache.set(key, { at: Date.now(), v }); return v; }
+  // One call for the dashboard: per-project queue by state, open PRs and metrics. A failing project never breaks the page.
+  async overview() {
+    const m = this.metrics();
+    return Promise.all(this.cfg.projects.map(async (p) => {
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      try { (await this.listTickets(p.id)).forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
+      return out;
+    }));
+  }
   async listTickets(id) { const p = this.project(id); return this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets()); }
   async listPrs(id) { const p = this.project(id); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: `https://github.com/${p.repo}/pull/${x.number}` })); }
   async createTicket(id, { title, body, repo }) {

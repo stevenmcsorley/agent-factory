@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { doctor } from './doctor.mjs';
 import { assessTicket } from './gate.mjs';
 import { templateNames } from './github.mjs';
-import { handleRpc } from './mcp.mjs';
+import { handleRpc, directTools, codeTools } from './mcp.mjs';
+import { sandboxAvailable } from './jssandbox.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const UI = path.join(here, '..', 'ui');
@@ -35,6 +36,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/templates$/, async () => templateNames()],
     ['GET', /^\/api\/whoami$/, async () => ({ login: await engine.gh.whoami() })],
     ['POST', /^\/api\/check-ticket$/, async (_m, body) => assessTicket({ title: body.title ?? '', body: body.body ?? '' }, engine.cfg.limits.gate)],
+    ['GET', /^\/api\/overview$/, async () => engine.overview()],
+    ['GET', /^\/api\/connect$/, async () => { const t = (x) => Math.round(JSON.stringify(x).length / 4); return { directTools: directTools().length, directTokens: t(directTools()), codeTokens: t(codeTools()), codeAvailable: await sandboxAvailable() }; }],
     ['GET', /^\/api\/activity$/, async () => engine.activity()],
     ['GET', /^\/api\/metrics$/, async (_m, _b, url) => engine.metrics({ days: Math.min(Number(url.searchParams.get('days')) || 14, 90) })],
     ['GET', /^\/api\/runs\/([a-f0-9]{8})$/, async (m) => engine.getRun(m[1])],

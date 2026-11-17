@@ -2,31 +2,30 @@ import { run } from '../util.mjs';
 
 // TicketSource backed by GitHub issues via the authenticated `gh` CLI.
 // Only issues authored by an allowlisted user are returned (prompt-injection guard).
-export function githubTickets({ repo, allowedAuthors }) {
+export function githubTickets({ repo, allowedAuthors, exec = run }) {
   const gh = async (args) => {
-    const r = await run('gh', args);
+    const r = await exec('gh', args);
     if (r.code !== 0) throw new Error(`gh ${args.join(' ')} failed: ${r.out}`);
     return r.out;
   };
+  const listIssues = async ({ labels, state }) => {
+    const q = [`repos/${repo}/issues`, '-X', 'GET', '-f', `state=${state}`, '-f', 'per_page=100', ...(labels ? ['-f', `labels=${labels}`] : [])];
+    return JSON.parse(await gh(['api', ...q]))
+      .filter((i) => !i.pull_request && allowedAuthors.includes(i.user?.login)) // PRs also appear in this endpoint; untrusted authors never get through
+      .map((i) => ({ id: i.number, title: i.title, body: i.body ?? '', labels: i.labels.map((l) => l.name), repo, url: i.html_url, state: i.state.toUpperCase(), updatedAt: i.updated_at }))
+      .filter((t) => (!labels || t.labels.includes(labels)) && (state === 'all' || t.state === state.toUpperCase())); // never rely on server-side filtering alone
+  };
   return {
+    // Reads use the REST issues endpoint, NOT `gh issue list --label`: that goes through GitHub's search index, which lags by
+    // several seconds, so a ticket queued a moment ago would be invisible to an immediate "Run now".
     async poll() {
-      const out = await gh(['issue', 'list', '-R', repo, '--label', 'agent-ready', '--state', 'open',
-        '--json', 'number,title,body,labels,author', '--limit', '20']);
-      return JSON.parse(out)
-        .filter((i) => allowedAuthors.includes(i.author.login))
-        .map((i) => ({ id: i.number, title: i.title, body: i.body, labels: i.labels.map((l) => l.name), repo }))
-        .filter((t) => !t.labels.includes('agent-working'));
+      return (await listIssues({ labels: 'agent-ready', state: 'open' })).filter((t) => !t.labels.includes('agent-working'));
     },
-    async listWorking() {
-      const out = await gh(['issue', 'list', '-R', repo, '--label', 'agent-working', '--state', 'open', '--json', 'number,title', '--limit', '50']);
-      return JSON.parse(out).map((i) => ({ id: i.number, title: i.title }));
-    },
-    // Everything the factory has touched (any agent-* label), for dashboards. Same author allowlist as poll().
+    async listWorking() { return (await listIssues({ labels: 'agent-working', state: 'open' })).map((t) => ({ id: t.id, title: t.title })); },
+    // Everything the factory has touched (any agent-* label), for dashboards.
     async listAgentTickets() {
-      const out = await gh(['issue', 'list', '-R', repo, '--state', 'all', '--json', 'number,title,labels,author,state,url,updatedAt', '--limit', '100']);
-      return JSON.parse(out).filter((i) => allowedAuthors.includes(i.author.login))
-        .map((i) => ({ id: i.number, title: i.title, state: i.state, url: i.url, updatedAt: i.updatedAt, labels: i.labels.map((l) => l.name) }))
-        .filter((t) => t.labels.some((l) => l.startsWith('agent-')));
+      return (await listIssues({ state: 'all' })).filter((t) => t.labels.some((l) => l.startsWith('agent-')))
+        .map((t) => ({ id: t.id, title: t.title, state: t.state, url: t.url, updatedAt: t.updatedAt, labels: t.labels }));
     },
     async create({ title, body }) {
       const url = (await gh(['issue', 'create', '-R', repo, '--title', title, '--body', body ?? '', '--label', 'agent-ready'])).trim().split('\n').pop();
