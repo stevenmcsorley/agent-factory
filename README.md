@@ -18,6 +18,7 @@ You need: **Node 22+**, **Docker**, **git**, and the **GitHub CLI** signed in (`
 ```bash
 git clone https://github.com/stevenmcsorley/agent-factory.git
 cd agent-factory
+npm install       # one small optional dependency (QuickJS) for MCP Code Mode
 npm run init     # checks prerequisites, builds the sandbox image, logs the agent in, adds your first repo
 npm start        # prints the UI link
 ```
