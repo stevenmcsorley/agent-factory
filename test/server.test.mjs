@@ -82,3 +82,53 @@ test('API: add/remove project persists; control tick refuses when busy; template
   e.busy = true; assert.equal((await call('/api/control/tick', { method: 'POST', body: {} })).status, 409);
   close();
 });
+
+const rpc = (call, path, method, params, id = 1) => call(path, { method: 'POST', body: { jsonrpc: '2.0', id, method, params } }).then((r) => r.json());
+
+test('MCP /mcp: auth, handshake, tools, calls, errors-as-results, notifications, batch', async () => {
+  const { call, close } = await boot();
+  assert.equal((await call('/mcp', { token: null, method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'ping' } })).status, 401);
+  assert.equal((await call('/mcp')).status, 405);
+  const init = await rpc(call, '/mcp', 'initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+  assert.equal(init.result.protocolVersion, '2025-03-26'); assert.equal(init.result.serverInfo.name, 'agent-factory'); assert.ok(init.result.capabilities.tools);
+  assert.equal((await rpc(call, '/mcp', 'initialize', { protocolVersion: '1999-01-01' })).result.protocolVersion, '2025-06-18'); // unknown version -> our latest
+  const list = await rpc(call, '/mcp', 'tools/list');
+  const names = list.result.tools.map((t) => t.name); assert.ok(names.includes('create_ticket') && names.includes('status') && !names.includes('remove_project'));
+  assert.ok(list.result.tools.every((t) => t.inputSchema.type === 'object' && t.annotations));
+  const projects = await rpc(call, '/mcp', 'tools/call', { name: 'list_projects', arguments: {} });
+  assert.deepEqual(JSON.parse(projects.result.content[0].text).map((p) => p.id), ['app']);
+  const bad = await rpc(call, '/mcp', 'tools/call', { name: 'create_ticket', arguments: { project: 'app', title: 'x', body: 'y', evil: 1 } });
+  assert.equal(bad.result.isError, true); assert.match(bad.result.content[0].text, /unknown argument/);
+  const vague = JSON.parse((await rpc(call, '/mcp', 'tools/call', { name: 'create_ticket', arguments: { project: 'app', title: 'Improve it', body: 'better' } })).result.content[0].text);
+  assert.equal(vague.queued, false); assert.ok(vague.problems.length && vague.hint);
+  const good = JSON.parse((await rpc(call, '/mcp', 'tools/call', { name: 'create_ticket', arguments: { project: 'app', title: 'Add thing function', body: 'Add an exported `thing()` function to index.js that returns 1, and it should be covered by a test.' } })).result.content[0].text);
+  assert.equal(good.queued, true);
+  assert.equal((await rpc(call, '/mcp', 'nope')).error.code, -32601);
+  assert.equal((await call('/mcp', { method: 'POST', body: { jsonrpc: '2.0', method: 'notifications/initialized' } })).status, 202);
+  const batch = await (await call('/mcp', { method: 'POST', body: [{ jsonrpc: '2.0', id: 1, method: 'ping' }, { jsonrpc: '2.0', id: 2, method: 'tools/list' }] })).json();
+  assert.equal(batch.length, 2);
+  close();
+});
+
+test('MCP /mcp-code: two tools, cheap index, execute runs JS against the ops, errors are flagged', async () => {
+  const { call, close } = await boot();
+  const list = await rpc(call, '/mcp-code', 'tools/list'); assert.deepEqual(list.result.tools.map((t) => t.name), ['search', 'execute']);
+  const idx = JSON.parse((await rpc(call, '/mcp-code', 'tools/call', { name: 'search', arguments: {} })).result.content[0].text);
+  assert.ok(idx.tools.length >= 15 && idx.tools.every((t) => !t.inputSchema));
+  const hit = JSON.parse((await rpc(call, '/mcp-code', 'tools/call', { name: 'search', arguments: { query: 'create_ticket', limit: 1 } })).result.content[0].text);
+  assert.equal(hit.tools[0].method, 'factory.create_ticket'); assert.ok(hit.tools[0].inputSchema.properties.title);
+  const run = async (code) => (await rpc(call, '/mcp-code', 'tools/call', { name: 'execute', arguments: { code } })).result;
+  const r = await run('async () => { const ps = await factory.list_projects({}); const t = await factory.list_tickets({ project: ps[0].id }); return { n: ps.length, tickets: t.length } }');
+  assert.deepEqual(JSON.parse(r.content[0].text).result, { n: 1, tickets: 1 }); assert.notEqual(r.isError, true);
+  const e1 = await run('async () => await factory.create_ticket({ project: "nope", title: "Add thing function", body: "Add an exported `thing()` function to index.js that returns 1, and it should be tested." })'); assert.equal(e1.isError, true); assert.match(e1.content[0].text, /No such project/);
+  const e2 = await run('async () => { while (true) {} }'.replace('while (true) {}', 'return typeof process + typeof fetch + typeof require')); assert.equal(JSON.parse(e2.content[0].text).result, 'undefinedundefinedundefined');
+  close();
+});
+
+test('API: activity, metrics and run detail endpoints', async () => {
+  const { call, close } = await boot(); const j = async (r) => r.json();
+  assert.deepEqual(Object.keys(await j(await call('/api/activity'))).sort(), ['active', 'events']);
+  const m = await j(await call('/api/metrics?days=7')); assert.equal(m.days.length, 7); assert.ok('totals' in m && 'projects' in m);
+  assert.equal((await call('/api/runs/deadbeef')).status, 404); assert.equal((await call('/api/runs/not-hex!')).status, 404);
+  close();
+});

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { doctor } from './doctor.mjs';
 import { assessTicket } from './gate.mjs';
 import { templateNames } from './github.mjs';
+import { handleRpc } from './mcp.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const UI = path.join(here, '..', 'ui');
@@ -34,6 +35,9 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/templates$/, async () => templateNames()],
     ['GET', /^\/api\/whoami$/, async () => ({ login: await engine.gh.whoami() })],
     ['POST', /^\/api\/check-ticket$/, async (_m, body) => assessTicket({ title: body.title ?? '', body: body.body ?? '' }, engine.cfg.limits.gate)],
+    ['GET', /^\/api\/activity$/, async () => engine.activity()],
+    ['GET', /^\/api\/metrics$/, async (_m, _b, url) => engine.metrics({ days: Math.min(Number(url.searchParams.get('days')) || 14, 90) })],
+    ['GET', /^\/api\/runs\/([a-f0-9]{8})$/, async (m) => engine.getRun(m[1])],
     ['GET', /^\/api\/runs$/, async (_m, _b, url) => engine.runs({ project: url.searchParams.get('project') || undefined, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500) })],
     ['POST', /^\/api\/control\/(pause|resume)$/, async (m) => { m[1] === 'pause' ? engine.pause() : engine.resume(); return engine.status(); }],
     // Long jobs run in the background; the UI watches `busy` in /api/status.
@@ -63,7 +67,8 @@ export function createServer(engine, { token, allowedHosts }) {
       const host = (req.headers.host ?? '').toLowerCase();
       if (!allowedHosts.includes(host)) return send(res, 421, { error: 'Unrecognised Host header' });
       const url = new URL(req.url, `http://${host}`);
-      if (!url.pathname.startsWith('/api/')) {
+      const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/mcp' || url.pathname === '/mcp-code';
+      if (!protectedPath) {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
         const file = path.join(UI, name);
@@ -75,6 +80,12 @@ export function createServer(engine, { token, allowedHosts }) {
       if (!bearer || !same(bearer, token)) return send(res, 401, { error: 'Missing or invalid token' }, { 'WWW-Authenticate': 'Bearer' });
       const write = req.method !== 'GET';
       if (write && req.headers.origin && new URL(req.headers.origin).host !== host) return send(res, 403, { error: 'Cross-origin write refused' });
+      if (url.pathname === '/mcp' || url.pathname === '/mcp-code') {
+        if (req.method !== 'POST') return send(res, 405, { error: 'POST JSON-RPC to this endpoint' }, { Allow: 'POST' });
+        const body = await readJson(req);
+        const out = Array.isArray(body) ? (await Promise.all(body.map((m) => handleRpc(engine, m, { code: url.pathname === '/mcp-code' })))).filter(Boolean) : await handleRpc(engine, body, { code: url.pathname === '/mcp-code' });
+        return out === null || (Array.isArray(out) && !out.length) ? (res.writeHead(202, { 'Cache-Control': 'no-store' }), res.end()) : send(res, 200, out);
+      }
       for (const [method, re, fn] of routes) {
         const m = re.exec(url.pathname);
         if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {}, url) ?? {});

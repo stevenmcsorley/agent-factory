@@ -21,5 +21,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stevenmcsorley/agent-factory.git"
+  },
+  "optionalDependencies": {
+    "quickjs-emscripten": "^0.31.0"
   }
 }

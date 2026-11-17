@@ -20,6 +20,7 @@ const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
+    this.events = []; this.active = new Map();
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -51,7 +52,7 @@ export class Engine {
     const vcs = this.f.vcs ?? gitVcs({ log, repo: p.repo });
     const host = this.f.host?.(p) ?? githubHost({ repo: p.repo, allowedAuthors: p.feedbackAuthors ?? t.allowedAuthors ?? [] });
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, cloneUrl: `https://github.com/${p.repo}.git`, runsDir: this.cfg.stateDir, repos };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, cloneUrl: `https://github.com/${p.repo}.git`, runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -69,6 +70,45 @@ export class Engine {
   }
   halt() { clearTimeout(this.timer); }
 
+  // ---- live activity: runs publish phase events; we keep a ring buffer and the set of runs in flight
+  _event(e) {
+    this.events.push(e); if (this.events.length > 300) this.events.shift();
+    if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [] });
+    const a = this.active.get(e.run);
+    if (e.type === 'phase' && a) { a.phase = e.phase; a.detail = e.detail; a.phaseStarted = e.at; a.phases.push({ name: e.phase, at: e.at }); }
+    if (e.type === 'end') this.active.delete(e.run);
+  }
+  activity() { return { active: [...this.active.values()], events: this.events.slice(-80).reverse() }; }
+  getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); return r; }
+
+  // Charts and KPIs, derived from the run log. "Neutral" outcomes (gate bounces, pauses, requeues) are not failures.
+  metrics({ days = 14 } = {}) {
+    const NEUTRAL = new Set(['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued', 'repo-not-allowed']);
+    const all = this.runs({ limit: 100000 }).filter((r) => r.finished);
+    const day = (d) => d.toISOString().slice(0, 10);
+    const series = []; for (let i = days - 1; i >= 0; i--) series.push({ date: day(new Date(Date.now() - i * 86400000)), ok: 0, failed: 0, neutral: 0 });
+    const idx = Object.fromEntries(series.map((x, i) => [x.date, i]));
+    const projects = {}; const dur = [];
+    let cost = 0, tIn = 0, tOut = 0, ok = 0, failed = 0;
+    for (const r of all) {
+      const kind = r.status === 'ok' ? 'ok' : NEUTRAL.has(r.status) ? 'neutral' : 'failed';
+      const i = idx[r.finished.slice(0, 10)];
+      if (i !== undefined) series[i][kind]++;
+      const p = (projects[r.project] ??= { runs: 0, ok: 0, failed: 0, ms: [], spark: new Array(days).fill(0) });
+      if (kind !== 'neutral') p.runs++;
+      if (kind === 'ok') { p.ok++; ok++; } if (kind === 'failed') { p.failed++; failed++; }
+      if (i !== undefined && kind !== 'neutral') p.spark[i]++;
+      const ms = new Date(r.finished) - new Date(r.started);
+      if (kind !== 'neutral' && ms >= 0) { p.ms.push(ms); dur.push(ms); }
+      cost += r.costUsd ?? 0; tIn += r.tokens?.input ?? 0; tOut += r.tokens?.output ?? 0;
+    }
+    const med = (a) => { if (!a.length) return 0; const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+    const avg = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0);
+    return { days: series,
+      totals: { runs: ok + failed, ok, failed, successRate: ok + failed ? ok / (ok + failed) : null, avgMs: avg(dur), p50Ms: med(dur), costUsd: Number(cost.toFixed(4)), tokens: { input: tIn, output: tOut } },
+      projects: Object.fromEntries(Object.entries(projects).map(([k, v]) => [k, { runs: v.runs, ok: v.ok, failed: v.failed, avgMs: avg(v.ms), spark: v.spark }])) };
+  }
+
   // ---- read models for the UI
   runs({ project, limit = 100 } = {}) {
     return read(path.join(this.cfg.stateDir, 'runs.jsonl')).split('\n').filter(Boolean).map((l) => JSON.parse(l))
@@ -79,7 +119,7 @@ export class Engine {
     const per = Object.fromEntries(this.cfg.projects.map((p) => [p.id, { project: p.id, repo: p.repo, paused: !!p.paused, runs: 0, ok: 0, failed: 0, lastRun: null }]));
     for (const r of runs) { const s = per[r.project]; if (!s) continue; s.runs++; if (r.status === 'ok') s.ok++; else if (!['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued'].includes(r.status)) s.failed++; s.lastRun ??= r; }
     const l = this.cfg.limits;
-    return { paused: this.paused(), busy: this.busy, last: this.last, agent: this.cfg.agent.kind,
+    return { paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, agent: this.cfg.agent.kind,
       today: { runs: runsToday(this.cfg.stateDir), maxRuns: l.maxRunsPerDay ?? null, costUsd: Number(spentToday(this.cfg.stateDir).toFixed(4)), maxCostUsd: l.dailyBudgetUsd ?? null },
       projects: Object.values(per) };
   }

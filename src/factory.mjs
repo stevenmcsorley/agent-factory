@@ -5,6 +5,7 @@ import { assessTicket, clarificationComment } from './gate.mjs';
 import { loadRepoConfig, detectVerify, protectedViolations } from './repoconfig.mjs';
 import { leaseStore, recover } from './leases.mjs';
 import { overBudget, recordRun } from './budget.mjs';
+import { startRun, tail, changedFiles } from './trace.mjs';
 
 export function buildPrompt(t, extra = '') {
   return [
@@ -36,47 +37,58 @@ export function resolveRepo(t, config) {
 }
 
 async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases }) {
-  const rec = { ticket: t.id, started: new Date().toISOString(), status: 'running', attempts: 0, costUsd: 0 };
+  const run = startRun({ ticket: t.id, title: t.title, repo: t.repo ?? config.repo, attempts: 0, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
+  const rec = run.rec;
   const branch = `agent/${t.id}-${slug(t.title)}`;
   let ws;
   const target = resolveRepo(t, config);
   if (target.error) {
     await tickets.comment(t.id, `agent-factory did not start work: ${target.error}. Add a \`repo:owner/name\` label for an allowed repository.`);
     await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']);
-    rec.status = 'repo-not-allowed'; recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec });
+    recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...run.finish('repo-not-allowed') });
     return rec;
   }
   const gate = assessTicket(t, config.gate);
   if (config.gate !== false && !gate.ok) {
     await tickets.comment(t.id, clarificationComment(gate.problems));
     await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']);
-    rec.status = 'needs-info'; // deliberately no `finished`: gate rejections cost nothing and must not count toward maxRunsPerDay
-    recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec });
+    // deliberately no `finished`: gate rejections cost nothing and must not count toward maxRunsPerDay
+    recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...run.finish('needs-info') });
     return rec;
   }
+  run.phase('claim');
   leases.acquire(t.id, (config.timeoutMs ?? 900_000) * ((config.maxAttempts ?? 2) + 1) + 120_000); // lease first, then label
   await tickets.label(t.id, ['agent-working'], ['agent-ready']); // claim
   try {
+    run.phase('sandbox', 'cloning the repository');
     ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base });
     const cfg = effectiveConfig({ ...config, ...target.overrides }, ws.dir);
     let feedback = '';
     for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {
       rec.attempts = a;
+      run.phase('agent', `attempt ${a}`);
       const r = await agent.run(sandbox, ws, buildPrompt(t, feedback), { timeoutMs: cfg.timeoutMs ?? 900_000 });
       rec.costUsd += r.costUsd ?? 0;
+      if (r.tokens) rec.tokens = { input: (rec.tokens?.input ?? 0) + r.tokens.input, output: (rec.tokens?.output ?? 0) + r.tokens.output };
+      run.note('agentSummary', tail(r.out));
       if (r.timedOut) { rec.status = 'timeout'; break; }
       if (!(await vcs.diffStat(ws))) { rec.status = 'no-change'; feedback = 'You made no changes.'; continue; }
-      const bad = protectedViolations(await vcs.diffStat(ws), cfg.protectedPaths);
+      const status = await vcs.diffStat(ws); run.note('changed', changedFiles(status));
+      const bad = protectedViolations(status, cfg.protectedPaths);
       if (bad.length) { rec.status = 'protected-path'; rec.error = `touched protected paths: ${bad.join(', ')}`; break; }
       if (cfg.verify) {
+        run.phase('verify', cfg.verify);
         const v = await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image });
+        run.note('verifyTail', tail(v.out));
         if (v.code !== 0) { rec.status = 'verify-failed'; feedback = v.out.slice(-3000); continue; }
       }
       rec.status = 'ok';
       break;
     }
     if (rec.status === 'ok') {
+      run.phase('push', branch);
       await vcs.commitAndPush(ws, { branch, message: `${t.title}\n\nRefs #${t.id} (agent-factory)` });
+      run.phase('pr');
       rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.` });
       await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).`);
       await tickets.label(t.id, ['agent-review'], ['agent-working']);
@@ -91,6 +103,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   } finally {
     leases.release(t.id);
     rec.finished = new Date().toISOString();
+    run.finish();
     recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec }); // state first: nothing after this line may lose the run's result
     try { ws?.destroy(); } catch { /* destroy() is best-effort */ }
   }

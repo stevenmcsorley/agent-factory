@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { overBudget, recordRun, readRuns } from './budget.mjs';
+import { startRun, tail, changedFiles } from './trace.mjs';
 import { effectiveConfig } from './factory.mjs';
 import { protectedViolations } from './repoconfig.mjs';
 
@@ -40,27 +41,35 @@ export async function feedbackTick({ host, sandbox, agent, vcs, config, stateDir
       results.push({ pr: pr.number, status: 'capped' });
       continue;
     }
-    const rec = { pr: pr.number, round: st.rounds + 1, status: 'running', costUsd: 0, started: new Date().toISOString() };
+    const run = startRun({ pr: pr.number, prNumber: pr.number, title: `Feedback round ${st.rounds + 1} on #${pr.number}: ${pr.title ?? ''}`.trim(), round: st.rounds + 1, repo: config.repo, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
+    const rec = run.rec;
     let ws;
     try {
+      run.phase('sandbox', 'cloning the PR branch');
       ws = await sandbox.create({ cloneUrl: config.cloneUrl, branch: pr.branch, base: pr.branch, newBranch: false });
       const cfg = effectiveConfig(config, ws.dir);
       const fbForPrompt = { failedChecks: ciFailed ? fb.failedChecks : [], newComments };
       let extra = '';
       for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {
+        run.phase('agent', `attempt ${a}`);
         const r = await agent.run(sandbox, ws, feedbackPrompt(pr, fbForPrompt) + extra, { timeoutMs: cfg.timeoutMs ?? 900_000 });
         rec.costUsd += r.costUsd ?? 0;
+        run.note('agentSummary', tail(r.out));
         if (r.timedOut) { rec.status = 'timeout'; break; }
         if (!(await vcs.diffStat(ws))) { rec.status = 'no-change'; extra = '\nYou made no changes last time; make the requested change.'; continue; }
-        const bad = protectedViolations(await vcs.diffStat(ws), cfg.protectedPaths);
+        const status = await vcs.diffStat(ws); run.note('changed', changedFiles(status));
+        const bad = protectedViolations(status, cfg.protectedPaths);
         if (bad.length) { rec.status = 'protected-path'; rec.error = `touched protected paths: ${bad.join(', ')}`; break; }
         if (cfg.verify) {
+          run.phase('verify', cfg.verify);
           const v = await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image });
+          run.note('verifyTail', tail(v.out));
           if (v.code !== 0) { rec.status = 'verify-failed'; extra = `\n# Verification failed\n${v.out.slice(-3000)}`; continue; }
         }
         rec.status = 'ok'; break;
       }
       if (rec.status === 'ok') {
+        run.phase('push', pr.branch);
         await vcs.commitAndPush(ws, { branch: pr.branch, message: `Address feedback on #${pr.number} (round ${rec.round})\n\nagent-factory` });
         await host.comment(pr, `Pushed round ${rec.round} addressing ${newComments.length} comment(s)${ciFailed ? ` and ${fb.failedChecks.length} failing check(s)` : ''}.`);
       } else {
@@ -69,7 +78,7 @@ export async function feedbackTick({ host, sandbox, agent, vcs, config, stateDir
     } catch (e) {
       rec.status = 'error'; rec.error = String(e.message ?? e);
     } finally {
-      rec.finished = new Date().toISOString(); recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec });
+      rec.finished = new Date().toISOString(); run.finish(); recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec });
       // Mark as handled even on failure so a broken round can't hot-loop; the round cap bounds retries.
       st.rounds++; st.seen.push(...newComments.map((c) => c.id)); if (ciFailed) st.handledShas.push(pr.sha);
       save();

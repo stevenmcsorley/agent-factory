@@ -89,3 +89,38 @@ test('createProject scaffolds a repo, registers it and queues the spec as the fi
   assert.equal(made.owner, 'me'); assert.equal(made.identity.email, 'me@users.noreply.github.com'); assert.equal(r.project.repo, 'me/shop');
   assert.ok((await e.listTickets('shop')).some((t) => t.title === 'Build shop'));
 });
+
+test('runs are traced: id, title, timed phases, summary, changed files; live events feed activity()', async () => {
+  const { e } = engine(); const seen = [];
+  const origEvent = e._event.bind(e); e._event = (ev) => { seen.push(ev.type + ':' + (ev.phase ?? '')); origEvent(ev); };
+  const out = await e.tickAll();
+  const r = e.runs().find((x) => x.project === 'one');
+  assert.match(r.id, /^[a-f0-9]{8}$/); assert.equal(r.title, 'Add b file please');
+  assert.deepEqual(r.phases.map((p) => p.name), ['claim', 'sandbox', 'agent', 'verify', 'push', 'pr']);
+  assert.ok(r.phases.every((p) => typeof p.ms === 'number' && p.at)); assert.deepEqual(r.changed, ['b.txt']);
+  assert.ok(seen.includes('start:') && seen.includes('phase:agent') && seen.includes('end:'));
+  assert.equal(e.active.size, 0); assert.ok(e.activity().events.length >= 8);
+  assert.equal(e.getRun(r.id).id, r.id); assert.throws(() => e.getRun('deadbeef'), /No such run/);
+  assert.equal(out.length, 2);
+});
+
+test('active runs are visible while in flight', async () => {
+  const { e } = engine({ agent: { run: async () => { assert.equal(e.activity().active.length, 1); assert.equal(e.activity().active[0].phase, 'agent'); return { code: 0, out: 'x' }; } } });
+  await e.tickAll();
+});
+
+test('metrics: daily series, success rate, durations, per-project sparks; neutral outcomes are not failures', () => {
+  const { e } = engine(); const now = new Date(); const iso = (msAgo) => new Date(now - msAgo).toISOString();
+  const rows = [
+    { project: 'one', status: 'ok', started: iso(70000), finished: iso(10000), costUsd: 0.5, tokens: { input: 10, output: 5 } },
+    { project: 'one', status: 'verify-failed', started: iso(130000), finished: iso(100000) },
+    { project: 'one', status: 'needs-info', started: iso(1000), finished: iso(500) },
+    { project: 'two', status: 'ok', started: iso(86400000 + 60000), finished: iso(86400000) },
+  ];
+  fs.writeFileSync(path.join(e.cfg.stateDir, 'runs.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const m = e.metrics({ days: 7 });
+  assert.equal(m.days.length, 7); assert.equal(m.totals.runs, 3); assert.equal(m.totals.ok, 2); assert.equal(m.totals.failed, 1);
+  assert.equal(m.totals.successRate, 2 / 3); assert.equal(m.totals.costUsd, 0.5); assert.deepEqual(m.totals.tokens, { input: 10, output: 5 });
+  assert.equal(m.days.at(-1).neutral >= 1, true); assert.equal(m.projects.one.runs, 2); assert.equal(m.projects.one.spark.length, 7);
+  assert.equal(m.projects.two.avgMs, 60000);
+});
