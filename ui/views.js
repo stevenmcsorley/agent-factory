@@ -272,7 +272,7 @@ export const health = {
 // The wizard is driven by /api/catalog, so a new tracker or code host appears here automatically once it is registered on the server.
 let npMode = 'existing';
 const wiz = { host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '' };
-const slugId = (r) => (r.split('/').pop() || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
+const slugId = (r) => (r.split(/[?#]/)[0].replace(/\/+$/, '').replace(/\.git$/i, '').split(/[/:]/).pop() || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
 
 export const newProject = {
   async load() { const [catalog, who] = await Promise.all([api('/catalog'), api('/whoami').catch(() => ({ login: '' }))]); return { catalog, who, templates: await api('/templates') }; },
@@ -307,7 +307,7 @@ export const newProject = {
     const existing = () => {
       const hd = hostDef(), sd = srcDef();
       const repoInput = h('input', { value: wiz.repo, placeholder: hd.repoHint ?? 'owner/name', oninput: (e) => { wiz.repo = e.target.value; wiz.hostCheck = null; if (!wiz.id) wiz.idAuto = true; } });
-      const testHost = h('button', { class: 'btn', onclick: act(async () => { wiz.hostCheck = await api('/hosts/test', { method: 'POST', body: { kind: wiz.host.kind, fields: wiz.host.fields, token: wiz.host.token, repo: wiz.repo.trim() } }).catch((e) => ({ error: e.message })); paint(); }) }, 'Check access');
+      const testHost = h('button', { class: 'btn', onclick: act(async () => { wiz.hostCheck = await api('/hosts/test', { method: 'POST', body: { kind: wiz.host.kind, fields: wiz.host.fields, token: wiz.host.token, repo: wiz.repo.trim() } }).catch((e) => ({ error: e.message })); if (wiz.hostCheck.repo) wiz.repo = wiz.hostCheck.repo; /* show the canonical owner/name */ paint(); }) }, 'Check access');
       const testSrc = h('button', { class: 'btn', onclick: act(async () => { wiz.srcCheck = await api('/sources/test', { method: 'POST', body: { kind: wiz.source.kind, fields: wiz.source.fields, token: wiz.source.token } }).catch((e) => ({ error: e.message })); if (wiz.srcCheck.projects?.length && !wiz.source.pick) wiz.source.pick = String(wiz.srcCheck.projects[0].id); paint(); }) }, sd.kind === 'github' ? 'Check' : 'Test connection');
       const ready = wiz.hostCheck && !wiz.hostCheck.error && (sd.kind === 'github' || (wiz.srcCheck && !wiz.srcCheck.error && (!sd.pick || wiz.source.pick)));
       const name = h('input', { value: wiz.id || slugId(wiz.repo), placeholder: 'short-name', oninput: (e) => { wiz.id = e.target.value; } });

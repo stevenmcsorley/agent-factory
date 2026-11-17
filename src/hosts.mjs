@@ -5,6 +5,7 @@ import { bitbucketHost } from './adapters/host-bitbucket.mjs';
 import { gitHost } from './adapters/host-git.mjs';
 import { inspectRepo as ghInspect, whoami as ghWhoami } from './github.mjs';
 import { checkBaseUrl, TOKEN_ENV } from './sources.mjs';
+import { normalizeRepo } from './repoRef.mjs';
 
 // Where the CODE lives. Independent of where TICKETS live (e.g. Jira tickets + a Bitbucket repo). A host provides: clone URL, git
 // authentication (env vars, never argv), repo access check, opening a draft PR/MR, and the PR feedback loop (CI + comments).
@@ -54,7 +55,8 @@ export function validateHost(p) {
 export const buildHost = (p, ctx) => HOSTS[hostKind(p)].build({ ...p, host: p.host ?? { kind: 'github' } }, { ...ctx, allowedAuthors: p.feedbackAuthors ?? p.tickets?.allowedAuthors ?? [] });
 
 // Wizard "Test connection" for a code host: authenticate with the pasted token, check access to the repo, WITHOUT saving anything.
-export async function identifyHost({ kind, fields = {}, token, repo, fetchImpl, exec }) {
+export async function identifyHost({ kind, fields = {}, token, repo: input, fetchImpl, exec }) {
+  const repo = normalizeRepo(input, kind).repo;
   const h = HOSTS[kind]; if (!h) throw Object.assign(new Error(`Unsupported code host: ${kind}`), { status: 400 });
   if (!h.repoPattern.test(repo ?? '')) throw Object.assign(new Error(`Repository must look like ${h.repoHint}`), { status: 400 });
   if (h.fields.some((f) => f.secret && f.required) && !token) throw Object.assign(new Error('Paste the access token first'), { status: 400 });

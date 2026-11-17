@@ -11,6 +11,7 @@ import { startEgress } from './egress.mjs';
 import { spentToday, runsToday } from './budget.mjs';
 import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
+import { normalizeRepo } from './repoRef.mjs';
 import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
@@ -216,13 +217,25 @@ export class Engine {
   }
   catalog() { return { sources: publicSources(), hosts: publicHosts() }; }
   async testSource({ kind, fields, token }) { return identifySource({ kind, fields, token, whoami: this.gh.whoami, fetchImpl: this.f.fetch }); }
-  async testHost({ kind, fields, token, repo }) { return kind === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami(), supportsPrs: true } : identifyHost({ kind, fields, token, repo, fetchImpl: this.f.fetch, exec: this.f.exec }); }
+  // Accept whatever the user pasted; return the canonical repo. A URL for a different host than the selected card is a clear, fixable mistake.
+  _repoFor(kind, input) {
+    const n = normalizeRepo(input, kind); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!n.repo) throw bad('Enter the repository, e.g. owner/name or its web URL');
+    const names = { github: 'GitHub', gitlab: 'GitLab', bitbucket: 'Bitbucket' };
+    if (n.host && n.host !== kind) throw bad(`That looks like a ${names[n.host]} URL, but ${names[kind] ?? kind} is selected. Choose ${names[n.host]} in step 1.`);
+    return n.repo;
+  }
+  async testHost({ kind, fields, token, repo: input }) { const repo = this._repoFor(kind, input); const r = await this._testHost({ kind, fields, token, repo }); return { ...r, repo }; }
+  async _testHost({ kind, fields, token, repo }) { return kind === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami(), supportsPrs: true } : identifyHost({ kind, fields, token, repo, fetchImpl: this.f.fetch, exec: this.f.exec }); }
   signupInfo(baseUrl) { return ossiconeSignupInfo(baseUrl, this.f.fetch); }
 
   // Add a project. Any ticket source × any code host. Tokens arrive as `secret` (tickets) / `hostSecret` (code host), are verified
   // against the real service BEFORE anything is saved, are written only to the secrets file, and never appear in the config or any response.
-  async addProject({ id, repo, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors }) {
+  async addProject({ id, repo: repoInput, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors }) {
     const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    const kindGuess = host?.kind ?? (normalizeRepo(repoInput).host ?? 'github');
+    const repo = this._repoFor(kindGuess, repoInput); if (!host && kindGuess !== 'github') host = { kind: kindGuess }; // pasted a GitLab/Bitbucket URL with no host chosen: use it
+    id = id || repo.split('/').pop().toLowerCase().replace(/[^a-z0-9-]/g, '-');
     const upper = String(id ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
     // 1. code host
     const hk = host?.kind ?? 'github';

@@ -63,7 +63,7 @@ WantedBy=default.target
   if (cmd === 'doctor') { const r = await doctor(cfg); r.forEach((c) => (c.ok ? ok(c.detail) : bad(c.detail, c.fix))); return process.exit(r.every((c) => c.ok || c.id === 'running') ? 0 : 1); }
   const problems = validateConfig(cfg); if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
   const engine = new Engine(cfg, { configPath });
-  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ id: repo.split('/')[1].toLowerCase().replace(/[^a-z0-9-]/g, '-'), repo }); return console.log(`Added ${p.id} (base ${p.base})`); }
+  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo }); return console.log(`Added ${p.id} (base ${p.base})`); }
   if (cmd === 'tick' || cmd === 'feedback') { await engine.start(); const r = await (cmd === 'tick' ? engine.tickAll() : engine.feedbackAll()); console.log(JSON.stringify(r, null, 2)); return; }
   if (cmd === 'start') {
     await engine.start();
