@@ -60,6 +60,14 @@ export function jiraTickets({ baseUrl, projectKey, flavor = 'cloud', auth, email
       const jql = `project = "${projectKey.toUpperCase()}" AND labels in (${AGENT.map((l) => `"${l}"`).join(', ')}) ORDER BY updated DESC`;
       return (await search(jql)).map(norm).filter(trusted).map(({ reporterIds, ...t }) => t);
     },
+    async get(id) {
+      const i = await call('GET', `/rest/api/2/issue/${key(id)}?fields=${FIELDS.join(',')},comment`); const t = norm(i);
+      if (!trusted(t)) throw new Error('That ticket was not created by an allowed reporter');
+      const { reporterIds, ...rest } = t;
+      return { ...rest, comments: (i.fields.comment?.comments ?? []).map((c) => { const b = adfToText(c.body).trim(); return { author: c.author?.displayName, body: b, at: c.created, factory: /^agent-factory|^Opened https?:\/\//.test(b) }; }) };
+    },
+    async update(id, { title, body }) { await this.get(id); await call('PUT', `/rest/api/2/issue/${key(id)}`, { fields: { ...(title !== undefined ? { summary: title } : {}), ...(body !== undefined ? { description: body } : {}) } }); },
+    async close() { throw Object.assign(new Error('Closing is not supported for Jira (workflows differ): close it in Jira'), { status: 501 }); },
     async label(id, add = [], remove = []) {
       await call('PUT', `/rest/api/2/issue/${key(id)}`, { update: { labels: [...remove.map((l) => ({ remove: l })), ...add.map((l) => ({ add: l }))] } });
       const to = add.includes('agent-working') ? statuses.working : add.includes('agent-review') ? statuses.review : add.includes('agent-failed') ? statuses.failed : null;

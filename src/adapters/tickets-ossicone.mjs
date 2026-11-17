@@ -37,6 +37,14 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
       const me = await call('GET', '/api/auth/me'); const ps = await call('GET', '/api/projects');
       return { user: { id: me.id, name: me.name ?? me.email, email: me.email, alsoMatches: [me.id] }, projects: ps.map((p) => ({ id: p.id, name: `${p.name} (${p.key})` })) };
     },
+    async get(id) {
+      const i = await call('GET', `/api/issues/${Number(id)}`); const t = norm(i);
+      if (!allowedReporterIds.includes(t.reporterId)) throw new Error('That ticket was not created by an allowed reporter');
+      const cs = await call('GET', `/api/comments/issue/${Number(id)}`).catch(() => []);
+      return { ...t, url: `${baseUrl.replace(/\/$/, '')}/projects/${i.projectId}/issues/${i.id}`, state: i.status === 'done' ? 'CLOSED' : 'OPEN', comments: (cs ?? []).map((c) => ({ author: c.author?.name ?? c.user?.name, body: c.content, at: c.createdAt, factory: /^agent-factory|^Opened https?:\/\//.test(c.content ?? '') })) };
+    },
+    async update(id, { title, body }) { await this.get(id); await call('PATCH', `/api/issues/${Number(id)}`, { ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { description: body } : {}) }); },
+    async close(id) { await this.get(id); await call('PATCH', `/api/issues/${Number(id)}`, { status: 'done' }); },
     async label(id, add = [], remove = []) {
       const cur = norm(await call('GET', `/api/issues/${id}`));
       const labels = [...new Set([...cur.labels.filter((l) => !remove.includes(l)), ...add])];

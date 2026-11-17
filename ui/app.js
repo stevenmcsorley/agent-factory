@@ -1,9 +1,10 @@
 import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim } from './lib.js';
-import { overview, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
+import { overview, inboxPage, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^projects$/, projectsPage, 'projects'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
-const NAV = [['overview', '#/', 'Control room', 'pulse'], ['projects', '#/projects', 'Cells', 'folder'], ['runs', '#/runs', 'Work orders', 'git'], ['connect', '#/connect', 'Connect AI', 'plug'], ['health', '#/health', 'Health', 'shield']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
+const NAV = [['overview', '#/', 'Control room'], ['inbox', '#/inbox', 'Inbox'], ['projects', '#/projects', 'Cells'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
+let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';
 let theme = null; try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
 if (theme) document.documentElement.dataset.theme = theme;
@@ -30,7 +31,7 @@ function drawHeader(nav) {
   const st = status; const state = !st ? 'off' : st.paused ? 'warn' : st.busy || st.active ? 'busy' : 'ok';
   const label = !st ? '…' : st.paused ? 'Paused' : st.active ? `${st.active} live` : st.busy ? 'Checking' : 'Ready';
   header.replaceChildren(h('div', { class: 'bar' }, h('a', { class: 'brand', href: '#/' }, logo(), h('span', {}, 'Agent Factory')),
-    h('nav', {}, NAV.map(([k, href, name], i) => h('a', { href, class: nav === k ? 'on' : '' }, h('i', {}, `0${i + 1}`), h('span', {}, name)))),
+    h('nav', {}, NAV.map(([k, href, name], i) => h('a', { href, class: nav === k ? 'on' : '' }, h('i', {}, `0${i + 1}`), h('span', {}, name), k === 'inbox' && inboxCount > 0 ? h('b', { class: 'nbadge', title: `${inboxCount} waiting on you` }, String(inboxCount)) : null))),
     h('div', { class: 'bar-r' }, st ? h('span', { class: 'line-state' }, h('i', { class: `lamp ${state}` }), label) : null,
       st ? h('button', { class: 'btn small', disabled: st.busy || st.paused, onclick: act(() => api('/control/tick', { method: 'POST', body: {} }), 'Checking for work…', () => refresh(true)) }, icon('play', 11), 'Run') : null,
       st ? h('button', { class: 'btn small', onclick: act(() => api(`/control/${st.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), st.paused ? 'Line resumed' : 'Line paused', () => refresh(true)) }, icon(st.paused ? 'play' : 'pause', 11), st.paused ? 'Resume' : 'Pause') : null,
@@ -64,8 +65,8 @@ async function refresh(force = false) {
   if (!session.token) return login();
   const r = match(); view = r.v;
   try {
-    const [data, st, act2] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] }))]);
-    status = st; if (!header) { shell(); lastRoute = null; } drawHeader(r.nav); drawTicker(act2.events, st);
+    const [data, st, act2, ic] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] })), api('/inbox/count').catch(() => ({ count: 0 }))]);
+    status = st; inboxCount = ic.count; if (!header) { shell(); lastRoute = null; } drawHeader(r.nav); drawTicker(act2.events, st);
     const key = JSON.stringify([location.hash, data]);
     if (!force && key === lastKey) return;
     if (!force && typing()) return;
@@ -98,6 +99,7 @@ async function openPalette() {
     ...projects.map((p) => ({ label: `Open project ${p.id}`, ic: 'folder', hint: p.repo, run: () => { location.hash = `#/project/${p.id}`; } })),
     { label: 'Add or create a project', ic: 'plus', run: () => { location.hash = '#/new'; } },
     { label: status?.paused ? 'Resume the factory' : 'Pause the factory', ic: status?.paused ? 'play' : 'pause', run: () => api(`/control/${status?.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }).then(() => refresh(true)).catch((e) => toast(e.message, 'bad')) },
+    { label: 'Open the inbox', ic: 'alert', run: () => { location.hash = '#/inbox'; } },
     { label: 'Run a cycle now', ic: 'bolt', run: () => api('/control/tick', { method: 'POST', body: {} }).then(() => toast('Checking for work…', 'ok')).catch((e) => toast(e.message, 'bad')) },
   ];
   let sel = 0, shown = items; const input = h('input', { placeholder: 'Type a command or project…', 'aria-label': 'Command' }); const list = h('ul', { role: 'listbox' });

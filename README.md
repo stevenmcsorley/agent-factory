@@ -60,10 +60,11 @@ Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-rev
 | Page | What you get |
 |---|---|
 | **01 Control room** | **Work-order intake** (describe what you want; a live clarity check tells you if it is specific enough), and **the line**: an animated assembly line where queued tickets wait in the *hopper*, each job rides the belt through six stations (claim → sandbox → agent → verify → push → ship) and finished PRs drop into the *shipped* chute. Every station has its own monoline icon that animates only while that station is working: a check drawing itself, a crate lid lifting, a chip pulsing, a magnifier scanning, an arrow rising, a paper plane taking off. Below it a spec strip (shipped today, success rate, median time to PR, waiting on you, capacity left), your project *cells*, a 14-day output chart, the live line log and recent work orders. A ticker across the top streams events. |
-| **02 Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults |
-| **03 Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
-| **04 Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
-| **05 Health** | The same checks as `npm run doctor`, each with a fix |
+| **02 Inbox** | Everything waiting on a human, with the reason. **Needs your decision**: tickets the factory bounced for detail or gave up on, showing what it said, the ticket text and the failing run; add the missing detail and **Requeue** (the clarity check re-runs first), comment, open the tracker, or close. **Ready to review**: PRs with a button straight to the PR. The *Waiting on you* tile and a badge on the nav lead here. |
+| **03 Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults |
+| **04 Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
+| **05 Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
+| **06 Health** | The same checks as `npm run doctor`, each with a fix |
 
 Dark and light themes (toggle in the header). Self-hosted fonts (Archivo, IBM Plex Mono; SIL OFL), so it works offline.
 
@@ -105,7 +106,7 @@ claude mcp add --transport http agent-factory http://127.0.0.1:7777/mcp-code --h
 | Endpoint | Tools | Context cost per session |
 |---|---|---|
 | `/mcp-code` (recommended) | `search` + `execute`: the AI writes a few lines of JavaScript that run in a free in-process **QuickJS sandbox** (no network or filesystem) and calls `factory.*` | ~270 tokens |
-| `/mcp` | 16 direct tools (`create_ticket`, `create_project`, `get_run`, `activity`, `metrics`, …) | ~1,700 tokens |
+| `/mcp` | 19 direct tools (`create_ticket`, `inbox`, `requeue_ticket`, `create_project`, `get_run`, `activity`, `metrics`, …) | ~2,000 tokens |
 
 Vague requests are refused with advice (`create_ticket` runs the clarity check), and the factory still never merges. Code Mode needs the optional `quickjs-emscripten` dependency (installed by `npm install`). Bearer-token auth only for now: ChatGPT connectors need a public HTTPS URL plus OAuth, which this local server does not provide.
 

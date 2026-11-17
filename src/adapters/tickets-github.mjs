@@ -45,6 +45,19 @@ export function githubTickets({ repo, allowedAuthors, exec = run }) {
       const n = /\/issues\/(\d+)$/.exec(url)?.[1]; if (n) RECENT.set(`${repo}#${n}`, Date.now());
       return { url };
     },
+    // Inbox support: full ticket with its comment thread, edit, close. Only tickets by trusted authors are ever readable or editable.
+    async get(id) {
+      const i = JSON.parse(await gh(['api', `repos/${repo}/issues/${Number(id)}`]));
+      if (!trustedIssue(i)) throw new Error('That ticket was not created by an allowed author');
+      const cs = JSON.parse(await gh(['api', `repos/${repo}/issues/${Number(id)}/comments?per_page=30`]));
+      return { ...normIssue(i), comments: cs.map((c) => ({ author: c.user?.login, body: c.body, at: c.created_at, factory: /^agent-factory|^Opened https?:\/\//.test(c.body) })) };
+    },
+    async update(id, { title, body }) {
+      await this.get(id); // authorisation check
+      const args = ['api', '-X', 'PATCH', `repos/${repo}/issues/${Number(id)}`]; if (title !== undefined) args.push('-f', `title=${title}`); if (body !== undefined) args.push('-f', `body=${body}`);
+      await gh(args);
+    },
+    async close(id) { await this.get(id); await gh(['api', '-X', 'PATCH', `repos/${repo}/issues/${Number(id)}`, '-f', 'state=closed']); },
     async label(id, add = [], remove = []) {
       const args = ['issue', 'edit', String(id), '-R', repo];
       for (const l of add) args.push('--add-label', l);

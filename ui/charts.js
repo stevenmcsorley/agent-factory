@@ -7,7 +7,7 @@ import { s, h, anim } from './lib.js';
 export function odometer(value, pad = 2) {
   const str = String(Math.max(0, Math.round(value ?? 0))).padStart(pad, '0');
   const cols = [...str].map((d) => { const strip = h('span', { class: 'odo-strip' }, [...'0123456789'].map((x) => h('i', {}, x))); strip.dataset.d = d; return h('span', { class: 'odo-col' }, strip); });
-  const el = h('span', { class: 'odo', 'aria-label': String(value) }, cols);
+  const el = h('span', { class: 'odo', 'aria-label': String(value) }, ...cols, h('span', { class: 'sr' }, String(Math.max(0, Math.round(value ?? 0)))));
   const set = () => cols.forEach((c, i) => { c.firstChild.style.transitionDelay = `${i * 70}ms`; c.firstChild.style.transform = `translateY(${-Number(c.firstChild.dataset.d) * 10}%)`; });
   if (anim.on) requestAnimationFrame(() => requestAnimationFrame(set)); // roll up from 0 only when arriving on the page
   else { cols.forEach((c) => { c.firstChild.style.transition = 'none'; }); set(); } // background refresh: show the value, no replay

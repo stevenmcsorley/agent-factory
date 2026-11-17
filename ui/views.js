@@ -76,7 +76,7 @@ export const overview = {
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Median time to PR'), h('div', { class: 'num' }, t.runs ? dur(t.p50Ms) : '–'), h('div', { class: 'foot' }, t.runs ? `mean ${dur(t.avgMs)}` : 'no runs yet')),
-        h('div', {}, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck')),
+        h('a', { class: 'spec-link', href: '#/inbox', title: 'Open your inbox' }, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck', ' ', h('b', { class: 'go' }, inReview + attention ? 'Open inbox →' : ''))),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Capacity today'), h('div', { class: 'num' }, left == null ? '∞' : odometer(left, 1), left == null ? null : h('small', {}, `of ${cap}`)), cap ? h('div', { class: 'cap' }, Array.from({ length: ticks }, (_, i) => h('i', { class: i < usedTicks ? 'on' : '' }))) : null, h('div', { class: 'foot' }, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
         'spec', [shipped, t, left, inReview, attention, st.today.costUsd]),
       stable(h('div', { class: 'page-head slim' }, h('h2', {}, 'Cells'), h('a', { class: 'btn small', href: '#/new' }, icon('plus', 12), 'Add project')), 'cellshead', 'x'),
@@ -108,6 +108,50 @@ function workOrders(runs) {
     h('td', { class: 'id' }, r.id ? h('a', { href: `#/run/${r.id}`, style: { color: 'inherit' } }, woId(r.id)) : '—'), h('td', {}, h('a', { href: r.id ? `#/run/${r.id}` : '#/runs' }, r.title ?? (r.round ? `Feedback on PR #${r.pr}` : `Ticket #${r.ticket}`)), h('small', { style: { display: 'block' } }, r.project ?? '')),
     h('td', {}, pill(r.status)), h('td', { class: 'r' }, r.finished ? dur(new Date(r.finished) - new Date(r.started)) : '–'), h('td', { class: 'r' }, ago(r.finished ?? r.started))))));
 }
+
+// ---- inbox: everything that needs a human
+const STATE_LABEL = { 'needs-info': ['warn', 'Needs detail'], failed: ['bad', 'Failed'], 'needs-human': ['bad', 'Needs a human'], review: ['ok', 'Ready to review'] };
+function decisionCard(it, ctx) {
+  const lastFactory = [...(it.comments ?? [])].reverse().find((c) => c.factory);
+  const reason = lastFactory?.body?.replace(/\*\*/g, '') ?? (it.run?.error ? `Last run: ${it.run.status} (${it.run.error})` : it.run ? `Last run: ${it.run.status}` : 'The factory stopped on this ticket.');
+  const note = h('textarea', { rows: 3, placeholder: it.state === 'needs-info' ? 'Say exactly what should change and how we will know it is done: name the files or functions and the expected behaviour.' : 'Optional: add guidance for the retry, e.g. “use exponential backoff, and test the failure path”.' });
+  const hint = h('div', { class: 'hint' }); let t;
+  const check = () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: it.title, body: `${it.body ?? ''}\n${note.value}` } }).catch(() => null); if (r) hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' Still too vague: ', r.problems.join('; '))); }, 300); };
+  note.addEventListener('input', check);
+  const base = `/projects/${it.project}/tickets/${it.id}`; const rerender = ctx.rerender;
+  const [tone, label] = STATE_LABEL[it.state] ?? ['', it.state];
+  return h('article', { class: `slip ${tone}` },
+    h('div', { class: 'slip-top' }, h('span', { class: `stamp ${tone}` }, label), ext(it.url, `#${it.id}`, 'tid'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, ago(it.updatedAt)), it.run?.id ? h('a', { class: 'small', href: `#/run/${it.run.id}` }, 'Last work order →') : null),
+    h('h3', {}, it.title),
+    h('div', { class: 'why' }, h('span', { class: 'eyebrow' }, 'What the factory said'), h('p', {}, reason)),
+    it.body ? h('details', { class: 'ticket-text' }, h('summary', {}, 'Ticket text'), h('pre', { class: 'log-pre wrap' }, it.body)) : null,
+    h('label', {}, it.state === 'needs-info' ? 'Add the missing detail' : 'Add guidance (optional)'), note, hint,
+    h('div', { class: 'row gap-t' },
+      h('button', { class: 'btn primary', onclick: act(async () => { await api(`${base}/requeue`, { method: 'POST', body: { details: note.value } }); }, 'Back on the line. The factory will pick it up.', rerender) }, icon('play', 12), note.value || it.state !== 'needs-info' ? 'Requeue' : 'Requeue'),
+      h('button', { class: 'btn', onclick: act(async () => { if (!note.value.trim()) throw new Error('Write a comment first'); await api(`${base}/comment`, { method: 'POST', body: { text: note.value } }); note.value = ''; }, 'Comment added to the ticket.', rerender) }, 'Just comment'),
+      ext(it.url, [icon('arrow', 12), ' Open in tracker'], 'btn ghost'),
+      h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Close “${it.title}”? You can reopen it in your tracker.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', rerender)(); } }, 'Close ticket')));
+}
+function reviewCard(it, ctx) {
+  const base = `/projects/${it.project}/tickets/${it.id}`;
+  return h('article', { class: 'slip ok' },
+    h('div', { class: 'slip-top' }, h('span', { class: 'stamp ok' }, 'Ready to review'), ext(it.url, `#${it.id}`, 'tid'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, ago(it.updatedAt)), it.run?.id ? h('a', { class: 'small', href: `#/run/${it.run.id}` }, 'Work order →') : null),
+    h('h3', {}, it.title),
+    h('div', { class: 'row gap-t' }, it.pr ? ext(it.pr.url, [icon('pr', 13), ` Review PR #${it.pr.number}`], 'btn primary') : h('span', { class: 'muted small' }, 'PR link unavailable (it may have been merged or closed)'),
+      h('button', { class: 'btn', onclick: async () => { if (confirm(`Mark “${it.title}” done by closing the ticket? Merge the PR first.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', ctx.rerender)(); } }, 'Done: close ticket')));
+}
+export const inboxPage = {
+  async load() { return { inbox: await api('/inbox') }; },
+  draw({ inbox }, ctx) {
+    const dec = inbox.items.filter((i) => i.kind === 'decision'), rev = inbox.items.filter((i) => i.kind === 'review');
+    const sec = (key, items, node) => keyed(node, key, items);
+    return [head('Inbox', dec.length || rev.length ? `${dec.length} need${dec.length === 1 ? 's' : ''} a decision · ${rev.length} ready to review. Nothing here is merged for you.` : 'Nothing is waiting on you.'),
+      inbox.errors.length ? h('div', { class: 'callout bad' }, icon('alert', 16), inbox.errors.map((e) => `${e.project}: ${e.error}`).join(' · ')) : null,
+      !dec.length && !rev.length ? card('reg', empty('All clear', 'No tickets are stuck and no PRs are waiting. Issue a work order from the control room.', h('a', { class: 'btn primary', href: '#/' }, 'Back to the control room'))) : null,
+      dec.length ? sec('decisions', dec, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Needs your decision · ${dec.length}`)), dec.map((i) => decisionCard(i, ctx)))) : null,
+      rev.length ? sec('reviews', rev, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Ready to review · ${rev.length}`)), rev.map((i) => reviewCard(i, ctx)))) : null];
+  },
+};
 
 // ---- all projects
 export const projectsPage = {

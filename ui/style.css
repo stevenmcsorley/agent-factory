@@ -195,3 +195,12 @@ h2 .icon { display: none; } .stage-wrap { padding: 8px 4px 4px; }
 .l-title { paint-order: stroke; stroke: var(--bg-2); stroke-width: 5px; stroke-linejoin: round; }
 /* the same glyphs, static, on the run page route sheet */
 .route .pn { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; } .route .pn .ic { color: var(--muted); } .route li.done .pn .ic { color: var(--ink-2); } .route .pn small { flex-basis: 100%; margin-top: 0; padding-left: 31px; }
+
+/* inbox */
+.nbadge { font: 700 10px/1 var(--mono); background: var(--orange); color: var(--orange-ink); padding: 3px 6px; border-radius: 2px; margin-left: 2px; letter-spacing: 0; }
+.spec-link { display: block; padding: 18px 20px 16px; border-right: 1px solid var(--line); color: inherit; position: relative; transition: background .14s; } .spec-link:hover { background: var(--panel-2); text-decoration: none; } .spec-link .go { color: var(--orange); font-weight: 700; margin-left: 6px; } .spec-link:hover .go { text-decoration: underline; text-underline-offset: 3px; }
+.slips { display: flex; flex-direction: column; gap: 16px; } .slip { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--faint); padding: 18px 22px 18px; position: relative; } .slip.warn { border-left-color: var(--amber); } .slip.bad { border-left-color: var(--red); } .slip.ok { border-left-color: var(--green); }
+.slip h3 { font-size: 21px; margin: 12px 0 6px; text-transform: none; font-stretch: 105%; letter-spacing: -.01em; } .slip-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; } .slip-top .small { margin-left: auto; }
+.why { background: var(--bg-2); border: 1px solid var(--line); padding: 12px 15px; margin: 12px 0; } .why p { margin: 7px 0 0; font: 500 13.5px/1.55 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; } .ticket-text summary { cursor: pointer; font: 600 11px var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--muted); padding: 6px 0; } .ticket-text pre { margin-top: 8px; max-height: 220px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } .odo { position: relative; } .odo-col { user-select: none; -webkit-user-select: none; }
+@media (max-width: 1100px) { .spec-link { border-bottom: 1px solid var(--line); } }

@@ -28,6 +28,14 @@ export function linearTickets({ teamId, token, allowedCreatorIds = [], endpoint 
     async poll() { return (await fetchIssues()).filter((t) => t.state === 'OPEN' && t.labels.includes('agent-ready') && !t.labels.includes('agent-working')); },
     async listWorking() { return (await fetchIssues()).filter((t) => t.state === 'OPEN' && t.labels.includes('agent-working')).map((t) => ({ id: t.id, title: t.title })); },
     async listAgentTickets() { return (await fetchIssues()).filter((t) => t.labels.some((l) => l.startsWith('agent-'))).map(({ creatorId, _labelIds, ...t }) => t); },
+    async get(id) {
+      const n = (await gql('query($i: String!) { issue(id: $i) { id identifier title description url updatedAt creator { id } labels { nodes { id name } } state { name type } comments(first: 30) { nodes { body createdAt user { name } } } } }', { i: id })).issue;
+      const t = norm(n); if (!trusted(t)) throw new Error('That ticket was not created by an allowed creator');
+      const { creatorId, _labelIds, ...rest } = t;
+      return { ...rest, comments: n.comments.nodes.map((c) => ({ author: c.user?.name, body: c.body, at: c.createdAt, factory: /^agent-factory|^Opened https?:\/\//.test(c.body) })) };
+    },
+    async update(id, { title, body }) { await this.get(id); await gql('mutation($id: String!, $i: IssueUpdateInput!) { issueUpdate(id: $id, input: $i) { success } }', { id: await uuid(id), i: { ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { description: body } : {}) } }); },
+    async close() { throw Object.assign(new Error('Closing is not supported for Linear (workflow states differ): close it in Linear'), { status: 501 }); },
     async label(id, add = [], remove = []) {
       const i = (await gql('query($i: String!) { issue(id: $i) { id labels { nodes { id name } } } }', { i: id })).issue; uuids.set(id, i.id);
       const keep = i.labels.nodes.filter((l) => !remove.includes(l.name)).map((l) => l.id);

@@ -11,6 +11,8 @@ import { startEgress } from './egress.mjs';
 import { spentToday, runsToday } from './budget.mjs';
 import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
+import { assessTicket } from './gate.mjs';
+import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
@@ -147,6 +149,49 @@ export class Engine {
       return out;
     }));
   }
+  // ---- inbox: everything that needs a human, with the reason and the run behind it
+  async inbox() {
+    const ATTN = new Set(['failed', 'needs-info', 'needs-human']); const items = []; const errors = []; let budget = 12; const runs = this.runs({ limit: 500 });
+    for (const p of this.cfg.projects) {
+      let tickets; try { tickets = (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED'); } catch (e) { errors.push({ project: p.id, error: String(e.message).slice(0, 160) }); continue; }
+      const mine = tickets.filter((t) => ATTN.has(stateOf(t.labels)) || stateOf(t.labels) === 'review'); if (!mine.length) continue;
+      const prs = mine.some((t) => stateOf(t.labels) === 'review') ? await this.listPrs(p.id).catch(() => []) : [];
+      for (const t of mine) {
+        const state = stateOf(t.labels); const item = { project: p.id, id: t.id, title: t.title, url: t.url, state, kind: state === 'review' ? 'review' : 'decision', updatedAt: t.updatedAt };
+        const run = runs.find((r) => r.project === p.id && String(r.ticket) === String(t.id)); if (run) item.run = { id: run.id, status: run.status, error: run.error, finished: run.finished };
+        if (state === 'review') { const pr = prs.find((x) => x.branch.startsWith(`agent/${t.id}-`)); if (pr) item.pr = pr; }
+        else if (budget-- > 0) { try { const d = await this._cached(`d:${p.id}:${t.id}`, 20000, () => this.deps(p).tickets.get(t.id)); item.body = d.body; item.comments = d.comments.slice(-4); } catch (e) { item.detailError = String(e.message).slice(0, 120); } }
+        items.push(item);
+      }
+    }
+    items.sort((a, b) => (a.kind === b.kind ? String(b.updatedAt).localeCompare(String(a.updatedAt)) : a.kind === 'decision' ? -1 : 1));
+    return { items, errors, counts: { decisions: items.filter((i) => i.kind === 'decision').length, reviews: items.filter((i) => i.kind === 'review').length } };
+  }
+  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); return { count: n }; }
+
+  // Act on a ticket from the inbox. Everything is validated; re-queueing re-runs the clarity gate so a vague ticket cannot just bounce back.
+  async ticketAction(projectId, ticketId, action, payload = {}) {
+    const bad = (m, status = 400) => Object.assign(new Error(m), { status });
+    const p = this.project(projectId); if (!/^[\w-]{1,40}$/.test(String(ticketId))) throw bad('Invalid ticket id');
+    const text = (v, max = 20000) => { if (typeof v !== 'string' || !v.trim() || v.length > max) throw bad(`Text is required (max ${max} characters)`); return v.trim(); };
+    const adapter = this.deps(p).tickets; if (!adapter.get) throw bad('This ticket source does not support that action', 501);
+    this.cache.delete(`t:${projectId}`); this.cache.delete(`d:${projectId}:${ticketId}`);
+    if (action === 'comment') { await adapter.comment(ticketId, text(payload.text)); return { commented: true }; }
+    if (action === 'update') { if (payload.title === undefined && payload.body === undefined) throw bad('Nothing to update'); await adapter.update(ticketId, { ...(payload.title !== undefined ? { title: text(payload.title, 200) } : {}), ...(payload.body !== undefined ? { body: text(payload.body) } : {}) }); return { updated: true }; }
+    if (action === 'close') { await adapter.close(ticketId); return { closed: true }; }
+    if (action === 'requeue') {
+      const cur = await adapter.get(ticketId); const details = payload.details === undefined || payload.details === '' ? '' : text(payload.details);
+      const body = details ? `${cur.body}\n\n---\nAdditional detail:\n${details}`.trim() : cur.body;
+      const g = assessTicket({ title: cur.title, body }, this.cfg.limits.gate);
+      if (!g.ok) throw bad(`Still too vague for the factory to start: ${g.problems.join('; ')}. Add concrete detail (function/file names, expected behaviour) and try again.`);
+      if (details) await adapter.update(ticketId, { body });
+      await adapter.label(ticketId, ['agent-ready'], AGENT_LABELS.filter((l) => l !== 'agent-ready'));
+      this.outcomes.delete(`${projectId}#${ticketId}`); await adapter.comment(ticketId, `agent-factory: requeued by you${details ? ' with extra detail' : ''}.`).catch(() => {});
+      return { requeued: true };
+    }
+    throw bad(`Unknown action: ${action}`, 404);
+  }
+
   async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
   repoUrl(p) { const k = hostKind(p); return k === 'github' ? `https://github.com/${p.repo}` : k === 'gitlab' ? `${(p.host.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '')}/${p.repo}` : k === 'bitbucket' ? `https://bitbucket.org/${p.repo}` : null; }
   async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
