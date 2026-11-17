@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Optional SonarQube integration** (Health page): run the official Community container for you, or connect your own server/SonarCloud. New projects are scanned in the background and Re-analyze re-scans; results (quality gate, bugs, vulnerabilities, smells, coverage, findings with a Queue fix button) appear on the project's Code health card. Re-analysis is now a background job with live progress.
 - **Repository analysis** on add (and Re-analyze): language, package manager, detected test command (including apps in subfolders), A–E ratings for size, tests, duplication, upkeep and committed secrets, with an editable verify command. Saved with the project, summarised in the agent prompt, and flagged on Health when a project has no way to verify.
 - The ticket pre-check now only blocks tickets too short to act on; the agent proceeds on stated assumptions or asks specific questions (`NEEDS_INFO:`).
 - Pasting any repository URL (web, `.git`, ssh) is accepted.

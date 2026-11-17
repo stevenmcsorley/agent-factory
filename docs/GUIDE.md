@@ -126,7 +126,14 @@ Open **Cells → Add project**. You make two independent choices, so you can mix
 - **How changes will be verified**: the detected test command (npm, pnpm, yarn, pytest, go, cargo, make, or an app in a subfolder such as `cd engine && npm test`). It is editable, so fix it here if it guessed wrong.
 - **Warnings**, such as "no way to run tests was found: pull requests will be UNVERIFIED".
 
-The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. This is a fast, line-based scan in the spirit of SonarQube's dashboard, not a full static analyser.
+The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. The built-in scan is fast and line-based, not a full static analyser. For the real thing, turn on SonarQube (next).
+
+**Optional: real SonarQube analysis.** Open **Health → Code quality (SonarQube)** and choose one:
+
+- **Run it for me:** the factory starts the official SonarQube Community container on this machine (127.0.0.1 only), sets an admin password and creates a token for itself. The first start downloads about 1 GB and needs about 2 GB of memory.
+- **I already have one:** paste the URL of your own server or SonarCloud, plus a token (*My Account → Security*).
+
+Once it is on, every new project is scanned in the background, and **Re-analyze** on a project re-runs both the fast scan and SonarQube. The Code health card then adds a **SonarQube** section: the quality gate (passed or failed, and why), bugs, vulnerabilities, code smells, security hotspots, coverage, duplication, reliability/security/maintainability ratings, and the top findings. Each finding has a **Queue fix** button that turns it into a normal ticket for the agent. The agent is also told the gate status and finding counts on every run. Scanning runs in a throwaway container with your code mounted read-only.
 
 <img src="guide/img/architecture.svg" alt="Architecture: ticket sources and code hosts around the factory, with the Docker sandbox below" width="100%">
 

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { detectVerify, loadRepoConfig } from './repoconfig.mjs';
+import { sonarSummary } from './sonar.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', 'vendor']);
 const safePath = (s) => String(s).replace(/[^\w./@+-]/g, '').slice(0, 120);
@@ -112,6 +113,7 @@ export function profileSummary(p) {
   if (p.languages?.length) bits.push(`Languages: ${p.languages.join(', ')}${p.framework ? ` (${safeName(p.framework)})` : ''}${p.packageManager ? `; package manager: ${p.packageManager}` : ''}.`);
   if (p.verify) bits.push(`Changes are verified with: ${String(p.verify).slice(0, 200)}. Make sure that passes.`); else bits.push('No automated tests are configured here; keep the change small and add tests only if a test setup obviously exists.');
   if (p.metrics?.hotspots?.length) bits.push(`Largest source files: ${p.metrics.hotspots.slice(0, 3).map((h) => `${safePath(h.file)} (${Number(h.lines) || 0} lines)`).join(', ')}.`);
+  const sq = sonarSummary(p.sonar); if (sq) bits.push(sq);
   if (p.topLevel?.length) bits.push(`Top-level layout: ${p.topLevel.slice(0, 20).join(' ')}`);
   return bits.join('\n');
 }

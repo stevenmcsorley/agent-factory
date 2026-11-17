@@ -167,25 +167,46 @@ export const projectsPage = {
 // ---- repository analysis ("code health"): ratings in the SonarQube style, but a fast heuristic scan, and it says so
 const RATING_LABEL = { size: 'Size', tests: 'Tests', duplication: 'Duplication', maintainability: 'Upkeep', security: 'Secrets' };
 const RATING_HELP = { size: 'Smaller code is easier for an agent to work in', tests: 'Test code relative to source code', duplication: 'Repeated blocks across files', maintainability: 'Very large files and TODO/FIXME count', security: 'Committed keys or tokens' };
-const healthCard = (pr, { onReanalyze, verifyInput } = {}) => {
-  if (!pr) return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), onReanalyze ? h('button', { class: 'btn', onclick: onReanalyze }, 'Analyze now') : null), h('p', { class: 'muted' }, 'This repository has not been analyzed yet.'));
+const GATE = { OK: ['ok', 'Quality gate passed'], WARN: ['warn', 'Quality gate: warning'], ERROR: ['bad', 'Quality gate failed'], NONE: ['warn', 'No quality gate'] };
+const SEV = { BLOCKER: 'bad', CRITICAL: 'bad', MAJOR: 'warn', MINOR: '', INFO: '' };
+const sonarBlock = (sq, { url, onFix } = {}) => {
+  if (!sq) return null;
+  if (sq.error || !sq.measures) return h('div', { class: 'note bad' }, icon('alert', 14), ' SonarQube scan did not complete: ', sq.error ?? 'no results', ' (Re-analyze to retry)');
+  const m = sq.measures; const [cls, label] = GATE[sq.qualityGate] ?? GATE.NONE; const v = (x, suf = '') => (x == null ? '–' : `${num(x)}${suf}`);
+  return h('div', { class: 'sonar' }, h('div', { class: 'card-h' }, h('h3', {}, 'SonarQube'), h('span', { class: `stamp ${cls}` }, label), url ? ext(url, 'Open in SonarQube', 'btn small') : null),
+    h('div', { class: 'ratings' }, [['Reliability', sq.ratings.reliability], ['Security', sq.ratings.security], ['Maintainability', sq.ratings.maintainability]].filter(([, g]) => g).map(([k, g]) => h('div', { class: 'rating' }, h('b', { class: `grade r-${g}` }, g), h('span', {}, k)))),
+    h('div', { class: 'facts' }, [[v(m.bugs), 'bugs'], [v(m.vulnerabilities), 'vulnerabilities'], [v(m.codeSmells), 'code smells'], [v(m.hotspots), 'hotspots'], [v(m.coverage, '%'), 'coverage'], [v(m.duplication, '%'), 'duplicated']].map(([x, l]) => h('div', { class: 'fact' }, h('b', {}, x), h('span', {}, l)))),
+    sq.failedConditions?.length ? h('p', { class: 'muted small' }, 'Gate failed on: ', sq.failedConditions.map((c) => `${c.metric} ${c.actual} (limit ${c.threshold})`).join(' · ')) : null,
+    sq.issues?.length ? h('details', { open: true }, h('summary', {}, `Top findings (${sq.issues.length} of ${num(sq.totalIssues)})`), h('ul', { class: 'plain issues' }, sq.issues.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}${i.line ? `:${i.line}` : ''}`),
+      onFix ? h('button', { class: 'btn small', onclick: () => onFix(i) }, 'Queue fix') : null)))) : h('p', { class: 'muted small' }, 'No open findings.'),
+    h('p', { class: 'muted small' }, `Scanned ${ago(sq.analyzedAt)}.`));
+};
+const healthCard = (pr, { onReanalyze, verifyInput, job, sonarUrl, onFix } = {}) => {
+  const running = job?.state === 'running';
+  const reBtn = onReanalyze ? h('button', { class: 'btn', disabled: running, onclick: onReanalyze }, running ? `Analyzing… ${job.phase ?? ''}` : pr ? 'Re-analyze' : 'Analyze now') : null;
+  if (job?.state === 'error' && !pr) pr = null;
+  if (!pr) return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), reBtn), job?.state === 'error' ? h('div', { class: 'note bad' }, icon('alert', 14), ' ', job.error) : null, h('p', { class: 'muted' }, 'This repository has not been analyzed yet.'));
   const m = pr.metrics;
-  return card('health', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), h('span', { class: 'muted small mono' }, [pr.languages?.join(' · ') || 'no recognised language', pr.packageManager ? ` · ${pr.packageManager}` : '', pr.framework ? ` · ${pr.framework}` : ''].join('')), onReanalyze ? h('button', { class: 'btn', onclick: onReanalyze }, 'Re-analyze') : null),
+  return card('health', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), h('span', { class: 'muted small mono' }, [pr.languages?.join(' · ') || 'no recognised language', pr.packageManager ? ` · ${pr.packageManager}` : '', pr.framework ? ` · ${pr.framework}` : ''].join('')), reBtn),
+    job?.state === 'error' ? h('div', { class: 'note bad' }, icon('alert', 14), ' Last analysis failed: ', job.error) : null,
     pr.warnings?.length ? pr.warnings.map((w) => h('div', { class: 'note bad' }, icon('alert', 14), ' ', w)) : null,
     m ? h('div', { class: 'ratings' }, Object.entries(m.ratings).map(([k, v]) => h('div', { class: 'rating', title: RATING_HELP[k] }, h('b', { class: `grade r-${v}` }, v), h('span', {}, RATING_LABEL[k])))) : null,
     m ? h('div', { class: 'facts' }, [[num(m.codeLines), 'lines of code'], [num(m.sourceFiles), 'source files'], [`${m.testFiles} (${m.testRatioPct}%)`, 'test files'], [`${m.duplicatedPct}%`, 'duplicated'], [num(m.todoCount), 'TODO / FIXME']].map(([v, l]) => h('div', { class: 'fact' }, h('b', {}, v), h('span', {}, l)))) : null,
     h('div', { class: 'verify-row' }, h('label', {}, 'How changes are verified'), verifyInput ?? h('code', {}, pr.verify || 'nothing: pull requests will be unverified'), pr.verifyReason && !verifyInput ? h('span', { class: 'muted small' }, ` (${pr.verifyReason})`) : null),
+    sonarBlock(pr.sonar, { url: sonarUrl, onFix }),
     m?.hotspots?.length ? h('details', {}, h('summary', {}, 'Largest files and details'), h('ul', { class: 'plain' }, m.hotspots.map((x) => h('li', { class: 'mono small' }, `${x.file} · ${x.lines} lines`)), (pr.notes ?? []).map((n) => h('li', { class: 'muted small' }, n)), pr.ci ? h('li', { class: 'muted small' }, `CI: ${pr.ci}`) : null, h('li', { class: 'muted small' }, 'Heuristic line-based scan, not a full static analyser like SonarQube.'))) : null);
 };
 
+let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
 // ---- single project
 let projTab = 'board';
 export const project = {
   async load(id) { const [ov, runs, metrics] = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const p = ov.find((x) => x.id === id);
-    const extra = {}; if (p) { if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
+    const extra = {}; if (p) { if (projTab === 'board') extra.job = await api(`/projects/${id}/analyze`).catch(() => null); if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
     return { id, p, runs, metrics, tab: projTab, ...extra }; },
   draw(d, ctx) {
     const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
+    if (d.job?.state === 'running') pollSoon(ctx);
     const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['new', 'New ticket'], ['log', 'Log']];
     const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
     const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
@@ -195,7 +216,7 @@ export const project = {
           m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
           h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
-      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis updated', ctx.rerender) }) : null, body]; },
+      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { job: d.job, sonarUrl: p.sonarUrl, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onFix: (i) => act(() => api(`/projects/${id}/sonar-issue`, { method: 'POST', body: { key: i.key } }), 'Fix queued as a new ticket', ctx.rerender)() }) : null, body]; },
 };
 
 function board(tickets) {
@@ -281,11 +302,29 @@ export const connect = {
 };
 
 // ---- health
+const sonarSetup = {}; // form state survives re-renders
+const sonarCard = (sq, ctx) => {
+  const st = sq?.state ?? 'off'; const busy = st === 'starting';
+  const enable = (mode) => act(async () => { await api('/sonar/enable', { method: 'POST', body: mode === 'managed' ? { mode } : { mode, url: sonarSetup.url, token: sonarSetup.token } }); sonarSetup.token = ''; }, mode === 'managed' ? 'Starting SonarQube' : 'SonarQube connected', ctx.rerender);
+  const field = (k, ph, type = 'text') => h('input', { type, value: sonarSetup[k] ?? '', placeholder: ph, autocomplete: 'off', oninput: (e) => { sonarSetup[k] = e.target.value; } });
+  const body = busy ? h('p', { class: 'muted' }, h('b', {}, 'Setting up: '), sq.phase ?? '…')
+    : st === 'ready' || st === 'down' ? [h('p', {}, h('i', { class: `lamp ${st === 'ready' ? 'ok' : 'bad'}` }), ` ${sq.mode === 'managed' ? 'Managed by the factory' : 'Your server'} · ${sq.url}`, sq.version ? ` · v${sq.version}` : ' · not responding'),
+        st === 'down' && sq.mode === 'managed' ? h('p', { class: 'muted small' }, 'Start it again with: ', h('code', {}, 'docker start agent-factory-sonarqube')) : null,
+        h('p', { class: 'muted small' }, 'New projects are scanned automatically; use Re-analyze on a project to scan again.'),
+        h('div', { class: 'row' }, ext(sq.url, 'Open SonarQube', 'btn small'), h('button', { class: 'btn small danger', onclick: act(() => api('/sonar/disable', { method: 'POST', body: { stop: sq.mode === 'managed' } }), 'SonarQube turned off', ctx.rerender) }, 'Turn off'))]
+    : [sq?.error ? h('div', { class: 'note bad' }, icon('alert', 14), ' ', sq.error) : null,
+        h('p', { class: 'muted small' }, 'Adds the real analyser (bugs, vulnerabilities, code smells, coverage, quality gate) to every project’s Code health card. Opt-in: it needs about 2 GB of memory and a minute or two per scan.'),
+        h('div', { class: 'cols-2' },
+          h('div', {}, h('h3', {}, 'Run it for me'), h('p', { class: 'muted small' }, 'The factory starts the official SonarQube Community container on this machine (127.0.0.1 only) and secures it. First start downloads about 1 GB.'), h('button', { class: 'btn primary', onclick: enable('managed') }, 'Set up SonarQube')),
+          h('div', {}, h('h3', {}, 'I already have one'), h('p', { class: 'muted small' }, 'Your own server or SonarCloud, with a token from My Account → Security.'), field('url', 'https://sonar.example.com'), field('token', 'token', 'password'), h('button', { class: 'btn', onclick: enable('external') }, 'Connect')))];
+  if (busy) pollSoon(ctx);
+  return card('', h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Code quality (SonarQube)'), st === 'ready' ? h('span', { class: 'stamp ok' }, 'on') : st === 'down' ? h('span', { class: 'stamp bad' }, 'down') : h('span', { class: 'stamp' }, busy ? 'starting' : 'off')), body);
+};
 export const health = {
-  async load() { return { checks: await api('/health') }; },
-  draw({ checks }) { const bad = checks.filter((c) => !c.ok).length;
+  async load() { const [checks, sonar] = await Promise.all([api('/health'), api('/sonar').catch(() => null)]); return { checks, sonar }; },
+  draw({ checks, sonar }, ctx) { const bad = checks.filter((c) => !c.ok).length;
     return [head('Health', bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix before the factory can run safely.` : 'Every system the factory needs is in place.'),
-      h('div', { class: 'checks' }, checks.map((c) => h('div', { class: 'card check' }, h('i', { class: `lamp ${c.ok ? 'ok' : 'bad'}` }), h('b', {}, c.id), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', { class: 'eyebrow' }, 'Fix'), h('code', {}, c.fix)) : null)))]; },
+      sonarCard(sonar, ctx), h('div', { class: 'checks' }, checks.map((c) => h('div', { class: 'card check' }, h('i', { class: `lamp ${c.ok ? 'ok' : 'bad'}` }), h('b', {}, c.id), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', { class: 'eyebrow' }, 'Fix'), h('code', {}, c.fix)) : null)))]; },
 };
 
 // ---- add / create project

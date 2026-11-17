@@ -211,3 +211,6 @@ h2 .icon { display: none; } .stage-wrap { padding: 8px 4px 4px; }
 .grade { width: 28px; height: 28px; display: grid; place-items: center; color: #fff; font: 700 15px var(--mono); } .r-A { background: #2f9e57; } .r-B { background: #7aae3a; } .r-C { background: #d9a21b; } .r-D { background: #e07a1f; } .r-E { background: #d23b3b; }
 .facts { display: flex; gap: 22px; flex-wrap: wrap; margin-bottom: 14px; } .fact b { display: block; font: 700 18px var(--mono); } .fact span { font: 500 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 .verify-row { display: grid; gap: 6px; margin: 8px 0; } .verify-row label { font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); } ul.plain { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; }
+
+.sonar { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); } .sonar h3 { margin: 0; font-size: 14px; }
+ul.issues li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
