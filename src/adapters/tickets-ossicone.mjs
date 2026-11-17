@@ -32,6 +32,11 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
         labels: ['agent-ready', ...(repo ? [`repo:${repo}`] : [])] });
       return { id: i.id };
     },
+    // For the setup wizard: who am I, and which projects can I pick?
+    async identify() {
+      const me = await call('GET', '/api/auth/me'); const ps = await call('GET', '/api/projects');
+      return { user: { id: me.id, name: me.name ?? me.email, email: me.email, alsoMatches: [me.id] }, projects: ps.map((p) => ({ id: p.id, name: `${p.name} (${p.key})` })) };
+    },
     async label(id, add = [], remove = []) {
       const cur = norm(await call('GET', `/api/issues/${id}`));
       const labels = [...new Set([...cur.labels.filter((l) => !remove.includes(l)), ...add])];

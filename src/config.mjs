@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { validateSource } from './sources.mjs';
+import { validateHost, hostKind } from './hosts.mjs';
+export { AGENT_LABELS } from './labels.mjs';
 
-export const AGENT_LABELS = ['agent-ready', 'agent-working', 'agent-review', 'agent-failed', 'agent-needs-info', 'agent-needs-human'];
 
 // Hosts an agent container legitimately needs. Everything else is blocked by the egress proxy.
 export const EGRESS_DEFAULTS = {
@@ -21,7 +23,6 @@ export const DEFAULTS = {
 };
 
 const ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
-const REPO = /^[\w.-]+\/[\w.-]+$/;
 
 export function withDefaults(cfg) {
   const c = { ...DEFAULTS, ...cfg, ui: { ...DEFAULTS.ui, ...cfg.ui }, sandbox: { ...DEFAULTS.sandbox, ...cfg.sandbox }, limits: { ...DEFAULTS.limits, ...cfg.limits } };
@@ -43,13 +44,12 @@ export function validateConfig(cfg) {
     if (!ID.test(p.id ?? '')) e.push(`project id "${p.id}" must match ${ID}`);
     if (seen.has(p.id)) e.push(`duplicate project id "${p.id}"`);
     seen.add(p.id);
-    if (!REPO.test(p.repo ?? '')) e.push(`project ${p.id}: repo "${p.repo}" must look like owner/name`);
+    e.push(...validateHost(p));
     const t = p.tickets ?? {};
-    if (!['github', 'ossicone', 'file'].includes(t.kind)) e.push(`project ${p.id}: tickets.kind "${t.kind}" is not supported`);
-    if (t.kind === 'github' && !t.allowedAuthors?.length) e.push(`project ${p.id}: tickets.allowedAuthors must list who may queue work (ticket text drives the agent)`);
-    if (t.kind === 'ossicone' && (!t.baseUrl || !t.projectId || !t.allowedReporterIds?.length || !p.feedbackAuthors?.length))
-      e.push(`project ${p.id}: ossicone needs tickets.baseUrl, tickets.projectId, tickets.allowedReporterIds and project.feedbackAuthors`);
-    for (const r of p.allowedRepos ?? []) if (!REPO.test(r)) e.push(`project ${p.id}: allowedRepos entry "${r}" must look like owner/name`);
+    e.push(...validateSource(t).map((x) => `project ${p.id}: ${x}`));
+    if (t.kind === 'github' && hostKind(p) !== 'github') e.push(`project ${p.id}: GitHub Issues can only be used with a GitHub repository; pick another ticket source (Jira, Linear, Ossicone) for ${hostKind(p)}`);
+    if (t.kind !== 'github' && t.kind !== 'file' && hostKind(p) !== 'git' && !p.feedbackAuthors?.length) e.push(`project ${p.id}: feedbackAuthors must list who may comment on pull requests (usernames on ${hostKind(p)})`);
+    for (const r of p.allowedRepos ?? []) if (!/^[\w.-]+(\/[\w.-]+)+$/.test(r)) e.push(`project ${p.id}: allowedRepos entry "${r}" must look like owner/name`);
   }
   return e.filter(Boolean);
 }

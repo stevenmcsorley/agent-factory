@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { run } from './util.mjs';
-import { AGENT_LABELS } from './config.mjs';
+import { AGENT_LABELS } from './labels.mjs';
 
 const gh = async (args, opts) => { const r = await run('gh', args, opts); if (r.code !== 0) throw new Error(`gh ${args.slice(0, 3).join(' ')} failed: ${r.out.trim().slice(0, 300)}`); return r.out; };
 

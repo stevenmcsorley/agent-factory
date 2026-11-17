@@ -39,9 +39,9 @@ export const ago = (iso) => { if (!iso) return '–'; const t = (Date.now() - ne
 export const dur = (ms) => { if (ms == null || ms < 0) return '–'; const s2 = Math.round(ms / 1000); if (s2 < 60) return `${s2}s`; const m = Math.floor(s2 / 60); return m < 60 ? `${m}m ${String(s2 % 60).padStart(2, '0')}s` : `${Math.floor(m / 60)}h ${m % 60}m`; };
 export const num = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n ?? 0));
 export const pct = (v) => (v == null ? '–' : `${Math.round(v * 100)}%`);
-export const safeUrl = (u) => (typeof u === 'string' && /^https:\/\/github\.com\/[\w.\-/#]+$/.test(u) ? u : null);
+// Links come from our own adapters (host/tracker base URL + ids), never from ticket text; still allow only plain http(s) URLs.
+export const safeUrl = (u) => (typeof u === 'string' && /^https?:\/\/[A-Za-z0-9.\-]+(:\d+)?(\/[\w.\-/#?=&%~+]*)?$/.test(u) ? u : null);
 export const ext = (u, text, cls) => (safeUrl(u) ? h('a', { href: u, target: '_blank', rel: 'noopener noreferrer', class: cls }, text) : h('span', { class: cls }, text));
-export const prUrl = (repo, n) => `https://github.com/${repo}/pull/${n}`;
 
 // ---- api
 export async function api(path, { method = 'GET', body } = {}) {

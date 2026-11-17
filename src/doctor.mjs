@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './util.mjs';
 import { validateConfig } from './config.mjs';
+import { hostKind } from './hosts.mjs';
 
 // Every check returns { id, ok, detail, fix? }. `exec` is injectable for tests.
 export async function doctor(cfg, { exec = run, env = process.env } = {}) {
@@ -13,7 +14,8 @@ export async function doctor(cfg, { exec = run, env = process.env } = {}) {
   const dk = await exec('docker', ['info', '--format', '{{.ServerVersion}}']);
   add('docker', dk.code === 0, dk.code === 0 ? `Docker ${dk.out.trim()}` : 'Docker daemon not reachable', 'Install Docker and make sure your user can run `docker ps`');
   const gh = await exec('gh', ['auth', 'status']);
-  add('github', gh.code === 0, gh.code === 0 ? 'gh is signed in' : 'gh is not signed in', 'Run `gh auth login`');
+  const needsGh = (cfg.projects ?? []).some((p) => hostKind(p) === 'github' || p.tickets?.kind === 'github');
+  add('github', gh.code === 0 || !needsGh, gh.code === 0 ? 'gh is signed in' : needsGh ? 'gh is not signed in' : 'gh is not signed in (only needed for GitHub projects)', 'Run `gh auth login`');
   if (cfg.sandbox?.kind === 'docker' && dk.code === 0) {
     const img = await exec('docker', ['image', 'inspect', cfg.sandbox.agentImage ?? 'agent-factory-agent:latest']);
     add('agent-image', img.code === 0, `${cfg.sandbox.agentImage} ${img.code === 0 ? 'present' : 'missing'}`, 'Run `npm run build-image`');
@@ -26,6 +28,8 @@ export async function doctor(cfg, { exec = run, env = process.env } = {}) {
     const f = path.join(cfg.agent.codexHome ?? '', 'auth.json'); const ok = !!cfg.agent.codexHome && fs.existsSync(f);
     add('agent-auth', ok, ok ? 'Dedicated Codex login found' : 'No dedicated Codex login', `Run \`CODEX_HOME=${cfg.agent.codexHome} codex login --device-auth\``);
   }
+  const missing = (cfg.projects ?? []).flatMap((p) => [p.tickets?.tokenEnv, p.host?.tokenEnv].filter(Boolean).filter((n) => !env[n]).map((n) => `${p.id}: ${n}`));
+  add('secrets', missing.length === 0, missing.length ? `Missing tokens: ${missing.join(', ')}` : 'All project tokens present', 'Re-add the project in the UI, or put NAME=token lines in state/secrets.env');
   const problems = validateConfig(cfg);
   add('config', problems.length === 0, problems.length ? problems.join('; ') : `${cfg.projects.length} project(s), valid`, 'Fix the listed config problems');
   add('running', !fs.existsSync(path.join(cfg.stateDir, 'STOP')), fs.existsSync(path.join(cfg.stateDir, 'STOP')) ? 'Paused (STOP file present)' : 'Not paused', 'Resume from the UI or delete the STOP file');

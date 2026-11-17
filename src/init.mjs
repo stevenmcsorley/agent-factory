@@ -38,7 +38,9 @@ export async function init({ configPath, root, flags }) {
   console.log('1. Checking prerequisites');
   const pre = await doctor(withDefaults({ stateDir, agent: { kind: 'shell' }, sandbox: { kind: 'docker', agentImage: 'agent-factory-agent:latest' } }));
   let blocked = false;
-  for (const c of pre.filter((x) => ['node', 'git', 'docker', 'github'].includes(x.id))) { if (c.ok) ok(c.detail); else { bad(c.detail, c.fix); blocked = true; } }
+  for (const c of pre.filter((x) => ['node', 'git', 'docker'].includes(x.id))) { if (c.ok) ok(c.detail); else { bad(c.detail, c.fix); blocked = true; } }
+  const ghOk = (await run('gh', ['auth', 'status'])).code === 0;
+  ghOk ? ok('GitHub CLI signed in') : console.log('  - GitHub CLI not signed in: fine if you use GitLab, Bitbucket or another git host (add projects in the UI); needed for GitHub (`gh auth login`)');
   if (blocked) { rl?.close(); console.log('\nFix the items above and run setup again.'); return 1; }
   if (!pre.find((c) => c.id === 'agent-image')?.ok && !(await buildImage(root))) { rl?.close(); return 1; }
   ok('sandbox image ready');
@@ -64,7 +66,7 @@ export async function init({ configPath, root, flags }) {
 
   console.log('\n3. Your first project (you can skip this and add projects in the UI)');
   const projects = existing.projects ?? [];
-  const repo = flags.repo ?? (projects.length ? '' : await ask('GitHub repository the factory should work on (owner/name, blank to skip)'));
+  const repo = flags.repo ?? (projects.length || !ghOk ? '' : await ask('GitHub repository the factory should work on (owner/name, blank to skip; other hosts can be added in the UI)'));
   if (repo) {
     try {
       const info = await inspectRepo(repo); const user = await whoami(); await ensureLabels(repo);

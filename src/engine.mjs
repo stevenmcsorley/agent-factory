@@ -2,10 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
-import { fileTickets } from './adapters/tickets-file.mjs';
-import { githubTickets } from './adapters/tickets-github.mjs';
-import { ossiconeTickets } from './adapters/tickets-ossicone.mjs';
-import { githubHost } from './adapters/githost-github.mjs';
+import { buildTickets, identifySource, publicSources, SOURCES, TOKEN_ENV, ossiconeSignupInfo } from './sources.mjs';
+import { buildHost, identifyHost, publicHosts, hostKind, HOSTS } from './hosts.mjs';
 import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
 import { agents } from './adapters/agents.mjs';
 import { gitVcs } from './adapters/vcs.mjs';
@@ -43,17 +41,15 @@ export class Engine {
   deps(p) {
     const dir = this.projectDir(p);
     const log = path.join(dir, 'logs', `${new Date().toISOString().slice(0, 10)}.log`);
-    const t = p.tickets;
-    const tickets = this.f.tickets?.(p) ?? (t.kind === 'github' ? githubTickets({ repo: p.repo, allowedAuthors: t.allowedAuthors })
-      : t.kind === 'ossicone' ? ossiconeTickets({ baseUrl: t.baseUrl, token: this.env[t.tokenEnv ?? 'OSSICONE_TOKEN'], projectId: t.projectId, allowedReporterIds: t.allowedReporterIds })
-      : fileTickets(t.path));
+    const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log });
     const a = this.cfg.agent;
     const agent = this.f.agent ?? agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log });
-    const vcs = this.f.vcs ?? gitVcs({ log, repo: p.repo });
-    const host = this.f.host?.(p) ?? githubHost({ repo: p.repo, allowedAuthors: p.feedbackAuthors ?? t.allowedAuthors ?? [] });
+    const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
+    const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, cloneUrl: `https://github.com/${p.repo}.git`, runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -131,13 +127,14 @@ export class Engine {
   async overview() {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
   }
   async listTickets(id) { const p = this.project(id); return this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets()); }
-  async listPrs(id) { const p = this.project(id); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: `https://github.com/${p.repo}/pull/${x.number}` })); }
+  repoUrl(p) { const k = hostKind(p); return k === 'github' ? `https://github.com/${p.repo}` : k === 'gitlab' ? `${(p.host.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '')}/${p.repo}` : k === 'bitbucket' ? `https://bitbucket.org/${p.repo}` : null; }
+  async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
   async createTicket(id, { title, body, repo }) {
     const p = this.project(id);
     if (!title || title.length > 200) throw Object.assign(new Error('title is required (max 200 chars)'), { status: 400 });
@@ -147,14 +144,55 @@ export class Engine {
 
   // ---- project management (persisted to the config file)
   _persist() { if (this.configPath) saveConfig(this.configPath, this.cfg); }
-  async addProject({ id, repo, base, tickets, config, allowedRepos, feedbackAuthors }) {
-    const user = tickets?.kind === 'github' || !tickets ? await this.gh.whoami().catch(() => null) : null;
-    const info = await this.gh.inspectRepo(repo);
-    const p = { id, repo, base: base || info.defaultBranch, tickets: tickets ?? { kind: 'github', allowedAuthors: user ? [user] : [] }, ...(config ? { config } : {}), ...(allowedRepos ? { allowedRepos } : {}), ...(feedbackAuthors ? { feedbackAuthors } : {}) };
-    const next = { ...this.cfg, projects: [...this.cfg.projects, p] };
-    const problems = validateConfig(next);
-    if (problems.length) throw Object.assign(new Error(problems.join('; ')), { status: 400 });
-    await this.gh.ensureLabels(repo);
+  // Persist a token in the owner-only secrets file and make it visible to this process. Names are restricted to AF_* so a project
+  // can only ever reference secrets the factory itself stored (never arbitrary environment variables).
+  saveSecret(name, value) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!TOKEN_ENV.test(name)) throw bad('Secret names must look like AF_MYPROJECT_TOKEN');
+    if (typeof value !== 'string' || !value.trim() || value.length > 4096 || /[\r\n\0]/.test(value)) throw bad('That token looks invalid (empty, multi-line or too long)');
+    const f = path.join(this.cfg.stateDir, 'secrets.env'); const lines = read(f).split('\n').filter((l) => l && !l.startsWith(`${name}=`));
+    lines.push(`${name}=${value.trim()}`); const tmp = `${f}.tmp`; fs.writeFileSync(tmp, lines.join('\n') + '\n', { mode: 0o600 }); fs.renameSync(tmp, f);
+    this.env[name] = value.trim();
+  }
+  catalog() { return { sources: publicSources(), hosts: publicHosts() }; }
+  async testSource({ kind, fields, token }) { return identifySource({ kind, fields, token, whoami: this.gh.whoami, fetchImpl: this.f.fetch }); }
+  async testHost({ kind, fields, token, repo }) { return kind === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami(), supportsPrs: true } : identifyHost({ kind, fields, token, repo, fetchImpl: this.f.fetch, exec: this.f.exec }); }
+  signupInfo(baseUrl) { return ossiconeSignupInfo(baseUrl, this.f.fetch); }
+
+  // Add a project. Any ticket source × any code host. Tokens arrive as `secret` (tickets) / `hostSecret` (code host), are verified
+  // against the real service BEFORE anything is saved, are written only to the secrets file, and never appear in the config or any response.
+  async addProject({ id, repo, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors }) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    const upper = String(id ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    // 1. code host
+    const hk = host?.kind ?? 'github';
+    const { kind: _k, token: _t, ...hostFields } = host ?? {};
+    const hostCfg = { kind: hk, ...hostFields };
+    const hostDef = HOSTS[hk]; if (!hostDef) throw bad(`Unsupported code host: ${hk}`);
+    if (hk !== 'github' && hostDef.fields.some((f) => f.secret)) hostCfg.tokenEnv ??= `AF_${upper}_GIT_TOKEN`;
+    const hostToken = hostSecret ?? (hostCfg.tokenEnv ? this.env[hostCfg.tokenEnv] : undefined);
+    const hostInfo = hk === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami().catch(() => null) } : await identifyHost({ kind: hk, fields: hostFields, token: hostToken, repo, fetchImpl: this.f.fetch, exec: this.f.exec });
+    // 2. ticket source
+    let t = tickets, ticketToken;
+    if (source) {
+      const def = SOURCES[source.kind]; if (!def || def.hidden) throw bad(`Unsupported ticket source: ${source.kind}`);
+      const { token: _s, pick, ...fields } = source.fields ?? {};
+      const tokenEnv = source.kind === 'github' ? undefined : (source.tokenEnv ?? `AF_${upper}_TOKEN`);
+      ticketToken = source.kind === 'github' ? undefined : (secret ?? this.env[tokenEnv]);
+      const identity = await identifySource({ kind: source.kind, fields, token: ticketToken, whoami: this.gh.whoami, fetchImpl: this.f.fetch });
+      const pickVal = source.pick !== undefined && def.pick?.type === 'number' ? Number(source.pick) : source.pick;
+      t = { kind: source.kind, ...fields, ...(tokenEnv ? { tokenEnv } : {}), ...(def.pick ? { [def.pick.key]: pickVal } : {}), ...def.allow(identity) };
+    }
+    t ??= hk === 'github' ? { kind: 'github', allowedAuthors: hostInfo.user ? [hostInfo.user] : [] } : null;
+    if (!t) throw bad(`Choose where tickets live (GitHub Issues only works with a GitHub repo): Jira, Linear or Ossicone`);
+    const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...(config ? { config } : {}), ...(allowedRepos ? { allowedRepos } : {}),
+      ...((feedbackAuthors ?? (t.kind !== 'github' && hostInfo.user ? [hostInfo.user] : null)) ? { feedbackAuthors: feedbackAuthors ?? [hostInfo.user] } : {}) };
+    const problems = validateConfig({ ...this.cfg, projects: [...this.cfg.projects, p] });
+    if (problems.length) throw bad(problems.join('; '));
+    // 3. side effects only after everything checked out
+    if (hostSecret) this.saveSecret(hostCfg.tokenEnv, hostSecret);
+    if (secret && t.tokenEnv) this.saveSecret(t.tokenEnv, secret);
+    if (t.kind === 'github') await this.gh.ensureLabels(repo);
     this.cfg.projects.push(p); this._persist();
     return p;
   }

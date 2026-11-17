@@ -46,7 +46,7 @@ export async function feedbackTick({ host, sandbox, agent, vcs, config, stateDir
     let ws;
     try {
       run.phase('sandbox', 'cloning the PR branch');
-      ws = await sandbox.create({ cloneUrl: config.cloneUrl, branch: pr.branch, base: pr.branch, newBranch: false });
+      ws = await sandbox.create({ cloneUrl: config.cloneUrl, branch: pr.branch, base: pr.branch, newBranch: false, gitEnv: config.gitEnv });
       const cfg = effectiveConfig(config, ws.dir);
       const fbForPrompt = { failedChecks: ciFailed ? fb.failedChecks : [], newComments };
       let extra = '';
@@ -78,6 +78,7 @@ export async function feedbackTick({ host, sandbox, agent, vcs, config, stateDir
     } catch (e) {
       rec.status = 'error'; rec.error = String(e.message ?? e);
     } finally {
+      rec.prLink = config.prLink?.(pr.number) ?? null;
       rec.finished = new Date().toISOString(); run.finish(); recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec });
       // Mark as handled even on failure so a broken round can't hot-loop; the round cap bounds retries.
       st.rounds++; st.seen.push(...newComments.map((c) => c.id)); if (ciFailed) st.handledShas.push(pr.sha);

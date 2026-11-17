@@ -33,7 +33,7 @@ export function resolveRepo(t, config) {
   const name = t.repo ?? config.repo;
   if (config.repos && !Object.hasOwn(config.repos, name ?? '')) return { error: `repository ${name ? `\`${name}\` ` : ''}is not on this factory's allowlist` };
   const rc = config.repos?.[name] ?? {};
-  return { name, cloneUrl: rc.cloneUrl ?? (name === config.repo && config.cloneUrl ? config.cloneUrl : name ? `https://github.com/${name}.git` : config.cloneUrl), base: rc.base ?? config.base ?? 'main', overrides: rc.config ?? {} };
+  return { name, cloneUrl: rc.cloneUrl ?? (name === config.repo && config.cloneUrl ? config.cloneUrl : name ? (config.cloneUrlFor?.(name) ?? `https://github.com/${name}.git`) : config.cloneUrl), base: rc.base ?? config.base ?? 'main', overrides: rc.config ?? {} };
 }
 
 async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases }) {
@@ -61,7 +61,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   await tickets.label(t.id, ['agent-working'], ['agent-ready']); // claim
   try {
     run.phase('sandbox', 'cloning the repository');
-    ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base });
+    ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base, gitEnv: config.gitEnv });
     const cfg = effectiveConfig({ ...config, ...target.overrides }, ws.dir);
     let feedback = '';
     for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {

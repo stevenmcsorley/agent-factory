@@ -13,7 +13,7 @@ Label a GitHub issue `agent-ready` (or queue one from the web UI). Agent Factory
 
 ## Quickstart
 
-You need: **Node 22+**, **Docker**, **git**, and the **GitHub CLI** signed in (`gh auth login`). Plus a Codex (ChatGPT) or Claude login.
+You need: **Node 22+**, **Docker** and **git**, plus a Codex (ChatGPT) or Claude login. The GitHub CLI (`gh auth login`) is only needed if you use GitHub; GitLab, Bitbucket and other hosts use a token you paste into the UI.
 
 ```bash
 git clone https://github.com/stevenmcsorley/agent-factory.git
@@ -69,6 +69,28 @@ Press **Ctrl/⌘ K** anywhere for a command palette (jump to a project, pause, r
 
 It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
 
+## Bring your own tools
+
+Two independent choices per project, mixable freely (for example Jira tickets with a Bitbucket repo):
+
+| **Where the code lives** | How it connects | Pull requests | CI + review feedback loop |
+|---|---|---|---|
+| **GitHub** | the `gh` CLI you are signed into | draft PR | CI logs + comments |
+| **GitLab** (gitlab.com or self-managed) | access token | merge request (`Draft:`) | pipeline job logs + notes |
+| **Bitbucket** Cloud | username + app password | pull request (`[Draft]`) | CI status + comments (no build logs in the API) |
+| **Any git remote** (Gitea, Forgejo, Azure DevOps, a plain server…) | URL template; ssh keys or https token | none: the branch is pushed and you open the PR | none |
+
+| **Where tickets live** | How it connects | Notes |
+|---|---|---|
+| **GitHub Issues** | the repo itself | label an issue `agent-ready` |
+| **Ossicone** | URL + API token. Use your existing account, or **sign up on any Ossicone server**: the UI checks whether sign-up is open and links you to register and generate a token | one project can fan out to several repos with a `repo:owner/name` label |
+| **Jira** (Cloud or Data Center) | URL + email + API token | state is kept in labels, so no workflow changes; optional status transitions |
+| **Linear** | personal API key | state is kept in labels, created automatically |
+
+Add them in the UI (**Add a project** has a guided flow with *Test connection* buttons and project pickers) or let an AI do it through MCP (`list_integrations`, `add_project`). Tokens you paste are checked against the real service **before** anything is saved, and stored only in an owner-only file (`state/secrets.env`), never in the config; each project can read only `AF_*` secrets, never arbitrary environment variables. Only tickets created by *you* (your Jira account, Linear user, Ossicone user, GitHub login) can queue work.
+
+Adding another tracker or host is a small adapter plus one registry entry (`src/sources.mjs`, `src/hosts.mjs`); it then appears in the UI, validation and MCP automatically.
+
 ## Drive it by prompt (MCP)
 
 The factory is also an MCP server, so an AI can run it for you: *"create a project that does X"*, *"what is the factory doing?"*, *"queue a fix for the login bug and tell me when the PR is up"*.
@@ -106,7 +128,7 @@ Vague requests are refused with advice (`create_ticket` runs the clarity check),
 { "verify": "npm ci && npm test", "image": "node:22-bookworm", "maxAttempts": 3, "protectedPaths": [".github/", "infra/"] }
 ```
 
-Other ticket sources: `ossicone` (a self-hosted tracker; see `src/adapters/tickets-ossicone.mjs`) and `file` (for testing). One Ossicone project can fan out to several repos with a `repo:owner/name` label and an `allowedRepos` list.
+Project config selects a ticket `source` and a code `host` (see [Bring your own tools](#bring-your-own-tools)). One Ossicone project can fan out to several repos with a `repo:owner/name` label and an `allowedRepos` list.
 
 ## Security model
 
@@ -137,12 +159,14 @@ All of this was run for real, not just unit-tested:
 - Creating a brand-new GitHub repo from a template, building it from a one-paragraph spec, answering a review comment on it, and bouncing a vague ticket; all against real GitHub and re-verified independently (clone, run its tests).
 - The MCP server driven by the official MCP SDK client against the running app (handshake, tools, Code Mode execute, error handling).
 
+**Integrations, honestly:** GitHub (both roles) and Ossicone (identify, sign-up probe, listing 24 real projects) were run against the real services. Jira, Linear, GitLab and Bitbucket were built from their API documentation and tested against fakes that mirror those APIs, plus real calls confirming the endpoints are reached and bad credentials fail cleanly (GitLab and Linear 401, Jira site-unavailable; Bitbucket returned an inconclusive 503 for a made-up workspace). **I have not run a full ticket → PR cycle on a real Jira, Linear, GitLab or Bitbucket account**; please try one and open an issue if anything differs from the docs.
+
 **Not done yet:** a long unattended soak (days), non-Node repos end to end (detection exists; images/egress hosts are yours to set), GitLab/other forges, webhooks instead of polling, SQLite state (it is JSON files), multi-user auth for the UI.
 
 ## Development
 
 ```bash
-npm test                          # ~53 tests, no network needed
+npm test                          # ~72 tests, no network needed
 FACTORY_DOCKER_TESTS=1 npm test   # also runs the real Docker egress-proxy test
 ```
 
