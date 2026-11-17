@@ -168,3 +168,8 @@ pre.log-pre { margin: 0; background: #070708; color: #d9d6cd; padding: 16px 18px
 h2 .icon { display: none; } .stage-wrap { padding: 8px 4px 4px; }
 .line-head { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .tabs { scrollbar-width: none; } .tabs::-webkit-scrollbar { display: none; }
+
+/* persistent line: transitions instead of rebuilds */
+.l-parts .l-part-g { transition: transform .95s cubic-bezier(.45, 0, .2, 1), opacity .6s ease; } .l-part-g .bob { animation: bob 1.5s ease-in-out infinite; } .l-part-g .l-part { fill: var(--orange); }
+.l-slot { opacity: 0; transition: opacity .5s ease; } .l-slot.show { opacity: 1; } .svg-hide { display: none; } .l-flash { animation: flash .8s ease; } @keyframes flash { 0% { opacity: .15; } 100% { opacity: 1; } }
+.l-station .l-lamp, .l-station .l-gantry, .l-station .l-name { transition: fill .3s, stroke .3s; }

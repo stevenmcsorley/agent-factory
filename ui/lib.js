@@ -65,3 +65,10 @@ export const OUTCOME = {
 export const pill = (status) => { const [c, t] = OUTCOME[status] ?? ['', status]; return h('span', { class: `stamp ${c}` }, h('i', { class: 'dot' }), t); };
 export const STAGES = [['claim', 'Claim'], ['sandbox', 'Sandbox'], ['agent', 'Agent'], ['verify', 'Verify'], ['push', 'Push'], ['pr', 'Ship']];
 export const STATES = { ready: ['info', 'Queued'], working: ['live', 'Working'], review: ['ok', 'In review'], failed: ['bad', 'Failed'], 'needs-info': ['warn', 'Needs info'], 'needs-human': ['bad', 'Needs a human'], other: ['', 'Other'] };
+
+// ---- render continuity: entrance animations and number roll-ups play on NAVIGATION only, never on a background refresh.
+export const anim = { on: true };
+// Mark a top-level section so the router can keep it untouched when its signature has not changed.
+export const keyed = (node, key, sig) => { node.dataset.key = key; if (sig !== undefined) node.dataset.sig = typeof sig === 'string' ? sig : JSON.stringify(sig); return node; };
+// A section that lives for the whole page visit and is updated in place (so CSS animations and transitions are never restarted).
+export const persist = (key, state, create) => { const n = document.createElement('div'); n.dataset.key = key; n.__persist = { state, create }; return n; };

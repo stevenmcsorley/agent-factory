@@ -130,3 +130,18 @@ test('queue-count cache is dropped when a run starts or ends so the dashboard ne
   e._event({ type: 'start', run: 'abc12345', project: 'one', at: new Date().toISOString() }); assert.equal(e.cache.size, 0);
   await e.listTickets('one'); e._event({ type: 'end', run: 'abc12345', at: new Date().toISOString() }); assert.equal(e.cache.size, 0);
 });
+
+test('overlay: the line\'s own knowledge beats a lagging tracker (no hopper flicker)', async () => {
+  const { e } = engine();
+  const stale = [{ id: 1, title: 'a', labels: ['agent-ready'] }, { id: 2, title: 'b', labels: ['agent-ready'] }, { id: 3, title: 'c', labels: ['agent-working'] }, { id: 4, title: 'd', labels: ['agent-review'] }];
+  const labels = (r) => r.map((t) => t.labels.filter((l) => l.startsWith('agent-'))[0]);
+  assert.deepEqual(labels(e.overlay('one', stale)), ['agent-ready', 'agent-ready', 'agent-working', 'agent-review']); // nothing known: unchanged
+  e._event({ type: 'start', run: 'r1', project: 'one', ticket: 1, at: new Date().toISOString() });                        // ticket 1 is on the line; tracker still says ready
+  assert.deepEqual(labels(e.overlay('one', stale)), ['agent-working', 'agent-ready', 'agent-working', 'agent-review']);
+  assert.deepEqual(labels(e.overlay('two', stale)), ['agent-ready', 'agent-ready', 'agent-working', 'agent-review']);       // other projects unaffected
+  e._event({ type: 'end', run: 'r1', status: 'ok', at: new Date().toISOString() });                                          // finished OK; tracker still stale
+  assert.equal(labels(e.overlay('one', stale))[0], 'agent-review');
+  e._event({ type: 'start', run: 'r2', project: 'one', ticket: 2, at: new Date().toISOString() }); e._event({ type: 'end', run: 'r2', status: 'verify-failed', at: new Date().toISOString() });
+  assert.equal(labels(e.overlay('one', stale))[1], 'agent-failed');
+  e.outcomes.set('one#1', { status: 'ok', at: Date.now() - 60000 }); assert.equal(labels(e.overlay('one', stale))[0], 'agent-ready'); // old outcomes expire: the tracker is trusted again
+});

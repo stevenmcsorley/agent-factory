@@ -1,4 +1,4 @@
-import { h, icon, s, api, session, saveToken, clearToken, toast, dur } from './lib.js';
+import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim } from './lib.js';
 import { overview, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 
 const $app = document.getElementById('app');
@@ -39,18 +39,42 @@ function drawHeader(nav) {
   document.title = st?.active ? `(${st.active}) Agent Factory` : 'Agent Factory';
 }
 
+// Reconcile instead of rebuild: sections keep their DOM (and any running CSS animation) unless their own data changed.
+function mount(nodes, navigated) {
+  const list = nodes.flat(Infinity).filter(Boolean);
+  const existing = new Map(); if (!navigated) for (const n of main.children) if (n.dataset.key) existing.set(n.dataset.key, n);
+  const next = list.map((n) => {
+    const key = n.dataset?.key; const ex = key ? existing.get(key) : null;
+    if (n.__persist) { if (ex?.__update) { ex.__update(n.__persist.state); return ex; } const real = n.__persist.create(n.__persist.state); real.dataset.key = key; return real; }
+    if (ex && n.dataset.sig !== undefined && ex.dataset.sig === n.dataset.sig) return ex; // unchanged: leave the live node alone
+    return n;
+  });
+  // Swap changed sections IN PLACE and never move unchanged ones: moving a node detaches it, which resets hover state and CSS animations.
+  const keep = new Set(next);
+  for (let i = 0; i < next.length; i++) {
+    const n = next[i]; const cur = main.children[i];
+    if (cur === n) continue;
+    if (!cur) main.append(n); else if (!keep.has(cur)) cur.replaceWith(n); else main.insertBefore(n, cur);
+  }
+  while (main.children.length > next.length) main.lastChild.remove();
+}
+
+let lastRoute = null, enterTimer = null;
 async function refresh(force = false) {
   if (!session.token) return login();
   const r = match(); view = r.v;
   try {
     const [data, st, act2] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] }))]);
-    status = st; if (!header) { shell(); } drawHeader(r.nav); drawTicker(act2.events, st);
-    const key = r.v === overview || true ? JSON.stringify([location.hash, data]) : '';
+    status = st; if (!header) { shell(); lastRoute = null; } drawHeader(r.nav); drawTicker(act2.events, st);
+    const key = JSON.stringify([location.hash, data]);
     if (!force && key === lastKey) return;
     if (!force && typing()) return;
     lastKey = key;
+    const navigated = location.hash !== lastRoute; lastRoute = location.hash;
+    anim.on = navigated; // entrance + roll-up animations play on arrival only
     const ctx = { rerender: () => refresh(true) };
-    main.replaceChildren(...r.v.draw(data, ctx).flat(Infinity).filter(Boolean)); main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter');
+    mount(r.v.draw(data, ctx), navigated);
+    if (navigated) { main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter'); clearTimeout(enterTimer); enterTimer = setTimeout(() => main.classList.remove('enter'), 1000); } // arrival animation only: expire it so sections inserted later by a refresh never replay it
   } catch (e) { if (e.auth) return login(e.message); if (!header) shell(); main.replaceChildren(h('div', { class: 'callout bad' }, icon('alert', 16), e.message)); }
 }
 function shell() { header = h('header', {}); ticker = h('div', { class: 'ticker static', 'aria-label': 'Live activity' }); main = h('main', { id: 'main' }); $app.replaceChildren(header, ticker, main); tickerKey = ''; }

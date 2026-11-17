@@ -1,4 +1,4 @@
-import { s, h } from './lib.js';
+import { s, h, anim } from './lib.js';
 
 // Dependency-free SVG/DOM visuals. Colours come from CSS classes so both themes work. No inline style attributes (strict CSP):
 // geometry goes in SVG attributes, animation timing through the CSSOM.
@@ -8,41 +8,57 @@ export function odometer(value, pad = 2) {
   const str = String(Math.max(0, Math.round(value ?? 0))).padStart(pad, '0');
   const cols = [...str].map((d) => { const strip = h('span', { class: 'odo-strip' }, [...'0123456789'].map((x) => h('i', {}, x))); strip.dataset.d = d; return h('span', { class: 'odo-col' }, strip); });
   const el = h('span', { class: 'odo', 'aria-label': String(value) }, cols);
-  requestAnimationFrame(() => requestAnimationFrame(() => cols.forEach((c, i) => { c.firstChild.style.transitionDelay = `${i * 70}ms`; c.firstChild.style.transform = `translateY(${-Number(c.firstChild.dataset.d) * 10}%)`; })));
+  const set = () => cols.forEach((c, i) => { c.firstChild.style.transitionDelay = `${i * 70}ms`; c.firstChild.style.transform = `translateY(${-Number(c.firstChild.dataset.d) * 10}%)`; });
+  if (anim.on) requestAnimationFrame(() => requestAnimationFrame(set)); // roll up from 0 only when arriving on the page
+  else { cols.forEach((c) => { c.firstChild.style.transition = 'none'; }); set(); } // background refresh: show the value, no replay
   return el;
 }
 
-// The assembly line: HOPPER (queued tickets) → six stations on a belt → SHIPPED chute. Active runs sit at their current station.
+// The assembly line. Built ONCE and updated in place: tickets slide from the hopper to their station and on to the chute, the belt keeps
+// running, and nothing is torn down between refreshes (rebuilding the SVG every few seconds is what made it jitter and "bounce").
 const TICKET = 'M0 0H46V9a4.5 4.5 0 000 9V30H0V18a4.5 4.5 0 000-9Z';
-export function line({ queued = 0, shipped = 0, active = [], paused = false, stages }) {
-  const W = 1200, H = 262, BY = 168, X0 = 250, DX = 138;
-  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: `line-svg ${active.length && !paused ? 'running' : ''}`, role: 'img', 'aria-label': `Assembly line: ${queued} queued, ${active.length} in progress, ${shipped} shipped today` });
-  svg.append(s('defs', {}, s('pattern', { id: 'haz', width: 18, height: 18, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(-45)' }, s('rect', { width: 9, height: 18, fill: 'currentColor', class: 'haz-a' }))));
+export function createLine(stages) {
+  const W = 1200, H = 262, BY = 168, X0 = 250, DX = 138, HOP = 85, CHUTE = 1121;
+  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'line-svg', role: 'img' });
+  svg.append(s('defs', {}, s('pattern', { id: 'haz', width: 18, height: 18, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(-45)' }, s('rect', { width: 9, height: 18, class: 'haz-a' }))));
   for (let x = 0; x <= W; x += 60) svg.append(s('line', { x1: x, y1: 0, x2: x, y2: H, class: 'l-grid' }));
-  // belt
   svg.append(s('rect', { x: 150, y: BY - 12, width: 910, height: 24, class: 'l-belt-bed' }), s('line', { x1: 150, y1: BY, x2: 1060, y2: BY, class: 'l-belt' }));
-  // hopper
-  const bin = s('g', {}, s('path', { d: 'M24 56H146L120 148H50Z', class: 'l-bin' }));
-  for (let i = 0; i < Math.min(queued, 5); i++) bin.append(s('path', { d: TICKET, transform: `translate(${50 + i * 6} ${64 + i * 13}) scale(.9)`, class: `l-ticket ${i === 0 ? 'on' : ''}` }));
-  svg.append(bin, s('text', { x: 85, y: 36, class: 'l-label' }, 'Hopper'), s('text', { x: 85, y: 200, class: 'l-big' }, String(queued)), s('text', { x: 85, y: 222, class: 'l-label' }, queued === 1 ? 'ticket waiting' : 'tickets waiting'));
-  // stations
-  stages.forEach(([key, name], i) => {
-    const x = X0 + i * DX; const here = active.filter((a) => a.phase === key);
-    const g = s('g', { class: `l-station ${here.length ? 'on' : ''}`, transform: `translate(${x} 0)` },
-      s('path', { d: `M-38 ${BY + 14} V74 H38 V${BY + 14}`, class: 'l-gantry' }), s('circle', { cx: 0, cy: 92, r: 8, class: 'l-lamp' }), s('text', { x: 0, y: 58, class: 'l-code', 'text-anchor': 'middle' }, `0${i + 1}`), s('text', { x: 0, y: BY + 40, class: 'l-name' }, name));
-    here.forEach((a, k) => {
-      const part = s('g', { class: 'l-part-wrap', transform: `translate(${-23 + (k % 2) * 8} ${BY - 40 - k * 34})` }, s('path', { d: TICKET, class: 'l-part' }), s('line', { x1: 9, y1: 11, x2: 37, y2: 11, class: 'l-part-line' }), s('line', { x1: 9, y1: 19, x2: 29, y2: 19, class: 'l-part-line' }), s('title', {}, a.title ?? ''));
-      part.style.animationDelay = `${k * 0.3}s`; g.append(part);
-    });
-    if (here[0]) g.append(s('text', { x: 0, y: 28, class: 'l-title' }, (here[0].title ?? '').length > 24 ? `${(here[0].title ?? '').slice(0, 23)}…` : (here[0].title ?? '')));
-    svg.append(g);
-  });
-  // shipped chute
-  const out = s('g', {}, s('rect', { x: 1066, y: 56, width: 110, height: 92, class: 'l-bin' }));
-  for (let i = 0; i < Math.min(shipped, 4); i++) out.append(s('path', { d: TICKET, transform: `translate(${1086 + i * 5} ${64 + i * 17}) scale(.82)`, class: 'l-ticket l-ship' }));
-  svg.append(out, s('text', { x: 1121, y: 36, class: 'l-label' }, 'Shipped'), s('text', { x: 1121, y: 200, class: 'l-big l-ship-big' }, String(shipped)), s('text', { x: 1121, y: 222, class: 'l-label' }, 'PRs today'));
-  if (paused) svg.append(s('rect', { x: 150, y: BY - 12, width: 910, height: 24, class: 'l-warn' }), s('text', { x: 605, y: 48, class: 'l-paused' }, 'LINE PAUSED'));
-  return svg;
+  // hopper (queued) and chute (shipped): fixed slots whose visibility changes
+  svg.append(s('path', { d: 'M24 56H146L120 148H50Z', class: 'l-bin' }), s('rect', { x: 1066, y: 56, width: 110, height: 92, class: 'l-bin' }));
+  const hop = Array.from({ length: 5 }, (_, i) => s('path', { d: TICKET, transform: `translate(${50 + i * 6} ${64 + i * 13}) scale(.9)`, class: `l-ticket l-slot ${i === 0 ? 'on' : ''}` }));
+  const ship = Array.from({ length: 4 }, (_, i) => s('path', { d: TICKET, transform: `translate(${1086 + i * 5} ${64 + i * 17}) scale(.82)`, class: 'l-ticket l-ship l-slot' }));
+  svg.append(...hop, ...ship);
+  const qText = s('text', { x: HOP, y: 200, class: 'l-big' }, '0'), qLabel = s('text', { x: HOP, y: 222, class: 'l-label' }, 'tickets waiting');
+  const sText = s('text', { x: CHUTE, y: 200, class: 'l-big l-ship-big' }, '0');
+  svg.append(s('text', { x: HOP, y: 36, class: 'l-label' }, 'Hopper'), qText, qLabel, s('text', { x: CHUTE, y: 36, class: 'l-label' }, 'Shipped'), sText, s('text', { x: CHUTE, y: 222, class: 'l-label' }, 'PRs today'));
+  const stationEls = stages.map(([, name], i) => { const g = s('g', { class: 'l-station', transform: `translate(${X0 + i * DX} 0)` }, s('path', { d: `M-38 ${BY + 14} V74 H38 V${BY + 14}`, class: 'l-gantry' }), s('circle', { cx: 0, cy: 92, r: 8, class: 'l-lamp' }), s('text', { x: 0, y: 58, class: 'l-code', 'text-anchor': 'middle' }, `0${i + 1}`), s('text', { x: 0, y: BY + 40, class: 'l-name' }, name)); svg.append(g); return g; });
+  const layer = s('g', { class: 'l-parts' }); svg.append(layer);
+  const pausedG = s('g', { class: 'svg-hide' }, s('rect', { x: 150, y: BY - 12, width: 910, height: 24, class: 'l-warn' }), s('text', { x: 605, y: 48, class: 'l-paused' }, 'LINE PAUSED')); svg.append(pausedG);
+
+  const parts = new Map(); let ready = false; const last = { q: null, s: null };
+  const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
+  const setCount = (el, key, v) => { if (last[key] === v) return; el.textContent = String(v); if (last[key] !== null) { el.classList.remove('l-flash'); void el.getBoundingClientRect(); el.classList.add('l-flash'); } last[key] = v; };
+  const makePart = (a) => { const g = s('g', { class: 'l-part-g' }, s('g', { class: 'bob' }, s('path', { d: TICKET, class: 'l-part', transform: 'translate(-23 0)' }), s('line', { x1: -14, y1: 11, x2: 14, y2: 11, class: 'l-part-line' }), s('line', { x1: -14, y1: 19, x2: 6, y2: 19, class: 'l-part-line' })), s('text', { x: 0, y: -9, class: 'l-title' })); layer.append(g); return { g, label: g.lastChild }; };
+
+  function update({ queued = 0, shipped = 0, active = [], paused = false }) {
+    svg.classList.toggle('running', active.length > 0 && !paused);
+    svg.setAttribute('aria-label', `Assembly line: ${queued} queued, ${active.length} in progress, ${shipped} shipped today`);
+    hop.forEach((e, i) => e.classList.toggle('show', i < Math.min(queued, 5))); ship.forEach((e, i) => e.classList.toggle('show', i < Math.min(shipped, 4)));
+    setCount(qText, 'q', queued); setCount(sText, 's', shipped); qLabel.textContent = queued === 1 ? 'ticket waiting' : 'tickets waiting';
+    pausedG.classList.toggle('svg-hide', !paused);
+    const per = {}; const seen = new Set(); const lit = new Set();
+    for (const a of active) {
+      seen.add(a.run); const si = Math.max(0, stages.findIndex(([k]) => k === a.phase)); lit.add(si); const k = (per[si] = (per[si] ?? -1) + 1);
+      const x = X0 + si * DX, y = BY - 46 - k * 38; let p = parts.get(a.run);
+      if (!p) { p = makePart(a); parts.set(a.run, p); p.g.style.transition = 'none'; place(p.g, ready ? HOP : x, ready ? 96 : y); void p.g.getBoundingClientRect(); p.g.style.transition = ''; } // new job: appears IN the hopper, then slides out
+      const t = a.title ?? ''; const short = t.length > 22 ? `${t.slice(0, 21)}…` : t; if (p.label.textContent !== short) p.label.textContent = short;
+      place(p.g, x, y);
+    }
+    for (const [id, p] of parts) if (!seen.has(id)) { parts.delete(id); place(p.g, CHUTE, 100); p.g.style.opacity = '0'; setTimeout(() => p.g.remove(), 1200); } // finished: rides into the shipped chute
+    stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(i)));
+    ready = true;
+  }
+  return { svg, update };
 }
 
 // 14-bar mini history for a project cell.

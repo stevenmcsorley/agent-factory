@@ -19,7 +19,7 @@ const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
-    this.events = []; this.active = new Map();
+    this.events = []; this.active = new Map(); this.outcomes = new Map();
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -76,7 +76,7 @@ export class Engine {
     if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [] });
     const a = this.active.get(e.run);
     if (e.type === 'phase' && a) { a.phase = e.phase; a.detail = e.detail; a.phaseStarted = e.at; a.phases.push({ name: e.phase, at: e.at }); }
-    if (e.type === 'end') this.active.delete(e.run);
+    if (e.type === 'end') { const a2 = this.active.get(e.run); this.active.delete(e.run); if (a2?.ticket != null) this.outcomes.set(`${a2.project}#${a2.ticket}`, { status: e.status, at: Date.now() }); }
   }
   activity() { return { active: [...this.active.values()], events: this.events.slice(-80).reverse() }; }
   getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); return r; }
@@ -124,6 +124,19 @@ export class Engine {
       projects: Object.values(per) };
   }
   async _cached(key, ttl, fn) { const c = this.cache.get(key); if (c && Date.now() - c.at < ttl) return c.v; const v = await fn(); this.cache.set(key, { at: Date.now(), v }); return v; }
+  // Trackers lag after a write (GitHub's lists by ~6s), so for a short while the label they report can be one step behind what the line
+  // itself knows. Overlay the factory's own live knowledge so the hopper/board never flicker back to a stale state.
+  overlay(projectId, tickets) {
+    const live = new Set([...this.active.values()].filter((a) => a.project === projectId).map((a) => String(a.ticket)));
+    return tickets.map((t) => {
+      const swap = (to) => ({ ...t, labels: [...t.labels.filter((l) => !['agent-ready', 'agent-working', 'agent-review', 'agent-failed', 'agent-needs-info'].includes(l)), to] });
+      if (live.has(String(t.id))) return swap('agent-working');
+      const o = this.outcomes.get(`${projectId}#${t.id}`);
+      if (o && Date.now() - o.at < 30000 && ['agent-ready', 'agent-working'].some((l) => t.labels.includes(l))) return swap(o.status === 'ok' ? 'agent-review' : o.status === 'needs-info' ? 'agent-needs-info' : 'agent-failed');
+      return t;
+    });
+  }
+
   // One call for the dashboard: per-project queue by state, open PRs and metrics. A failing project never breaks the page.
   async overview() {
     const m = this.metrics();
@@ -133,7 +146,7 @@ export class Engine {
       return out;
     }));
   }
-  async listTickets(id) { const p = this.project(id); return this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets()); }
+  async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
   repoUrl(p) { const k = hostKind(p); return k === 'github' ? `https://github.com/${p.repo}` : k === 'gitlab' ? `${(p.host.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '')}/${p.repo}` : k === 'bitbucket' ? `https://bitbucket.org/${p.repo}` : null; }
   async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
   async createTicket(id, { title, body, repo }) {

@@ -1,5 +1,5 @@
-import { h, icon, api, toast, ago, dur, num, pct, ext, pill, STAGES, STATES, session } from './lib.js';
-import { line, odometer, miniBars, bars, barcode } from './charts.js';
+import { h, icon, api, toast, ago, dur, num, pct, ext, pill, STAGES, STATES, session, keyed, persist } from './lib.js';
+import { createLine, odometer, miniBars, bars, barcode } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
 export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };
@@ -34,6 +34,31 @@ function intake(projects, rerender) {
     h('div', { class: 'intake-foot' }, sel, hint, h('button', { class: 'btn primary', onclick: go }, 'Issue work order', icon('arrow', 14))));
 }
 
+// The line card lives for the whole page visit and is updated in place (see persist()).
+function lineCard(state0) {
+  const L = createLine(STAGES);
+  const stamp = h('span', { class: 'stamp' }); const follow = h('a', { class: 'btn small', href: '#/', hidden: true }, 'Follow', icon('arrow', 12));
+  const el = h('section', { class: 'card line-card reg' }, h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg));
+  el.__update = (st) => {
+    L.update(st);
+    stamp.className = `stamp ${st.active.length ? 'live' : st.paused ? 'warn' : ''}`;
+    stamp.replaceChildren(...(st.active.length ? [h('i', { class: 'dot' }), `${st.active.length} on the line`] : [st.paused ? 'paused' : st.nextIn != null ? `idle · next check in ${st.nextIn}s` : 'idle']));
+    follow.hidden = !st.active.length; if (st.active[0]) follow.href = `#/run/${st.active[0].run}`;
+  };
+  el.__update(state0); return el;
+}
+
+// Chart and log in one persistent grid: each half is swapped only when ITS data changed (a new log line must not rebuild the chart).
+function outputSection(st0) {
+  const chartSlot = h('div'), logSlot = h('div'); let cs = '', ls = ''; const el = h('div', { class: 'cols-2' }, chartSlot, logSlot);
+  el.__update = ({ days, events }) => {
+    const c = JSON.stringify(days); if (c !== cs) { cs = c; chartSlot.replaceChildren(card('', h('div', { class: 'card-h' }, h('h2', {}, 'Output · 14 days'), h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'sw ok' }), 'shipped'), h('span', {}, h('i', { class: 'sw bad' }), 'failed'), h('span', {}, h('i', { class: 'sw neu' }), 'needed info'))), bars(days))); }
+    const l = JSON.stringify(events); if (l !== ls) { ls = l; const old = logSlot.querySelector('.log'); const top = old ? old.scrollTop : 0;
+      logSlot.replaceChildren(card('', h('div', { class: 'card-h' }, h('h2', {}, 'Line log')), events.length ? h('div', { class: 'log' }, events.slice(0, 40).map(logRow)) : empty('Quiet', 'Events appear here as the factory works.'))); const nl = logSlot.querySelector('.log'); if (nl) nl.scrollTop = top; }
+  };
+  el.__update(st0); return el;
+}
+
 // ---- overview: the control room
 export const overview = {
   async load() { const [status, projects, metrics, activity, runs] = await Promise.all([api('/status'), api('/overview'), api('/metrics?days=14'), api('/activity'), api('/runs?limit=7')]); return { status, projects, metrics, activity, runs }; },
@@ -43,24 +68,21 @@ export const overview = {
     const t = metrics.totals, shipped = metrics.days.at(-1)?.ok ?? 0; const cap = st.today.maxRuns; const left = cap ? Math.max(0, cap - st.today.runs) : null;
     const ticks = cap ? Math.min(cap, 24) : 0, usedTicks = cap ? Math.round((st.today.runs / cap) * ticks) : 0;
     const nextIn = st.nextAt ? Math.max(0, Math.round((new Date(st.nextAt) - Date.now()) / 1000)) : null;
+    const stable = (node, key, sig) => keyed(node, key, sig);
     return [
-      intake(projects, ctx.rerender),
-      h('section', { class: 'card line-card reg' },
-        h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, activity.active.length ? h('span', { class: 'stamp live' }, h('i', { class: 'dot' }), `${activity.active.length} on the line`) : st.paused ? h('span', { class: 'stamp warn' }, 'paused') : h('span', { class: 'stamp' }, nextIn != null ? `idle · next check in ${nextIn}s` : 'idle'),
-          activity.active[0] ? h('a', { class: 'btn small', href: `#/run/${activity.active[0].run}` }, 'Follow', icon('arrow', 12)) : null)),
-        h('div', { class: 'stage-wrap' }, line({ queued, shipped, active: activity.active, paused: st.paused, stages: STAGES }))),
-      h('section', { class: 'spec' },
+      stable(intake(projects, ctx.rerender), 'intake', projects.map((p) => p.id)),
+      persist('line', { queued, shipped, active: activity.active, paused: st.paused, nextIn }, lineCard),
+      stable(h('section', { class: 'spec' },
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Median time to PR'), h('div', { class: 'num' }, t.runs ? dur(t.p50Ms) : '–'), h('div', { class: 'foot' }, t.runs ? `mean ${dur(t.avgMs)}` : 'no runs yet')),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck')),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Capacity today'), h('div', { class: 'num' }, left == null ? '∞' : odometer(left, 1), left == null ? null : h('small', {}, `of ${cap}`)), cap ? h('div', { class: 'cap' }, Array.from({ length: ticks }, (_, i) => h('i', { class: i < usedTicks ? 'on' : '' }))) : null, h('div', { class: 'foot' }, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
-      h('div', { class: 'page-head slim' }, h('h2', {}, 'Cells'), h('a', { class: 'btn small', href: '#/new' }, icon('plus', 12), 'Add project')),
-      projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', 'Connect a repository and a ticket tracker to start the line.', h('a', { class: 'btn primary', href: '#/new' }, 'Add a project'))),
-      h('div', { class: 'cols-2' },
-        card('', h('div', { class: 'card-h' }, h('h2', {}, 'Output · 14 days'), h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'sw ok' }), 'shipped'), h('span', {}, h('i', { class: 'sw bad' }), 'failed'), h('span', {}, h('i', { class: 'sw neu' }), 'needed info'))), bars(metrics.days)),
-        card('', h('div', { class: 'card-h' }, h('h2', {}, 'Line log')), activity.events.length ? h('div', { class: 'log' }, activity.events.slice(0, 40).map(logRow)) : empty('Quiet', 'Events appear here as the factory works.'))),
-      card('', h('div', { class: 'card-h' }, h('h2', {}, 'Recent work orders'), h('a', { href: '#/runs', class: 'small' }, 'All work orders →')), workOrders(runs))];
+        'spec', [shipped, t, left, inReview, attention, st.today.costUsd]),
+      stable(h('div', { class: 'page-head slim' }, h('h2', {}, 'Cells'), h('a', { class: 'btn small', href: '#/new' }, icon('plus', 12), 'Add project')), 'cellshead', 'x'),
+      stable(projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', 'Connect a repository and a ticket tracker to start the line.', h('a', { class: 'btn primary', href: '#/new' }, 'Add a project'))), 'cells', projects),
+      persist('cols', { days: metrics.days, events: activity.events }, outputSection),
+      stable(card('', h('div', { class: 'card-h' }, h('h2', {}, 'Recent work orders'), h('a', { href: '#/runs', class: 'small' }, 'All work orders →')), workOrders(runs)), 'orders', runs)];
   },
 };
 
