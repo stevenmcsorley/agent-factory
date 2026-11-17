@@ -1,162 +1,175 @@
 import { h, icon, api, toast, ago, dur, num, pct, ext, pill, STAGES, STATES, session } from './lib.js';
-import { ring, spark, bars, timeline } from './charts.js';
+import { line, odometer, miniBars, bars, barcode } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
 export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };
 const since = (iso) => h('span', { class: 'since', 'data-since': iso }, dur(Date.now() - new Date(iso)));
-const empty = (title, body, action) => h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon('spark', 28)), h('b', {}, title), body ? h('p', {}, body) : null, action);
+const empty = (title, body, action) => h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon('spark', 24)), h('b', {}, title), body ? h('p', {}, body) : null, action);
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
 const head = (title, sub, ...actions) => h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, title), sub ? h('p', { class: 'sub' }, sub) : null), h('div', { class: 'row' }, actions));
 const ATTENTION = ['failed', 'needs-info', 'needs-human'];
-
 const HOST_LABEL = { github: 'GitHub', gitlab: 'GitLab', bitbucket: 'Bitbucket', git: 'git' }; const SRC_LABEL = { github: 'GitHub Issues', ossicone: 'Ossicone', jira: 'Jira', linear: 'Linear', file: 'file' };
-// ---- live pipeline: claim → sandbox → agent → verify → push → PR
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour12: false });
+const woId = (id) => `WO-${String(id).toUpperCase()}`;
+
+// ---- live pipeline (used on a run page while the run is in flight)
 export function pipeline(run, { active = false } = {}) {
   const order = STAGES.map(([k]) => k); const reached = run.phases.map((p) => p.name);
   const cur = active ? run.phase : reached.at(-1); const ci = order.indexOf(cur);
-  const failed = !active && run.status && !['ok', 'running'].includes(run.status);
-  return h('ol', { class: 'pipe' }, STAGES.map(([k, label], i) => {
-    const seen = reached.includes(k); const ms = run.phases.find((p) => p.name === k)?.ms;
-    const state = active ? (i < ci ? 'done' : i === ci ? 'active' : 'todo') : (failed && k === cur ? 'bad' : seen ? 'done' : 'todo');
-    return h('li', { class: `stage ${state}` }, h('span', { class: 'node' }, state === 'done' ? icon('check', 13) : state === 'bad' ? icon('x', 13) : i + 1), h('span', { class: 'lbl' }, label), ms != null && !active ? h('small', {}, dur(ms)) : null);
-  }));
+  return h('ol', { class: 'pipe' }, STAGES.map(([k, label], i) => { const state = active ? (i < ci ? 'done' : i === ci ? 'active' : 'todo') : (reached.includes(k) ? 'done' : 'todo');
+    return h('li', { class: `stage ${state}` }, h('span', { class: 'node' }, state === 'done' ? icon('check', 13) : i + 1), h('span', { class: 'lbl' }, label)); }));
 }
 
-// ---- prompt bar: the "tell the factory what to do" box
-function promptBar(projects, rerender) {
-  const sel = h('select', { 'aria-label': 'Project' }, projects.map((p) => h('option', { value: p.id }, p.id)), h('option', { value: '__new' }, '+ New project…'));
-  const title = h('input', { placeholder: 'What should the factory build or fix? e.g. “Add rate limiting to the login endpoint”', maxlength: 200, 'aria-label': 'Ticket title' });
-  const body = h('textarea', { rows: 3, placeholder: 'Details: which files or functions, expected behaviour, and how we will know it is done.', 'aria-label': 'Ticket details', hidden: true });
+// ---- intake: "tell the factory what to do"
+function intake(projects, rerender) {
+  const sel = h('select', { 'aria-label': 'Project' }, projects.map((p) => h('option', { value: p.id }, p.id)), h('option', { value: '__new' }, '+ new project…'));
+  const title = h('input', { placeholder: 'What should the factory build or fix?', maxlength: 200, 'aria-label': 'Ticket title', autocomplete: 'off' });
+  const body = h('textarea', { rows: 3, placeholder: 'Which files or functions, the expected behaviour, and how we will know it is done.', 'aria-label': 'Ticket details', hidden: true });
   const hint = h('div', { class: 'hint' }); let t;
   const check = () => { clearTimeout(t); t = setTimeout(async () => { if (!title.value && !body.value) return hint.replaceChildren(); try { const r = await api('/check-ticket', { method: 'POST', body: { title: title.value, body: body.value } });
     hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' Add detail: ', r.problems.join('; '))); } catch { /* ignore */ } }, 300); };
   title.addEventListener('focus', () => { body.hidden = false; }); title.addEventListener('input', check); body.addEventListener('input', check);
-  const go = act(async () => { if (sel.value === '__new') { location.hash = '#/new'; return; } await api(`/projects/${sel.value}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; hint.replaceChildren(); },
-    'Queued. The factory picks it up on its next cycle.', rerender);
-  return h('section', { class: 'prompt card' }, h('div', { class: 'prompt-top' }, icon('spark', 18), h('b', {}, 'Tell the factory what to do'), h('span', { class: 'kbd-hint' }, 'or press ', h('kbd', {}, 'Ctrl'), ' ', h('kbd', {}, 'K'))),
-    h('div', { class: 'prompt-row' }, title), body, h('div', { class: 'prompt-foot' }, sel, hint, h('button', { class: 'btn primary', onclick: go }, 'Queue it', icon('arrow', 15))));
+  const go = act(async () => { if (sel.value === '__new') { location.hash = '#/new'; return; } await api(`/projects/${sel.value}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; hint.replaceChildren(); }, 'Work order issued. The factory picks it up on its next cycle.', rerender);
+  return h('section', { class: 'card intake reg' }, h('div', { class: 'eyebrow' }, icon('spark', 13), 'Work order intake', h('span', { class: 'kbd-hint' }, 'CTRL+K for commands')), h('span', { class: 'caret' }, '›'), title, body,
+    h('div', { class: 'intake-foot' }, sel, hint, h('button', { class: 'btn primary', onclick: go }, 'Issue work order', icon('arrow', 14))));
 }
 
-// ---- overview
+// ---- overview: the control room
 export const overview = {
-  async load() { const [status, projects, metrics, activity, runs] = await Promise.all([api('/status'), api('/overview'), api('/metrics?days=14'), api('/activity'), api('/runs?limit=8')]); return { status, projects, metrics, activity, runs }; },
+  async load() { const [status, projects, metrics, activity, runs] = await Promise.all([api('/status'), api('/overview'), api('/metrics?days=14'), api('/activity'), api('/runs?limit=7')]); return { status, projects, metrics, activity, runs }; },
   draw({ status: st, projects, metrics, activity, runs }, ctx) {
-    const attention = projects.reduce((n, p) => n + ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0), 0), inReview = projects.reduce((n, p) => n + (p.queue.review ?? 0), 0);
-    const t = metrics.totals; const nextIn = st.nextAt ? Math.max(0, Math.round((new Date(st.nextAt) - Date.now()) / 1000)) : null;
+    const queued = projects.reduce((n, p) => n + (p.queue.ready ?? 0), 0), inReview = projects.reduce((n, p) => n + (p.queue.review ?? 0), 0);
+    const attention = projects.reduce((n, p) => n + ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0), 0);
+    const t = metrics.totals, shipped = metrics.days.at(-1)?.ok ?? 0; const cap = st.today.maxRuns; const left = cap ? Math.max(0, cap - st.today.runs) : null;
+    const ticks = cap ? Math.min(cap, 24) : 0, usedTicks = cap ? Math.round((st.today.runs / cap) * ticks) : 0;
+    const nextIn = st.nextAt ? Math.max(0, Math.round((new Date(st.nextAt) - Date.now()) / 1000)) : null;
     return [
-      promptBar(projects, ctx.rerender),
-      h('div', { class: 'kpis' },
-        card('kpi', ring(st.today.runs, st.today.maxRuns ?? Math.max(5, st.today.runs), { label: String(st.today.runs), sub: st.today.maxRuns ? `of ${st.today.maxRuns}` : 'today' }), h('div', {}, h('small', {}, 'Agent runs today'), h('b', {}, st.today.maxRuns ? `${st.today.maxRuns - st.today.runs} left` : 'no cap'), h('em', {}, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
-        card('kpi', ring(t.successRate ?? 0, 1, { label: pct(t.successRate), tone: t.successRate == null ? 'muted' : t.successRate > 0.7 ? 'ok' : t.successRate > 0.4 ? 'warn' : 'bad' }), h('div', {}, h('small', {}, 'Success rate · 14 days'), h('b', {}, `${t.ok} of ${t.runs} runs`), h('em', {}, t.failed ? `${t.failed} failed` : 'no failures'))),
-        card('kpi', h('div', { class: 'kpi-ico' }, icon('clock', 22)), h('div', {}, h('small', {}, 'Time to pull request'), h('b', {}, t.runs ? dur(t.p50Ms) : '–'), h('em', {}, t.runs ? `median · mean ${dur(t.avgMs)}` : 'no runs yet'))),
-        card('kpi', h('div', { class: `kpi-ico ${attention ? 'warn' : ''}` }, icon(attention ? 'alert' : 'pr', 22)), h('div', {}, h('small', {}, 'Waiting on you'), h('b', {}, `${inReview} to review`), h('em', {}, attention ? `${attention} need attention` : 'nothing stuck')))),
+      intake(projects, ctx.rerender),
+      h('section', { class: 'card line-card reg' },
+        h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, activity.active.length ? h('span', { class: 'stamp live' }, h('i', { class: 'dot' }), `${activity.active.length} on the line`) : st.paused ? h('span', { class: 'stamp warn' }, 'paused') : h('span', { class: 'stamp' }, nextIn != null ? `idle · next check in ${nextIn}s` : 'idle'),
+          activity.active[0] ? h('a', { class: 'btn small', href: `#/run/${activity.active[0].run}` }, 'Follow', icon('arrow', 12)) : null)),
+        h('div', { class: 'stage-wrap' }, line({ queued, shipped, active: activity.active, paused: st.paused, stages: STAGES }))),
+      h('section', { class: 'spec' },
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Median time to PR'), h('div', { class: 'num' }, t.runs ? dur(t.p50Ms) : '–'), h('div', { class: 'foot' }, t.runs ? `mean ${dur(t.avgMs)}` : 'no runs yet')),
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck')),
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Capacity today'), h('div', { class: 'num' }, left == null ? '∞' : odometer(left, 1), left == null ? null : h('small', {}, `of ${cap}`)), cap ? h('div', { class: 'cap' }, Array.from({ length: ticks }, (_, i) => h('i', { class: i < usedTicks ? 'on' : '' }))) : null, h('div', { class: 'foot' }, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
+      h('div', { class: 'page-head slim' }, h('h2', {}, 'Cells'), h('a', { class: 'btn small', href: '#/new' }, icon('plus', 12), 'Add project')),
+      projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', 'Connect a repository and a ticket tracker to start the line.', h('a', { class: 'btn primary', href: '#/new' }, 'Add a project'))),
       h('div', { class: 'cols-2' },
-        card('now', h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Right now'), activity.active.length ? h('span', { class: 'pill live' }, h('i', { class: 'dot' }), `${activity.active.length} running`) : h('span', { class: 'muted small' }, st.paused ? 'paused' : nextIn != null ? `next check in ${nextIn}s` : '')),
-          activity.active.length ? activity.active.map((r) => h('a', { class: 'live-run', href: `#/project/${r.project}` }, h('div', { class: 'row between' }, h('b', {}, r.title ?? `#${r.ticket}`), h('span', { class: 'muted small' }, r.project, ' · ', since(r.started))), pipeline({ phase: r.phase, phases: r.phases }, { active: true }), h('div', { class: 'muted small' }, r.phase === 'agent' ? 'The agent is working in its sandbox…' : r.phase === 'verify' ? 'Running your tests…' : `${r.phase}${r.detail ? ` · ${String(r.detail).slice(0, 60)}` : ''}`)))
-            : empty(st.paused ? 'Paused' : 'Idle', st.paused ? 'Resume to let the factory claim work.' : `Watching ${projects.length} project${projects.length === 1 ? '' : 's'} for tickets labelled agent-ready.`)),
-        card('chart-card', h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Last 14 days'), h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'sw ok' }), 'PR opened'), h('span', {}, h('i', { class: 'sw bad' }), 'failed'), h('span', {}, h('i', { class: 'sw neu' }), 'needed info'))), bars(metrics.days))),
-      h('div', { class: 'page-head slim' }, h('h2', {}, 'Projects'), h('a', { class: 'btn', href: '#/new' }, icon('plus', 14), 'Add project')),
-      projects.length ? h('div', { class: 'grid' }, projects.map((p) => projectCard(p))) : card('', empty('No projects yet', 'Add a repository, or have the factory create a new one.', h('a', { class: 'btn primary', href: '#/new' }, 'Add a project'))),
-      h('div', { class: 'cols-2' },
-        card('', h('div', { class: 'card-h' }, h('h2', {}, icon('bolt', 17), 'Activity')), activity.events.length ? h('ul', { class: 'feed' }, activity.events.slice(0, 12).map(feedItem)) : empty('Nothing yet', 'Events appear here as the factory works.')),
-        card('', h('div', { class: 'card-h' }, h('h2', {}, icon('git', 17), 'Recent runs'), h('a', { href: '#/runs', class: 'small' }, 'All runs')), runsList(runs)))];
+        card('', h('div', { class: 'card-h' }, h('h2', {}, 'Output · 14 days'), h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'sw ok' }), 'shipped'), h('span', {}, h('i', { class: 'sw bad' }), 'failed'), h('span', {}, h('i', { class: 'sw neu' }), 'needed info'))), bars(metrics.days)),
+        card('', h('div', { class: 'card-h' }, h('h2', {}, 'Line log')), activity.events.length ? h('div', { class: 'log' }, activity.events.slice(0, 40).map(logRow)) : empty('Quiet', 'Events appear here as the factory works.'))),
+      card('', h('div', { class: 'card-h' }, h('h2', {}, 'Recent work orders'), h('a', { href: '#/runs', class: 'small' }, 'All work orders →')), workOrders(runs))];
   },
 };
 
-function projectCard(p) {
-  const q = p.queue, attn = ATTENTION.reduce((a, k) => a + (q[k] ?? 0), 0), m = p.metrics;
-  return h('a', { class: `card pcard ${p.paused ? 'paused' : ''}`, href: `#/project/${p.id}` },
-    h('div', { class: 'row between' }, h('h3', {}, p.id), p.paused ? h('span', { class: 'pill warn' }, 'paused') : p.error ? h('span', { class: 'pill bad' }, 'error') : null),
-    h('div', { class: 'muted small mono' }, p.repo), h('div', { class: 'row tight' }, h('span', { class: 'badge' }, HOST_LABEL[p.host] ?? p.host), h('span', { class: 'badge' }, SRC_LABEL[p.source] ?? p.source)), m ? spark(m.spark) : h('div', { class: 'spark-empty' }, 'no runs yet'),
-    h('div', { class: 'chips' }, chip('Queued', q.ready ?? 0, 'info'), chip('Working', q.working ?? 0, 'live'), chip('Review', q.review ?? p.prs ?? 0, 'ok'), attn ? chip('Attention', attn, 'bad') : null),
-    p.error ? h('div', { class: 'small bad-t' }, p.error) : null);
-}
-const chip = (label, n, tone) => h('span', { class: `chip ${n ? tone : ''}` }, h('b', {}, n), label);
-
-const FEED = { start: ['info', 'play', 'Started'], end: ['', 'check', 'Finished'], phase: ['info', 'bolt', ''] };
-function feedItem(e) {
-  const [tone, ic] = FEED[e.type] ?? ['', 'pulse']; const bad = e.type === 'end' && e.status !== 'ok';
-  const text = e.type === 'phase' ? `${e.phase}${e.detail ? ` · ${String(e.detail).slice(0, 50)}` : ''}` : e.type === 'start' ? 'picked up' : `finished: ${e.status}`;
-  return h('li', { class: bad ? 'bad' : e.type === 'end' ? 'ok' : '' }, h('span', { class: `fi ${bad ? 'bad' : tone}` }, icon(bad ? 'x' : ic, 13)), h('div', {}, h('span', { class: 'ft' }, h('b', {}, e.title ? String(e.title).slice(0, 48) : `#${e.ticket ?? e.pr ?? ''}`), ' ', h('span', { class: 'muted' }, text)), h('small', {}, e.project, ' · ', ago(e.at))));
+function cell(p) {
+  const q = p.queue, attn = ATTENTION.reduce((a, k) => a + (q[k] ?? 0), 0); const state = p.paused ? 'off' : p.error || attn ? 'bad' : (q.working ?? 0) > 0 ? 'busy' : 'ok';
+  const tally = (label, n, cls) => h('div', { class: n ? cls : 'z' }, h('b', {}, String(n).padStart(2, '0')), h('small', {}, label));
+  return h('a', { class: `cell ${p.paused ? 'paused' : ''}`, href: `#/project/${p.id}` },
+    h('div', { class: 'cell-top' }, h('i', { class: `lamp ${state}` }), h('h3', {}, p.id), p.paused ? h('span', { class: 'stamp warn' }, 'paused') : null), h('span', { class: 'repo' }, p.repo),
+    h('div', { class: 'row' }, h('span', { class: 'tag' }, HOST_LABEL[p.host] ?? p.host), h('span', { class: 'tag' }, SRC_LABEL[p.source] ?? p.source)),
+    p.metrics ? miniBars(p.metrics.spark) : h('div', { class: 'small muted', style: { margin: '14px 0' } }, 'No runs yet'), p.error ? h('div', { class: 'small', style: { color: 'var(--red)' } }, p.error) : null,
+    h('div', { class: 'tally' }, tally('queued', q.ready ?? 0, 'hot'), tally('working', q.working ?? 0, 'hot'), tally('review', q.review ?? p.prs ?? 0, 'good'), tally('faults', attn, 'bad')));
 }
 
-function runsList(runs) {
-  if (!runs.length) return empty('No runs yet', 'Queue a ticket to see the first one.');
-  return h('ul', { class: 'runs' }, runs.map((r) => h('li', {}, h('a', { href: r.id ? `#/run/${r.id}` : '#/runs', class: 'run-row' }, pill(r.status), h('div', { class: 'grow' }, h('b', {}, r.title ?? (r.round ? `PR #${r.pr} feedback` : `Ticket #${r.ticket}`)), h('small', {}, r.project, ' · ', ago(r.finished ?? r.started))), h('span', { class: 'muted small' }, r.finished ? dur(new Date(r.finished) - new Date(r.started)) : '')))));
+function logRow(e) {
+  const bad = e.type === 'end' && e.status !== 'ok'; const kind = bad ? 'bad' : e.type === 'end' ? 'ok' : e.type;
+  const label = e.type === 'phase' ? e.phase : e.type === 'start' ? 'picked up' : e.status === 'ok' ? 'shipped' : e.status;
+  return h('div', { class: `log-row ${kind}` }, h('time', {}, clock(e.at)), h('span', { class: 'p' }, label), h('span', { class: 'm' }, (e.title ?? `#${e.ticket ?? e.pr ?? ''}`), h('small', {}, e.project ?? '')));
 }
 
-// ---- projects list
+function workOrders(runs) {
+  if (!runs.length) return empty('No work orders yet', 'Issue one above and it will appear here.');
+  return h('table', { class: 'wo' }, h('thead', {}, h('tr', {}, ['Order', 'Work', 'Result', 'Time', 'When'].map((x, i) => h('th', { class: i > 2 ? 'r' : '' }, x)))), h('tbody', {}, runs.map((r) => h('tr', {},
+    h('td', { class: 'id' }, r.id ? h('a', { href: `#/run/${r.id}`, style: { color: 'inherit' } }, woId(r.id)) : '—'), h('td', {}, h('a', { href: r.id ? `#/run/${r.id}` : '#/runs' }, r.title ?? (r.round ? `Feedback on PR #${r.pr}` : `Ticket #${r.ticket}`)), h('small', { style: { display: 'block' } }, r.project ?? '')),
+    h('td', {}, pill(r.status)), h('td', { class: 'r' }, r.finished ? dur(new Date(r.finished) - new Date(r.started)) : '–'), h('td', { class: 'r' }, ago(r.finished ?? r.started))))));
+}
+
+// ---- all projects
 export const projectsPage = {
   async load() { return { projects: await api('/overview') }; },
-  draw({ projects }) { return [head('Projects', 'Repositories the factory builds in.', h('a', { class: 'btn primary', href: '#/new' }, icon('plus', 14), 'Add project')),
-    projects.length ? h('div', { class: 'grid' }, projects.map(projectCard)) : card('', empty('No projects yet', null, h('a', { class: 'btn primary', href: '#/new' }, 'Add one')))]; },
+  draw({ projects }) { return [head('Cells', 'Each project is a work cell: a repository, a ticket source and its own queue.', h('a', { class: 'btn primary', href: '#/new' }, icon('plus', 13), 'Add project')),
+    projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', null, h('a', { class: 'btn primary', href: '#/new' }, 'Add one')))]; },
 };
 
 // ---- single project
 let projTab = 'board';
 export const project = {
-  async load(id) { const base = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const [ov, runs, metrics] = base; const p = ov.find((x) => x.id === id);
+  async load(id) { const [ov, runs, metrics] = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const p = ov.find((x) => x.id === id);
     const extra = {}; if (p) { if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
     return { id, p, runs, metrics, tab: projTab, ...extra }; },
   draw(d, ctx) {
-    const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to projects')))];
-    const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Runs'], ['new', 'New ticket'], ['log', 'Log']];
-    const body = d.tab === 'board' ? board(d.tickets, p) : d.tab === 'prs' ? prsList(d.prs, p) : d.tab === 'runs' ? card('', runsList(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : h('pre', { class: 'log' }, d.log.join('\n') || 'No log yet.');
-    return [head(id, null,
-      h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Project resumed' : 'Project paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 14), p.paused ? 'Resume' : 'Pause'),
-      h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove')),
-      h('div', { class: 'proj-meta' }, ext(p.repoUrl, [icon('git', 14), p.repo], 'repo-link'), h('span', { class: 'badge' }, HOST_LABEL[p.host] ?? p.host), h('span', { class: 'badge' }, `tickets: ${SRC_LABEL[p.source] ?? p.source}`), h('span', { class: 'muted' }, `base ${p.base}`), p.paused ? h('span', { class: 'pill warn' }, 'paused') : null,
-        m ? [h('span', { class: 'muted' }, `${m.ok}/${m.runs} runs succeeded`), m.avgMs ? h('span', { class: 'muted' }, `avg ${dur(m.avgMs)}`) : null, spark(m.spark, { w: 90, h: 24 })] : null),
+    const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
+    const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['new', 'New ticket'], ['log', 'Log']];
+    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
+    const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
+    return [h('a', { class: 'back', href: '#/projects' }, icon('arrow', 12, 'flip'), 'All cells'),
+      h('div', { class: 'page-head' }, h('div', {}, h('div', { class: 'row' }, h('i', { class: `lamp ${state}` }), h('h1', {}, id)),
+        h('div', { class: 'proj-meta' }, ext(p.repoUrl, [icon('git', 14), p.repo], 'repo-link'), h('span', { class: 'tag' }, HOST_LABEL[p.host] ?? p.host), h('span', { class: 'tag' }, `tickets · ${SRC_LABEL[p.source] ?? p.source}`), h('span', { class: 'tag' }, `base ${p.base}`), p.paused ? h('span', { class: 'stamp warn' }, 'paused') : null,
+          m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
+        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
+          h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
       h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), body]; },
 };
 
-function board(tickets, p) {
-  const cols = [['ready', 'Queued', 'info'], ['working', 'Working', 'live'], ['review', 'In review', 'ok'], ['attn', 'Needs attention', 'bad']];
-  const bucket = (t) => { const s = stateOfLabels(t.labels); return ATTENTION.includes(s) ? 'attn' : s; };
+function board(tickets) {
+  const cols = [['ready', 'Hopper', 'info'], ['working', 'On the line', 'live'], ['review', 'In review', 'ok'], ['attn', 'Faults', 'bad']];
+  const bucket = (t) => { const s2 = stateOfLabels(t.labels); return ATTENTION.includes(s2) ? 'attn' : s2; };
   const open = tickets.filter((t) => t.state !== 'CLOSED'), done = tickets.filter((t) => t.state === 'CLOSED');
-  const column = ([k, label, tone]) => { const items = open.filter((t) => bucket(t) === k); return h('div', { class: `col ${tone}` }, h('div', { class: 'col-h' }, h('b', {}, label), h('span', { class: 'count' }, items.length)),
-    items.length ? items.map((t) => h('div', { class: 'tcard' }, h('div', { class: 'row between' }, ext(t.url, `#${t.id}`, 'tid'), k === 'attn' ? h('span', { class: `pill ${STATES[stateOfLabels(t.labels)]?.[0] ?? ''}` }, STATES[stateOfLabels(t.labels)]?.[1] ?? '') : null), h('div', { class: 'ttitle' }, t.title), h('small', {}, ago(t.updatedAt)))) : h('div', { class: 'col-empty' }, k === 'ready' ? 'Nothing queued' : '—')); };
+  const column = ([k, label, tone]) => { const items = open.filter((t) => bucket(t) === k);
+    return h('div', { class: `col ${tone}` }, h('div', { class: 'col-h' }, h('span', {}, label), h('span', { class: 'count' }, items.length)),
+      h('div', { class: 'items' }, items.length ? items.map((t) => h('div', { class: 'tcard' }, h('div', { class: 'row between' }, ext(t.url, `#${t.id}`, 'tid'), k === 'attn' ? h('span', { class: `stamp ${STATES[stateOfLabels(t.labels)]?.[0] ?? ''}` }, STATES[stateOfLabels(t.labels)]?.[1] ?? '') : null), h('div', { class: 'ttitle' }, t.title), h('small', { class: 'mono' }, ago(t.updatedAt)))) : h('div', { class: 'col-empty' }, k === 'ready' ? 'Hopper empty' : 'Clear'))); };
   return [h('div', { class: 'board' }, cols.map(column)), done.length ? h('details', { class: 'closed' }, h('summary', {}, `${done.length} closed`), h('ul', { class: 'plain' }, done.map((t) => h('li', {}, ext(t.url, `#${t.id}`, 'tid'), ' ', t.title)))) : null];
 }
 const stateOfLabels = (labels = []) => ['agent-needs-human', 'agent-failed', 'agent-needs-info', 'agent-review', 'agent-working', 'agent-ready'].find((l) => labels.includes(l))?.replace('agent-', '') ?? 'other';
-const prRow = (x) => h('li', {}, h('div', { class: 'run-row' }, icon('pr', 18), h('div', { class: 'grow' }, ext(x.url, `#${x.number} ${x.title}`, 'tid'), h('small', {}, x.branch)), h('span', { class: 'pill ok' }, 'draft')));
+const prRow = (x) => h('li', {}, h('div', { class: 'run-row' }, icon('pr', 18), h('div', { class: 'grow' }, ext(x.url, `#${x.number} ${x.title}`, 'tid'), h('small', {}, x.branch)), h('span', { class: 'stamp ok' }, 'draft')));
 const prsList = (prs) => card('', prs.length ? h('ul', { class: 'runs' }, prs.map(prRow)) : empty('No open agent pull requests', 'PRs appear here when the factory finishes a ticket.'));
 
 function ticketForm(id, ctx) {
   const title = h('input', { placeholder: 'Short title', maxlength: 200 }), body = h('textarea', { rows: 6, placeholder: 'What should change, and how will we know it is done? Name files/functions and expected behaviour.' }), hint = h('div', { class: 'hint' }); let t;
   const check = () => { clearTimeout(t); t = setTimeout(async () => { if (!title.value && !body.value) return hint.replaceChildren(); const r = await api('/check-ticket', { method: 'POST', body: { title: title.value, body: body.value } }).catch(() => null); if (r) hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' The factory will ask for more detail: ', r.problems.join('; '))); }, 300); };
   title.addEventListener('input', check); body.addEventListener('input', check);
-  return card('form', h('label', {}, 'Title'), title, h('label', {}, 'Details'), body, hint, h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: act(async () => { await api(`/projects/${id}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; projTab = 'board'; }, 'Queued. The factory picks it up on its next cycle.', ctx.rerender) }, 'Queue for the factory'), h('span', { class: 'muted small' }, 'Creates a GitHub issue labelled agent-ready.')));
+  return card('form', h('label', {}, 'Title'), title, h('label', {}, 'Details'), body, hint, h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: act(async () => { await api(`/projects/${id}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; projTab = 'board'; }, 'Work order issued.', ctx.rerender) }, 'Issue work order'), h('span', { class: 'muted small' }, 'Creates a ticket labelled agent-ready in your tracker.')));
 }
 
-// ---- run detail
+// ---- run detail: the work-order traveler
 export const runPage = {
   async load(id) { const [run, activity] = await Promise.all([api(`/runs/${id}`).catch(() => null), api('/activity')]); return { id, run, live: activity.active.find((a) => a.run === id) }; },
   draw({ id, run, live }) {
-    if (!run && !live) return [card('', empty('Run not found', `No run “${id}”.`, h('a', { class: 'btn', href: '#/runs' }, 'All runs')))];
-    if (!run) return [head(live.title ?? `Run ${id}`, `${live.project} · running`), card('', pipeline(live, { active: true }), h('p', { class: 'muted' }, 'In progress… ', since(live.started)))];
+    if (!run && !live) return [card('', empty('Work order not found', `No run “${id}”.`, h('a', { class: 'btn', href: '#/runs' }, 'All work orders')))];
+    if (!run) return [head(live.title ?? woId(id), `${live.project} · on the line now`), card('reg', h('div', { class: 'card-h' }, h('h2', {}, 'Route')), pipeline(live, { active: true }), h('p', { class: 'muted mono small' }, 'In progress… ', since(live.started)))];
     const ms = run.finished ? new Date(run.finished) - new Date(run.started) : null; const ok = run.status === 'ok';
-    return [h('a', { class: 'back', href: `#/project/${run.project}` }, icon('arrow', 14, 'flip'), run.project),
-      head(run.title ?? `Run ${id}`, `${run.round ? `Feedback round ${run.round} · ` : ''}${new Date(run.started).toLocaleString()}`, pill(run.status), (run.prLink ?? (typeof run.pr === 'string' ? run.pr : null)) ? ext(run.prLink ?? run.pr, [icon('pr', 14), ' Open PR'], 'btn primary') : null),
+    const verdict = ok ? ['ok', 'Shipped', 'PR opened'] : ['needs-info', 'repo-not-allowed', 'stopped', 'budget-exhausted'].includes(run.status) ? ['warn', 'Held', (OUT[run.status] ?? run.status)] : ['bad', 'Rejected', OUT[run.status] ?? run.status];
+    const link = run.prLink ?? (typeof run.pr === 'string' ? run.pr : null);
+    const reached = run.phases.map((p) => p.name); const maxMs = Math.max(1, ...run.phases.map((p) => p.ms ?? 0));
+    return [h('a', { class: 'back', href: `#/project/${run.project}` }, icon('arrow', 12, 'flip'), run.project),
+      h('div', { class: 'wo-head' }, h('div', {}, h('span', { class: 'wo-id' }, `Work order ${woId(run.id)}`), h('h1', {}, run.title ?? woId(run.id)), h('p', { class: 'sub mono small' }, `${run.round ? `Feedback round ${run.round} · ` : ''}${new Date(run.started).toLocaleString()}`), barcode(run.id), h('div', { class: 'row gap-t' }, link ? ext(link, [icon('pr', 13), ' Open pull request'], 'btn primary') : null)),
+        h('div', { class: `rubber ${verdict[0]}` }, verdict[1], h('small', {}, verdict[2]))),
       h('div', { class: 'stats' }, stat('Duration', dur(ms)), stat('Attempts', run.attempts ?? run.round ?? '–'), stat('Files changed', run.changed?.length ?? 0), stat('Tokens', run.tokens ? num(run.tokens.input + run.tokens.output) : '–'), stat('Cost', run.costUsd ? `$${run.costUsd.toFixed(3)}` : '–')),
-      card('', h('div', { class: 'card-h' }, h('h2', {}, 'Pipeline')), pipeline(run), run.phases.length ? timeline(run.phases, ms) : null),
+      card('reg', h('div', { class: 'card-h' }, h('h2', {}, 'Route sheet')), h('ol', { class: 'route' }, STAGES.map(([k, label], i) => { const ph = run.phases.find((p) => p.name === k); const last = reached.at(-1) === k && !ok;
+        return h('li', { class: ph ? (last ? 'bad' : 'done') : 'todo' }, h('span', { class: 'n' }, ph ? (last ? icon('x', 14) : icon('check', 14)) : `0${i + 1}`), h('span', { class: 'pn' }, label, ph?.detail ? h('small', {}, String(ph.detail).slice(0, 60)) : null),
+          h('div', { class: `bar-x ph-${k}` }, ph ? h('i', { style: { width: `${Math.max(3, ((ph.ms ?? 0) / maxMs) * 100)}%` } }) : null), h('span', { class: 't' }, ph ? dur(ph.ms) : '–')); }))),
       run.error ? h('div', { class: 'callout bad' }, icon('alert', 16), run.error) : null,
-      run.changed?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Files changed')), h('div', { class: 'files' }, run.changed.map((f) => h('code', {}, f)))) : null,
-      run.agentSummary ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'What the agent said')), h('pre', { class: 'log wrap' }, run.agentSummary)) : null,
-      run.verifyTail ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Verification output'), h('span', { class: `pill ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'see below')), h('pre', { class: 'log' }, run.verifyTail)) : null]; },
+      h('div', { class: 'cols-2' },
+        run.agentSummary ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Operator notes')), h('pre', { class: 'log-pre wrap' }, run.agentSummary)) : null,
+        run.changed?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, `Parts changed · ${run.changed.length}`)), h('div', { class: 'files' }, run.changed.map((f) => h('code', {}, f)))) : null),
+      run.verifyTail ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Quality check'), h('span', { class: `stamp ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'see output')), h('pre', { class: `log-pre ${ok ? 'good' : 'fail'}` }, run.verifyTail)) : null]; },
 };
-const stat = (l, v) => h('div', { class: 'stat' }, h('small', {}, l), h('b', {}, String(v)));
+const OUT = { 'verify-failed': 'Tests failed', timeout: 'Timed out', error: 'Error', 'no-change': 'No change', 'protected-path': 'Protected path', 'needs-info': 'Needs info', 'repo-not-allowed': 'Repo not allowed', stopped: 'Paused', 'budget-exhausted': 'Budget reached' };
+const stat = (l, v) => h('div', { class: 'stat' }, h('span', { class: 'eyebrow' }, l), h('b', {}, String(v)));
 
-// ---- all runs
+// ---- all work orders
 let runFilter = 'all';
 export const runsPage = {
   async load() { return { runs: await api('/runs?limit=300') }; },
   draw({ runs }, ctx) {
     const f = { all: () => true, ok: (r) => r.status === 'ok', failed: (r) => !['ok', 'needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued', 'repo-not-allowed'].includes(r.status), info: (r) => ['needs-info', 'repo-not-allowed'].includes(r.status) };
     const shown = runs.filter(f[runFilter]);
-    return [head('Runs', 'Every agent run and feedback round, newest first.'),
-      h('div', { class: 'seg' }, [['all', 'All'], ['ok', 'PRs opened'], ['failed', 'Failed'], ['info', 'Needed info']].map(([k, t]) => h('button', { class: runFilter === k ? 'on' : '', onclick: () => { runFilter = k; ctx.rerender(); } }, t))),
-      card('', shown.length ? runsList(shown) : empty('No runs match', null))]; },
+    return [head('Work orders', 'Every agent run and feedback round, newest first.'),
+      h('div', { class: 'seg' }, [['all', 'All'], ['ok', 'Shipped'], ['failed', 'Failed'], ['info', 'Needed info']].map(([k, t]) => h('button', { class: runFilter === k ? 'on' : '', onclick: () => { runFilter = k; ctx.rerender(); } }, t))),
+      card('', shown.length ? workOrders(shown) : empty('No work orders match', null))]; },
 };
 
 // ---- connect (MCP)
@@ -173,7 +186,7 @@ export const connect = {
     return [head('Connect an AI', 'Drive the factory by prompt from Claude, ChatGPT or any MCP client: “create a project that…”, “what is the factory doing?”, “queue a fix for…”.'),
       card('', h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Your access token'), h('div', { class: 'row' }, tokenView, reveal, copy(tok, 'Token'))), h('p', { class: 'muted small' }, 'Treat it like a password: anyone with it can queue work. It never leaves this machine unless you paste it somewhere. Rotate it by deleting ', h('code', {}, 'state/ui-token'), ' and restarting.')),
       h('div', { class: 'cols-2' },
-        card('', h('div', { class: 'card-h' }, h('h2', {}, icon('plug', 17), 'Code Mode (recommended)'), h('span', { class: info.codeAvailable ? 'pill ok' : 'pill warn' }, info.codeAvailable ? 'ready' : 'needs quickjs')), h('p', {}, 'Two tools: ', h('code', {}, 'search'), ' and ', h('code', {}, 'execute'), '. The AI writes a few lines of JavaScript that run in a sandbox, so a whole workflow costs a fraction of the tokens.'), h('div', { class: 'row' }, h('code', { class: 'url' }, `${origin}/mcp-code`), copy(`${origin}/mcp-code`, 'URL')), code(cmd('/mcp-code', 'agent-factory'))),
+        card('', h('div', { class: 'card-h' }, h('h2', {}, icon('plug', 17), 'Code Mode (recommended)'), h('span', { class: info.codeAvailable ? 'stamp ok' : 'stamp warn' }, info.codeAvailable ? 'ready' : 'needs quickjs')), h('p', {}, 'Two tools: ', h('code', {}, 'search'), ' and ', h('code', {}, 'execute'), '. The AI writes a few lines of JavaScript that run in a sandbox, so a whole workflow costs a fraction of the tokens.'), h('div', { class: 'row' }, h('code', { class: 'url' }, `${origin}/mcp-code`), copy(`${origin}/mcp-code`, 'URL')), code(cmd('/mcp-code', 'agent-factory'))),
         card('', h('div', { class: 'card-h' }, h('h2', {}, icon('plug', 17), `Direct tools (${info.directTools})`)), h('p', {}, 'One tool per operation. Simpler for small clients, but the tool list is larger.'), h('div', { class: 'row' }, h('code', { class: 'url' }, `${origin}/mcp`), copy(`${origin}/mcp`, 'URL')), code(cmd('/mcp', 'agent-factory-direct')))),
       card('', h('div', { class: 'card-h' }, h('h2', {}, 'What each costs your AI in context, every session')),
         h('div', { class: 'cmp' }, [['Direct tools', info.directTokens, 'info'], ['Code Mode', info.codeTokens, 'ok']].map(([l, n, tone]) => h('div', { class: 'cmp-row' }, h('span', {}, l), h('div', { class: 'cmp-bar' }, h('i', { class: tone, style: { width: `${(n / max) * 100}%` } })), h('b', {}, `~${num(n)} tokens`))))),
@@ -185,8 +198,8 @@ export const connect = {
 export const health = {
   async load() { return { checks: await api('/health') }; },
   draw({ checks }) { const bad = checks.filter((c) => !c.ok).length;
-    return [head('Health', bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix before the factory can run safely.` : 'Everything the factory needs is in place.'),
-      h('div', { class: 'grid' }, checks.map((c) => h('div', { class: `card check ${c.ok ? 'good' : 'badc'}` }, h('div', { class: 'row' }, h('span', { class: 'ci' }, icon(c.ok ? 'check' : 'x', 16)), h('b', {}, c.id)), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', {}, 'Fix'), h('code', {}, c.fix)) : null)))]; },
+    return [head('Health', bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix before the factory can run safely.` : 'Every system the factory needs is in place.'),
+      h('div', { class: 'checks' }, checks.map((c) => h('div', { class: 'card check' }, h('i', { class: `lamp ${c.ok ? 'ok' : 'bad'}` }), h('b', {}, c.id), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', { class: 'eyebrow' }, 'Fix'), h('code', {}, c.fix)) : null)))]; },
 };
 
 // ---- add / create project

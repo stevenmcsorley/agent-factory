@@ -124,3 +124,9 @@ test('metrics: daily series, success rate, durations, per-project sparks; neutra
   assert.equal(m.days.at(-1).neutral >= 1, true); assert.equal(m.projects.one.runs, 2); assert.equal(m.projects.one.spark.length, 7);
   assert.equal(m.projects.two.avgMs, 60000);
 });
+
+test('queue-count cache is dropped when a run starts or ends so the dashboard never lags the line', async () => {
+  const { e } = engine(); await e.listTickets('one'); assert.ok(e.cache.has('t:one'));
+  e._event({ type: 'start', run: 'abc12345', project: 'one', at: new Date().toISOString() }); assert.equal(e.cache.size, 0);
+  await e.listTickets('one'); e._event({ type: 'end', run: 'abc12345', at: new Date().toISOString() }); assert.equal(e.cache.size, 0);
+});

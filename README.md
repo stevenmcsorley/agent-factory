@@ -53,17 +53,19 @@ Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-rev
 
 ## The web UI
 
-![Overview: prompt bar, KPIs, live status, 14-day chart, projects](docs/img/overview.jpg)
+![The control room: work-order intake, the live assembly line (hopper → six stations → shipped), spec strip, cells](docs/img/overview.jpg)
 
-![A run: pipeline, timed phases, changed files, the agent's summary and verification output](docs/img/run.jpg)
+![A work order: barcode, stamped result, route sheet with timed stations, operator notes, quality check](docs/img/run.jpg)
 
 | Page | What you get |
 |---|---|
-| **Overview** | A prompt bar ("tell the factory what to do") with a live clarity check; KPI rings (runs today vs cap, success rate, time to PR, what is waiting on you); a **live pipeline** for every run in flight (claim → sandbox → agent → verify → push → PR) with a ticking timer; a 14-day activity chart; project cards with sparklines and queue chips; an activity feed |
-| **Project** | A **ticket board** (Queued / Working / In review / Needs attention), open agent PRs, run history, live log, and a new-ticket form |
-| **Run** | The full story of one run: timed phases, files changed, tokens, what the agent said, and the verification output |
-| **Connect AI** | Copy-paste setup for Claude and other MCP clients, plus the measured token cost of each mode |
-| **Health** | The same checks as `npm run doctor`, each with a fix |
+| **01 Control room** | **Work-order intake** (describe what you want; a live clarity check tells you if it is specific enough), and **the line**: an animated assembly line where queued tickets wait in the *hopper*, each job rides the belt through six stations (claim → sandbox → agent → verify → push → ship) and finished PRs drop into the *shipped* chute. Below it a spec strip (shipped today, success rate, median time to PR, waiting on you, capacity left), your project *cells*, a 14-day output chart, the live line log and recent work orders. A ticker across the top streams events. |
+| **02 Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults |
+| **03 Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
+| **04 Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
+| **05 Health** | The same checks as `npm run doctor`, each with a fix |
+
+Dark and light themes (toggle in the header). Self-hosted fonts (Archivo, IBM Plex Mono; SIL OFL), so it works offline.
 
 Press **Ctrl/⌘ K** anywhere for a command palette (jump to a project, pause, run now, add a project).
 

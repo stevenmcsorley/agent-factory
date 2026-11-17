@@ -72,6 +72,7 @@ export class Engine {
   // ---- live activity: runs publish phase events; we keep a ring buffer and the set of runs in flight
   _event(e) {
     this.events.push(e); if (this.events.length > 300) this.events.shift();
+    if (e.type === 'start' || e.type === 'end') this.cache.clear(); // queue counts must reflect a run starting/finishing immediately, not 15s later
     if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [] });
     const a = this.active.get(e.run);
     if (e.type === 'phase' && a) { a.phase = e.phase; a.detail = e.detail; a.phaseStarted = e.at; a.phases.push({ name: e.phase, at: e.at }); }

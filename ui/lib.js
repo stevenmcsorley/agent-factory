@@ -30,6 +30,7 @@ const ICONS = {
   plug: 'M9 2v5M15 2v5M6 7h12v4a6 6 0 01-12 0zM12 17v5', pulse: 'M3 12h4l3-8 4 16 3-8h4', folder: 'M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z',
   copy: 'M9 9h10v10H9zM5 15V5h10', arrow: 'M5 12h14M13 6l6 6-6 6', search: 'M11 4a7 7 0 100 14 7 7 0 000-14zM21 21l-5-5', bolt: 'M13 2L4 14h7l-1 8 9-12h-7z',
   shield: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z', plus: 'M12 5v14M5 12h14', git: 'M6 3v12M6 15a3 3 0 100 6 3 3 0 000-6zM18 9a3 3 0 100-6 3 3 0 000 6zM18 9c0 6-12 3-12 6',
+  sun: 'M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6L4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4M12 8a4 4 0 100 8 4 4 0 000-8z', moon: 'M20 14.5A8.5 8.5 0 119.5 4a7 7 0 0010.5 10.5z',
   cpu: 'M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3M7 6h10a1 1 0 011 1v10a1 1 0 01-1 1H7a1 1 0 01-1-1V7a1 1 0 011-1zM10 10h4v4h-4z', box: 'M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
 };
 export const icon = (name, size = 16, cls = '') => s('svg', { viewBox: '0 0 24 24', width: size, height: size, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.9, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', class: `icon ${cls}`, 'aria-hidden': 'true' }, s('path', { d: ICONS[name] ?? ICONS.spark }));
@@ -61,6 +62,6 @@ export const OUTCOME = {
   ok: ['ok', 'PR opened'], 'verify-failed': ['bad', 'Tests failed'], 'no-change': ['warn', 'No change'], timeout: ['bad', 'Timed out'], error: ['bad', 'Error'], 'needs-info': ['warn', 'Needs info'],
   'protected-path': ['bad', 'Blocked: protected path'], 'repo-not-allowed': ['warn', 'Repo not allowed'], 'budget-exhausted': ['warn', 'Budget reached'], stopped: ['info', 'Paused'], running: ['info', 'Running'],
   'recovered-requeued': ['info', 'Requeued'], 'recovered-failed': ['bad', 'Gave up'] };
-export const pill = (status) => { const [c, t] = OUTCOME[status] ?? ['', status]; return h('span', { class: `pill ${c}` }, h('i', { class: 'dot' }), t); };
-export const STAGES = [['claim', 'Claim'], ['sandbox', 'Sandbox'], ['agent', 'Agent'], ['verify', 'Verify'], ['push', 'Push'], ['pr', 'PR']];
+export const pill = (status) => { const [c, t] = OUTCOME[status] ?? ['', status]; return h('span', { class: `stamp ${c}` }, h('i', { class: 'dot' }), t); };
+export const STAGES = [['claim', 'Claim'], ['sandbox', 'Sandbox'], ['agent', 'Agent'], ['verify', 'Verify'], ['push', 'Push'], ['pr', 'Ship']];
 export const STATES = { ready: ['info', 'Queued'], working: ['live', 'Working'], review: ['ok', 'In review'], failed: ['bad', 'Failed'], 'needs-info': ['warn', 'Needs info'], 'needs-human': ['bad', 'Needs a human'], other: ['', 'Other'] };

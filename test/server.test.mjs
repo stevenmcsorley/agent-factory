@@ -39,7 +39,9 @@ test('auth: every /api route needs the bearer token; static UI does not; wrong h
   const ui = await call('/', { token: null }); assert.equal(ui.status, 200);
   assert.match(await ui.clone().text(), /^<!doctype html>/i); assert.match(ui.headers.get('content-type'), /text\/html/);
   for (const f of ['app.js', 'lib.js', 'views.js', 'charts.js']) { const js = await call(`/${f}`, { token: null }); assert.equal(js.status, 200, f); assert.match(js.headers.get('content-type'), /javascript/); assert.match(await js.text(), /import|export/); }
-  assert.match((await call('/favicon.svg', { token: null })).headers.get('content-type'), /svg/); assert.match((await (await call('/', { token: null })).text()), /type="module"/);
+  assert.match((await call('/favicon.svg', { token: null })).headers.get('content-type'), /svg/);
+  const font = await call('/fonts/archivo-var.woff2', { token: null }); assert.equal(font.status, 200); assert.equal(font.headers.get('content-type'), 'font/woff2'); assert.ok((await font.arrayBuffer()).byteLength > 50000);
+  assert.equal((await call('/fonts/../package.json', { token: null })).status, 404); assert.equal((await call('/fonts/nope.woff2', { token: null })).status, 404); assert.match(ui.headers.get('content-security-policy'), /font-src 'self'/); assert.match((await (await call('/', { token: null })).text()), /type="module"/);
   assert.match(ui.headers.get('content-security-policy'), /default-src 'none'/); assert.equal(ui.headers.get('x-content-type-options'), 'nosniff');
   assert.equal((await call('/../package.json', { token: null })).status, 404);
   assert.equal((await call('/secrets.env', { token: null })).status, 404);

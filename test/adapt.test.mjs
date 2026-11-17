@@ -148,3 +148,15 @@ test('github tickets read via the REST issues endpoint (no search lag), drop PRs
   const all = await t.listAgentTickets();
   assert.deepEqual(all.map((x) => [x.id, x.state]), [[1, 'OPEN'], [4, 'OPEN'], [5, 'CLOSED']]);
 });
+
+test('github: a just-created ticket is found immediately even while the list endpoint lags (single-issue read-your-writes)', async () => {
+  const calls = [];
+  const issue = { number: 77, title: 'fresh', body: 'b', labels: [{ name: 'agent-ready' }], user: { login: 'me' }, html_url: 'https://github.com/o/lag/issues/77', state: 'open', updated_at: 'T' };
+  const exec = async (cmd, args) => { calls.push(args.join(' ')); if (args[0] === 'issue') return { code: 0, out: 'https://github.com/o/lag/issues/77\n' }; if (args[1] === 'repos/o/lag/issues/77') return { code: 0, out: JSON.stringify(issue) }; return { code: 0, out: '[]' }; }; // list lags: empty
+  const t = githubTickets({ repo: 'o/lag', allowedAuthors: ['me'], exec });
+  assert.deepEqual(await t.poll(), []);                       // nothing created yet
+  await t.create({ title: 'fresh', body: 'b' });
+  assert.deepEqual((await t.poll()).map((x) => x.id), [77]);  // found despite the empty list
+  const stranger = githubTickets({ repo: 'o/lag2', allowedAuthors: ['someone-else'], exec: async (c, a) => (a[0] === 'issue' ? { code: 0, out: 'https://github.com/o/lag2/issues/5\n' } : a[1] === 'repos/o/lag2/issues/5' ? { code: 0, out: JSON.stringify({ ...issue, number: 5, user: { login: 'me' } }) } : { code: 0, out: '[]' }) });
+  await stranger.create({ title: 'x', body: 'y' }); assert.deepEqual(await stranger.poll(), []); // still only trusted authors
+});
