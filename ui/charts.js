@@ -14,6 +14,21 @@ export function odometer(value, pad = 2) {
   return el;
 }
 
+// ── Station glyphs: 24-unit monoline icons (one stroke weight, round caps). Each has named parts so CSS can animate them when its
+// station is active. The same glyphs are used on the line (animated) and the run page route sheet (static).
+const P = (d, cls) => s('path', { d, ...(cls ? { class: cls } : {}) });
+const GLYPHS = {
+  claim: () => [P('M7 5H5.5A1.5 1.5 0 004 6.5v13A1.5 1.5 0 005.5 21h13a1.5 1.5 0 001.5-1.5v-13A1.5 1.5 0 0018.5 5H17'), s('rect', { x: 8, y: 2.5, width: 8, height: 4.5, rx: 1.2, class: 'clip' }), P('M8 14l2.8 2.8L16 11.2', 'tick')],
+  sandbox: () => [P('M4 7.5v9L12 21l8-4.5v-9M12 12v9'), P('M4 7.5L12 3l8 4.5-8 4.5z', 'lid')],
+  agent: () => { const pins = ['M9 3v3', 'M15 3v3', 'M9 18v3', 'M15 18v3', 'M3 9h3', 'M3 15h3', 'M18 9h3', 'M18 15h3'].map((d, i) => { const e = P(d, 'pin'); e.style.animationDelay = `${i * 0.13}s`; return e; });
+    return [s('rect', { x: 6, y: 6, width: 12, height: 12, rx: 2 }), s('rect', { x: 10, y: 10, width: 4, height: 4, rx: 0.8, class: 'core' }), ...pins]; },
+  verify: () => [s('g', { class: 'glass' }, s('circle', { cx: 10.5, cy: 10.5, r: 6.2 }), P('M15.2 15.2L20.5 20.5'), P('M7.8 10.6l2 2 3.6-4', 'tick'))],
+  push: () => [P('M4 15.5v3a1.5 1.5 0 001.5 1.5h13a1.5 1.5 0 001.5-1.5v-3'), s('g', { class: 'arrow' }, P('M12 15V4'), P('M7.5 8.5L12 4l4.5 4.5'))],
+  ship: () => [s('g', { class: 'plane' }, P('M21 3L3 10.5l7 2.5 2.5 7z'), P('M21 3L10 13')), P('M3.5 20.5h6', 'ground')],
+};
+const glyphKey = (k) => (k === 'pr' ? 'ship' : k); // the pipeline calls the last stage `pr`; on screen it is "Ship"
+export const stationGlyph = (key, size = 22) => { const k = glyphKey(key); return s('svg', { viewBox: '0 0 24 24', width: size, height: size, class: `ic ic-${k}`, 'aria-hidden': 'true' }, ...(GLYPHS[k] ?? GLYPHS.claim)()); };
+
 // The assembly line. Built ONCE and updated in place: tickets slide from the hopper to their station and on to the chute, the belt keeps
 // running, and nothing is torn down between refreshes (rebuilding the SVG every few seconds is what made it jitter and "bounce").
 const TICKET = 'M0 0H46V9a4.5 4.5 0 000 9V30H0V18a4.5 4.5 0 000-9Z';
@@ -31,14 +46,17 @@ export function createLine(stages) {
   const qText = s('text', { x: HOP, y: 200, class: 'l-big' }, '0'), qLabel = s('text', { x: HOP, y: 222, class: 'l-label' }, 'tickets waiting');
   const sText = s('text', { x: CHUTE, y: 200, class: 'l-big l-ship-big' }, '0');
   svg.append(s('text', { x: HOP, y: 36, class: 'l-label' }, 'Hopper'), qText, qLabel, s('text', { x: CHUTE, y: 36, class: 'l-label' }, 'Shipped'), sText, s('text', { x: CHUTE, y: 222, class: 'l-label' }, 'PRs today'));
-  const stationEls = stages.map(([, name], i) => { const g = s('g', { class: 'l-station', transform: `translate(${X0 + i * DX} 0)` }, s('path', { d: `M-38 ${BY + 14} V74 H38 V${BY + 14}`, class: 'l-gantry' }), s('circle', { cx: 0, cy: 92, r: 8, class: 'l-lamp' }), s('text', { x: 0, y: 58, class: 'l-code', 'text-anchor': 'middle' }, `0${i + 1}`), s('text', { x: 0, y: BY + 40, class: 'l-name' }, name)); svg.append(g); return g; });
+  const stationEls = stages.map(([key, name], i) => { const g = s('g', { class: 'l-station', transform: `translate(${X0 + i * DX} 0)` },
+    s('text', { x: 0, y: 30, class: 'l-code', 'text-anchor': 'middle' }, `0${i + 1}`),
+    s('g', { transform: 'translate(-20 36) scale(1.67)' }, s('g', { class: `ic ic-${glyphKey(key)}` }, ...GLYPHS[glyphKey(key)]())),
+    s('path', { d: `M-38 ${BY + 14} V98 H38 V${BY + 14}`, class: 'l-gantry' }), s('circle', { cx: 0, cy: 98, r: 5.5, class: 'l-lamp' }), s('text', { x: 0, y: BY + 40, class: 'l-name' }, name)); svg.append(g); return g; });
   const layer = s('g', { class: 'l-parts' }); svg.append(layer);
   const pausedG = s('g', { class: 'svg-hide' }, s('rect', { x: 150, y: BY - 12, width: 910, height: 24, class: 'l-warn' }), s('text', { x: 605, y: 48, class: 'l-paused' }, 'LINE PAUSED')); svg.append(pausedG);
 
   const parts = new Map(); let ready = false; const last = { q: null, s: null };
   const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
   const setCount = (el, key, v) => { if (last[key] === v) return; el.textContent = String(v); if (last[key] !== null) { el.classList.remove('l-flash'); void el.getBoundingClientRect(); el.classList.add('l-flash'); } last[key] = v; };
-  const makePart = (a) => { const g = s('g', { class: 'l-part-g' }, s('g', { class: 'bob' }, s('path', { d: TICKET, class: 'l-part', transform: 'translate(-23 0)' }), s('line', { x1: -14, y1: 11, x2: 14, y2: 11, class: 'l-part-line' }), s('line', { x1: -14, y1: 19, x2: 6, y2: 19, class: 'l-part-line' })), s('text', { x: 0, y: -9, class: 'l-title' })); layer.append(g); return { g, label: g.lastChild }; };
+  const makePart = (a) => { const g = s('g', { class: 'l-part-g' }, s('g', { class: 'bob' }, s('path', { d: TICKET, class: 'l-part', transform: 'translate(-23 0)' }), s('line', { x1: -14, y1: 11, x2: 14, y2: 11, class: 'l-part-line' }), s('line', { x1: -14, y1: 19, x2: 6, y2: 19, class: 'l-part-line' })), s('text', { x: 0, y: -11, class: 'l-title' })); layer.append(g); return { g, label: g.lastChild }; };
 
   function update({ queued = 0, shipped = 0, active = [], paused = false }) {
     svg.classList.toggle('running', active.length > 0 && !paused);

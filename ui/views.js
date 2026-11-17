@@ -1,5 +1,5 @@
 import { h, icon, api, toast, ago, dur, num, pct, ext, pill, STAGES, STATES, session, keyed, persist } from './lib.js';
-import { createLine, odometer, miniBars, bars, barcode } from './charts.js';
+import { createLine, odometer, miniBars, bars, barcode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
 export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };
@@ -171,7 +171,7 @@ export const runPage = {
         h('div', { class: `rubber ${verdict[0]}` }, verdict[1], h('small', {}, verdict[2]))),
       h('div', { class: 'stats' }, stat('Duration', dur(ms)), stat('Attempts', run.attempts ?? run.round ?? '–'), stat('Files changed', run.changed?.length ?? 0), stat('Tokens', run.tokens ? num(run.tokens.input + run.tokens.output) : '–'), stat('Cost', run.costUsd ? `$${run.costUsd.toFixed(3)}` : '–')),
       card('reg', h('div', { class: 'card-h' }, h('h2', {}, 'Route sheet')), h('ol', { class: 'route' }, STAGES.map(([k, label], i) => { const ph = run.phases.find((p) => p.name === k); const last = reached.at(-1) === k && !ok;
-        return h('li', { class: ph ? (last ? 'bad' : 'done') : 'todo' }, h('span', { class: 'n' }, ph ? (last ? icon('x', 14) : icon('check', 14)) : `0${i + 1}`), h('span', { class: 'pn' }, label, ph?.detail ? h('small', {}, String(ph.detail).slice(0, 60)) : null),
+        return h('li', { class: ph ? (last ? 'bad' : 'done') : 'todo' }, h('span', { class: 'n' }, ph ? (last ? icon('x', 14) : icon('check', 14)) : `0${i + 1}`), h('span', { class: 'pn' }, stationGlyph(k, 22), label, ph?.detail ? h('small', {}, String(ph.detail).slice(0, 60)) : null),
           h('div', { class: `bar-x ph-${k}` }, ph ? h('i', { style: { width: `${Math.max(3, ((ph.ms ?? 0) / maxMs) * 100)}%` } }) : null), h('span', { class: 't' }, ph ? dur(ph.ms) : '–')); }))),
       run.error ? h('div', { class: 'callout bad' }, icon('alert', 16), run.error) : null,
       h('div', { class: 'cols-2' },

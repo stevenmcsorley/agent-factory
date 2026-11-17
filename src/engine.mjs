@@ -141,8 +141,9 @@ export class Engine {
   async overview() {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
+      // closed tickets are history, not queue (see the CLOSED filter below)
       const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
-      try { (await this.listTickets(p.id)).forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
+      try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
   }

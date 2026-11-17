@@ -145,3 +145,10 @@ test('overlay: the line\'s own knowledge beats a lagging tracker (no hopper flic
   assert.equal(labels(e.overlay('one', stale))[1], 'agent-failed');
   e.outcomes.set('one#1', { status: 'ok', at: Date.now() - 60000 }); assert.equal(labels(e.overlay('one', stale))[0], 'agent-ready'); // old outcomes expire: the tracker is trusted again
 });
+
+test('overview queue counts ignore closed tickets (a closed issue that kept its agent-ready label is not "waiting")', async () => {
+  const { e } = engine();
+  e.f.tickets = () => ({ listAgentTickets: async () => [{ id: 1, title: 'open', labels: ['agent-ready'], state: 'OPEN' }, { id: 2, title: 'closed probe', labels: ['agent-ready'], state: 'CLOSED' }, { id: 3, title: 'done', labels: ['agent-review'], state: 'CLOSED' }] });
+  e.f.hostAdapter = () => ({ pr: { listAgentPrs: async () => [] }, prUrl: () => null, gitEnv: () => ({}), cloneUrl: () => 'x' });
+  const ov = await e.overview(); assert.equal(ov[0].queue.ready, 1); assert.equal(ov[0].queue.review ?? 0, 0);
+});
