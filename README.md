@@ -25,7 +25,7 @@ npm start        # prints the UI link
 
 Open the printed link (it contains your UI token). Then either label an issue `agent-ready` in your repo or use **Projects → New ticket** in the UI.
 
-`npm run doctor` re-checks everything and tells you how to fix what is wrong.
+`npm run doctor` re-checks everything and tells you how to fix what is wrong. Full walkthrough (per-OS prerequisites, creating each token, running it as a service, troubleshooting): **[docs/setup.md](docs/setup.md)**. No clone needed either: `mkdir my-factory && cd my-factory && npx github:stevenmcsorley/agent-factory init`.
 
 ## How it works
 

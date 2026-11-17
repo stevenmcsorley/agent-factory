@@ -52,3 +52,11 @@ test('doctor reports each prerequisite with a fix hint, using injected exec', as
   assert.equal(by.github.ok, true); assert.equal(by['agent-auth'].ok, false); assert.match(by['agent-auth'].fix, /codex login/);
   assert.equal(by.config.ok, true);
 });
+
+import { execFileSync } from 'node:child_process';
+test('CLI `service` prints a systemd unit for the given config, and `help` lists every command', () => {
+  const cli = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'cli.mjs');
+  const out = execFileSync(process.execPath, [cli, 'service', '--config=/srv/factory/agent-factory.json']).toString();
+  assert.match(out, /\[Service\]/); assert.match(out, /WorkingDirectory=\/srv\/factory/); assert.match(out, /ExecStart=.*cli\.mjs start --config=\/srv\/factory\/agent-factory\.json/); assert.match(out, /Restart=on-failure/);
+  const help = execFileSync(process.execPath, [cli, 'help']).toString(); for (const c of ['init', 'start', 'doctor', 'add', 'service', 'token']) assert.match(help, new RegExp(`\\b${c}\\b`));
+});

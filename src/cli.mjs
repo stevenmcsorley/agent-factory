@@ -24,6 +24,7 @@ const HELP = `agent-factory <command>
   feedback       process CI/review feedback on open agent PRs once and exit
   build-image    build the agent sandbox image
   token          print the UI sign-in URL
+  service        print a systemd unit that keeps the factory running (Linux)
 
   --config=PATH  (default ./agent-factory.json)`;
 
@@ -37,6 +38,25 @@ function boot() {
 async function main() {
   if (cmd === 'help' || flags.help) return console.log(HELP);
   if (cmd === 'init') process.exit(await init({ configPath, root, flags }));
+  if (cmd === 'service') {
+    const unit = `[Unit]
+Description=Agent Factory
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${path.dirname(configPath)}
+ExecStart=${process.execPath} ${path.join(root, 'src', 'cli.mjs')} start --config=${configPath}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`;
+    console.log(`# Save as ~/.config/systemd/user/agent-factory.service, then:\n#   systemctl --user daemon-reload && systemctl --user enable --now agent-factory\n#   loginctl enable-linger $USER     # keep it running when you are logged out\n#   journalctl --user -u agent-factory -f\n\n${unit}`);
+    return;
+  }
   if (cmd === 'build-image') process.exit((await buildImage(root)) ? 0 : 1);
   const cfg = boot();
   if (cmd === 'token') return console.log(`http://${cfg.ui.host}:${cfg.ui.port}/#token=${await ensureToken(cfg.stateDir)}`);

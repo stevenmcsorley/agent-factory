@@ -20,6 +20,9 @@ export async function ensureToken(stateDir) {
   return fs.readFileSync(f, 'utf8').trim();
 }
 
+// Run an interactive command INSIDE the sandbox image (so the host needs no codex/claude CLI). `mount` = host dir to expose as the agent's HOME config.
+export const containerRun = (image, cmd, { mounts = [] } = {}) => inherit('docker', ['run', '--rm', '-i', ...(process.stdin.isTTY ? ['-t'] : []), '--user', `${process.getuid()}:${process.getgid()}`, '-e', 'HOME=/home/node', ...mounts.flatMap((m) => ['-v', m]), image, ...cmd]);
+
 export async function buildImage(root, tag = 'agent-factory-agent:latest') {
   console.log(`Building the agent sandbox image (${tag}); the first build takes a minute...`);
   return (await inherit('docker', ['build', '-f', path.join(root, 'Dockerfile.agent'), '-t', tag, root])) === 0;
@@ -55,12 +58,14 @@ export async function init({ configPath, root, flags }) {
     if (fs.existsSync(path.join(agent.codexHome, 'auth.json'))) ok('dedicated Codex login found');
     else {
       console.log(`  The factory uses its OWN Codex login (${agent.codexHome}), never your personal one.\n  A code and a link will appear; open the link, sign in, enter the code.`);
-      await inherit('codex', ['login', '--device-auth'], { CODEX_HOME: agent.codexHome });
+      if (!process.stdin.isTTY) { bad('login needs an interactive terminal', `run: npm run init   (or: docker run --rm -it --user $(id -u):$(id -g) -e HOME=/home/node -v ${agent.codexHome}:/home/node/.codex agent-factory-agent:latest codex login --device-auth)`); }
+      else await containerRun('agent-factory-agent:latest', ['codex', 'login', '--device-auth'], { mounts: [`${agent.codexHome}:/home/node/.codex`] });
       fs.existsSync(path.join(agent.codexHome, 'auth.json')) ? ok('logged in') : bad('login did not complete', `run: CODEX_HOME=${agent.codexHome} codex login --device-auth`);
     }
   } else if (!/CLAUDE_CODE_OAUTH_TOKEN=|ANTHROPIC_API_KEY=/.test(fs.existsSync(secrets) ? fs.readFileSync(secrets, 'utf8') : '')) {
-    console.log('  Run `claude setup-token` in another terminal (needs a Claude subscription), or use an Anthropic API key.');
-    const t = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY || await ask('Paste the token here (stored in an owner-only file, never in the config)');
+    if (interactive && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY && (await ask('Create a long-lived Claude token now? It needs a Claude subscription and opens a login link (n = paste an API key instead)', 'y')).toLowerCase().startsWith('y'))
+      await containerRun('agent-factory-agent:latest', ['claude', 'setup-token']);
+    const t = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY || await ask('Paste the token (or an Anthropic API key) here: it is stored in an owner-only file, never in the config');
     if (t) { fs.mkdirSync(stateDir, { recursive: true }); fs.writeFileSync(secrets, `${t.startsWith('sk-ant-api') ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN'}=${t}\n`, { mode: 0o600 }); ok('token saved'); } else bad('no token provided');
   } else ok('Claude credential found');
 
@@ -81,6 +86,9 @@ export async function init({ configPath, root, flags }) {
   saveConfig(configPath, cfg);
   const token = await ensureToken(stateDir);
   rl?.close();
-  console.log(`\nDone. Config: ${configPath}\n\nStart the factory:\n  npm start\n\nThen open  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n`);
+  // `npm start` only works inside a clone; from npx (or anywhere else) print the command that always works.
+  const inClone = fs.existsSync(path.join(process.cwd(), 'package.json')) && JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).name === 'agent-factory';
+  const startCmd = inClone ? 'npm start' : `node ${path.join(root, 'src', 'cli.mjs')} start --config=${configPath}`;
+  console.log(`\nDone. Config: ${configPath}\n\nStart the factory:\n  ${startCmd}\n\nThen open  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n\nKeep it running in the background (Linux):  node ${path.join(root, 'src', 'cli.mjs')} service --config=${configPath}\n`);
   return 0;
 }
