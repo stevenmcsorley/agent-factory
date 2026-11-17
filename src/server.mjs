@@ -1,0 +1,91 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { timingSafeEqual } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { doctor } from './doctor.mjs';
+import { assessTicket } from './gate.mjs';
+import { templateNames } from './github.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const UI = path.join(here, '..', 'ui');
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MAX_BODY = 64 * 1024;
+
+const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
+const fail = (status, message) => Object.assign(new Error(message), { status });
+
+async function readJson(req) {
+  if (!/^application\/json/i.test(req.headers['content-type'] ?? '')) throw fail(415, 'Content-Type must be application/json');
+  let size = 0; const chunks = [];
+  for await (const c of req) { size += c.length; if (size > MAX_BODY) throw fail(413, 'Request body too large'); chunks.push(c); }
+  try { return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch { throw fail(400, 'Invalid JSON'); }
+}
+
+// A small JSON API plus the static UI. Security model: loopback bind (enforced by config validation), bearer token on every
+// /api route (no cookies, so no CSRF), Host allowlist (DNS rebinding), Origin must match Host for writes, strict CSP, bounded bodies.
+export function createServer(engine, { token, allowedHosts }) {
+  if (!token || token.length < 24) throw new Error('A UI token of at least 24 characters is required');
+  const doc = { at: 0, v: null };
+
+  const routes = [
+    ['GET', /^\/api\/status$/, async () => engine.status()],
+    ['GET', /^\/api\/health$/, async () => { if (Date.now() - doc.at > 10000) { doc.v = await doctor(engine.cfg, { env: engine.env }); doc.at = Date.now(); } return doc.v; }],
+    ['GET', /^\/api\/templates$/, async () => templateNames()],
+    ['GET', /^\/api\/whoami$/, async () => ({ login: await engine.gh.whoami() })],
+    ['POST', /^\/api\/check-ticket$/, async (_m, body) => assessTicket({ title: body.title ?? '', body: body.body ?? '' }, engine.cfg.limits.gate)],
+    ['GET', /^\/api\/runs$/, async (_m, _b, url) => engine.runs({ project: url.searchParams.get('project') || undefined, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500) })],
+    ['POST', /^\/api\/control\/(pause|resume)$/, async (m) => { m[1] === 'pause' ? engine.pause() : engine.resume(); return engine.status(); }],
+    // Long jobs run in the background; the UI watches `busy` in /api/status.
+    ['POST', /^\/api\/control\/(tick|feedback)$/, async (m) => { if (engine.busy) throw fail(409, 'The factory is already running'); (m[1] === 'tick' ? engine.tickAll() : engine.feedbackAll()).catch((e) => console.error(e.message)); return { started: m[1] }; }],
+    ['GET', /^\/api\/projects$/, async () => engine.cfg.projects],
+    ['POST', /^\/api\/projects$/, async (_m, b) => engine.addProject(b)],
+    ['POST', /^\/api\/projects\/new$/, async (_m, b) => engine.createProject(b)],
+    ['DELETE', /^\/api\/projects\/([a-z0-9-]+)$/, async (m) => { engine.removeProject(m[1]); return { removed: m[1] }; }],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/(pause|resume)$/, async (m) => engine.setProjectPaused(m[1], m[2] === 'pause')],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m) => engine.listTickets(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m, b) => engine.createTicket(m[1], b)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/prs$/, async (m) => engine.listPrs(m[1])],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/log$/, async (m) => {
+      const dir = path.join(engine.projectDir(engine.project(m[1])), 'logs'); const files = fs.readdirSync(dir).sort();
+      return { lines: files.length ? fs.readFileSync(path.join(dir, files.at(-1)), 'utf8').split('\n').slice(-200) : [] };
+    }],
+  ];
+
+  const send = (res, status, body, headers = {}) => {
+    const data = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
+    res.writeHead(status, { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Type': 'application/json; charset=utf-8', ...headers });
+    res.end(data);
+  };
+
+  return http.createServer(async (req, res) => {
+    try {
+      const host = (req.headers.host ?? '').toLowerCase();
+      if (!allowedHosts.includes(host)) return send(res, 421, { error: 'Unrecognised Host header' });
+      const url = new URL(req.url, `http://${host}`);
+      if (!url.pathname.startsWith('/api/')) {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const name = url.pathname === '/' ? 'index.html' : path.basename(url.pathname);
+        const file = path.join(UI, name);
+        if (!TYPES[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, { error: 'Not found' });
+        return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)],
+          'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+      }
+      const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
+      if (!bearer || !same(bearer, token)) return send(res, 401, { error: 'Missing or invalid token' }, { 'WWW-Authenticate': 'Bearer' });
+      const write = req.method !== 'GET';
+      if (write && req.headers.origin && new URL(req.headers.origin).host !== host) return send(res, 403, { error: 'Cross-origin write refused' });
+      for (const [method, re, fn] of routes) {
+        const m = re.exec(url.pathname);
+        if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {}, url) ?? {});
+      }
+      send(res, 404, { error: 'No such endpoint' });
+    } catch (e) {
+      const status = e.status ?? 500;
+      if (status === 500) console.error('API error:', e.message);
+      send(res, status, { error: status === 500 ? String(e.message).slice(0, 300) : e.message });
+    }
+  });
+}
+
+export const hostsFor = (host, port) => (['127.0.0.1', 'localhost', '::1'].includes(host) ? [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`] : [`${host}:${port}`]);

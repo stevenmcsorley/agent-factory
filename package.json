@@ -1,0 +1,25 @@
+{
+  "name": "agent-factory",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.mjs start",
+    "init": "node src/cli.mjs init",
+    "doctor": "node src/cli.mjs doctor",
+    "build-image": "node src/cli.mjs build-image",
+    "test": "node --test --test-force-exit test/*.test.mjs"
+  },
+  "description": "Self-hosted autonomous software delivery: tickets in, reviewed pull requests out. Any CLI coding agent, sandboxed in Docker.",
+  "license": "Apache-2.0",
+  "bin": {
+    "agent-factory": "src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stevenmcsorley/agent-factory.git"
+  }
+}

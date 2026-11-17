@@ -1,0 +1,84 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import readline from 'node:readline/promises';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { run } from './util.mjs';
+import { withDefaults, saveConfig, validateConfig } from './config.mjs';
+import { doctor } from './doctor.mjs';
+import { inspectRepo, ensureLabels, whoami } from './github.mjs';
+
+const inherit = (cmd, args, env = {}) => new Promise((res) => spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env } }).on('close', (c) => res(c)));
+export const ok = (m) => console.log(`  ✓ ${m}`);
+export const bad = (m, fix) => console.log(`  ✗ ${m}${fix ? `\n      → ${fix}` : ''}`);
+
+export async function ensureToken(stateDir) {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const f = path.join(stateDir, 'ui-token');
+  if (!fs.existsSync(f)) fs.writeFileSync(f, randomBytes(24).toString('base64url') + '\n', { mode: 0o600 });
+  return fs.readFileSync(f, 'utf8').trim();
+}
+
+export async function buildImage(root, tag = 'agent-factory-agent:latest') {
+  console.log(`Building the agent sandbox image (${tag}); the first build takes a minute...`);
+  return (await inherit('docker', ['build', '-f', path.join(root, 'Dockerfile.agent'), '-t', tag, root])) === 0;
+}
+
+// Interactive (or flag-driven) first-run setup. Safe to re-run: it never overwrites an existing project list.
+export async function init({ configPath, root, flags }) {
+  const interactive = process.stdin.isTTY && !flags.yes;
+  const rl = interactive ? readline.createInterface({ input: process.stdin, output: process.stdout }) : null;
+  const ask = async (q, def = '') => (rl ? (await rl.question(`${q}${def ? ` [${def}]` : ''}: `)).trim() || def : def);
+  console.log('\nAgent Factory setup\n');
+
+  const existing = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+  const stateDir = path.resolve(path.dirname(configPath), existing.stateDir ?? 'state');
+
+  console.log('1. Checking prerequisites');
+  const pre = await doctor(withDefaults({ stateDir, agent: { kind: 'shell' }, sandbox: { kind: 'docker', agentImage: 'agent-factory-agent:latest' } }));
+  let blocked = false;
+  for (const c of pre.filter((x) => ['node', 'git', 'docker', 'github'].includes(x.id))) { if (c.ok) ok(c.detail); else { bad(c.detail, c.fix); blocked = true; } }
+  if (blocked) { rl?.close(); console.log('\nFix the items above and run setup again.'); return 1; }
+  if (!pre.find((c) => c.id === 'agent-image')?.ok && !(await buildImage(root))) { rl?.close(); return 1; }
+  ok('sandbox image ready');
+
+  console.log('\n2. Choosing an agent');
+  const kind = (flags.agent ? flags.agent : await ask('Which coding agent should do the work? (codex = ChatGPT subscription, claude = Claude subscription or API key)', existing.agent?.kind?.replace('Container', '') ?? 'codex')).toLowerCase();
+  if (!['codex', 'claude'].includes(kind)) { rl?.close(); console.log('Choose codex or claude.'); return 1; }
+  const agent = kind === 'codex' ? { kind: 'codexContainer', codexHome: existing.agent?.codexHome ?? path.join(os.homedir(), '.agent-factory', 'codex') } : { kind: 'claudeContainer' };
+  const secrets = path.join(stateDir, 'secrets.env');
+  if (kind === 'codex') {
+    fs.mkdirSync(agent.codexHome, { recursive: true, mode: 0o700 });
+    if (fs.existsSync(path.join(agent.codexHome, 'auth.json'))) ok('dedicated Codex login found');
+    else {
+      console.log(`  The factory uses its OWN Codex login (${agent.codexHome}), never your personal one.\n  A code and a link will appear; open the link, sign in, enter the code.`);
+      await inherit('codex', ['login', '--device-auth'], { CODEX_HOME: agent.codexHome });
+      fs.existsSync(path.join(agent.codexHome, 'auth.json')) ? ok('logged in') : bad('login did not complete', `run: CODEX_HOME=${agent.codexHome} codex login --device-auth`);
+    }
+  } else if (!/CLAUDE_CODE_OAUTH_TOKEN=|ANTHROPIC_API_KEY=/.test(fs.existsSync(secrets) ? fs.readFileSync(secrets, 'utf8') : '')) {
+    console.log('  Run `claude setup-token` in another terminal (needs a Claude subscription), or use an Anthropic API key.');
+    const t = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY || await ask('Paste the token here (stored in an owner-only file, never in the config)');
+    if (t) { fs.mkdirSync(stateDir, { recursive: true }); fs.writeFileSync(secrets, `${t.startsWith('sk-ant-api') ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN'}=${t}\n`, { mode: 0o600 }); ok('token saved'); } else bad('no token provided');
+  } else ok('Claude credential found');
+
+  console.log('\n3. Your first project (you can skip this and add projects in the UI)');
+  const projects = existing.projects ?? [];
+  const repo = flags.repo ?? (projects.length ? '' : await ask('GitHub repository the factory should work on (owner/name, blank to skip)'));
+  if (repo) {
+    try {
+      const info = await inspectRepo(repo); const user = await whoami(); await ensureLabels(repo);
+      projects.push({ id: repo.split('/')[1].toLowerCase().replace(/[^a-z0-9-]/g, '-'), repo, base: info.defaultBranch, tickets: { kind: 'github', allowedAuthors: [user] } });
+      ok(`${repo} added (base ${info.defaultBranch}, only issues by ${user} can queue work)`);
+    } catch (e) { bad(e.message); }
+  }
+
+  const cfg = withDefaults({ ...existing, agent, projects, stateDir });
+  const problems = validateConfig(cfg);
+  if (problems.length) { rl?.close(); console.log(problems.join('\n')); return 1; }
+  saveConfig(configPath, cfg);
+  const token = await ensureToken(stateDir);
+  rl?.close();
+  console.log(`\nDone. Config: ${configPath}\n\nStart the factory:\n  npm start\n\nThen open  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n`);
+  return 0;
+}

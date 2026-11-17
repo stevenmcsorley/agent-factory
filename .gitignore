@@ -1,0 +1,6 @@
+node_modules/
+state/
+agent-factory.json
+secrets.env
+*.log
+.env
