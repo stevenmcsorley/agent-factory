@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+- **Repository analysis** on add (and Re-analyze): language, package manager, detected test command (including apps in subfolders), A–E ratings for size, tests, duplication, upkeep and committed secrets, with an editable verify command. Saved with the project, summarised in the agent prompt, and flagged on Health when a project has no way to verify.
+- The ticket pre-check now only blocks tickets too short to act on; the agent proceeds on stated assumptions or asks specific questions (`NEEDS_INFO:`).
+- Pasting any repository URL (web, `.git`, ssh) is accepted.
+
 ## 0.3.0
 - **Control room UI** redesigned: live assembly line with a monoline animated icon per station, work-order pages, ticker, light and dark themes, self-hosted fonts.
 - **Inbox**: act on everything that needs a human (add detail and requeue, comment, edit, close, review PRs). Also available over MCP.

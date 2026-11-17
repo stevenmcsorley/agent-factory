@@ -64,7 +64,7 @@ Done. Start the factory:  npm start
 |---|---|
 | **1** | **Header.** Navigation (the **Inbox** badge counts what is waiting on you), the line's status lamp, **Run** (check for work now), **Pause**, the light/dark switch, and the command palette (`Ctrl`/`⌘` + `K`). |
 | **2** | **Ticker.** A live stream of what the line is doing, newest first. |
-| **3** | **Work-order intake.** Type what you want built or fixed. A live check tells you whether it is specific enough *before* you send it. |
+| **3** | **Work-order intake.** Type what you want built or fixed. A live check tells you if it is too short to act on; the agent handles the rest. |
 | **4** | **The line.** Queued tickets wait in the **hopper**; each running job rides the belt through six stations. A station lights up and its icon animates while it is working: *claim* (a check draws itself), *sandbox* (the crate opens), *agent* (the chip pulses), *verify* (a magnifier scans), *push* (an arrow rises), *ship* (a plane takes off). |
 | **5** | **Spec strip.** Shipped today, success rate, median time to PR, **waiting on you** (click it to open your inbox) and today's remaining capacity. |
 | **6** | **Cells.** One per project, with a status lamp (green fine, orange working, red needs you), a 14-day history and queue tallies. |
@@ -87,7 +87,7 @@ Done. Start the factory:  npm start
 
 1. **Describe it** in the intake box. Name the file or function and say how you will know it is done:
    > *Add an exported `slugify(text)` function in `slugify.js` that lowercases the text and replaces every run of non-alphanumeric characters with a single dash. Add tests and mention it in the README.*
-2. **Watch the hint.** "Clear enough to start" turns green. If it says *add detail*, the factory would only bounce the ticket, so add a little more.
+2. **Watch the hint.** "Good to go" turns green, sometimes with a tip. Only tickets too short to act on are held back; if the agent finds a request genuinely open-ended it asks specific questions in your inbox instead of guessing.
 3. **Issue the work order.** A ticket is created in *your* tracker, labelled `agent-ready`. The factory claims it on its next cycle (or press **Run** to go now).
 4. **Watch the line.** The ticket slides out of the hopper and along the belt. The whole thing usually takes under a minute for a small change.
 5. **Open the work order** to see exactly what happened:
@@ -119,6 +119,14 @@ Open **Cells → Add project**. You make two independent choices, so you can mix
 | **2** | Paste the access token, enter the repository, and press **Check access**. It tells you who you are connected as and the default branch *before* anything is saved. |
 | **3** | **Where your tickets live**: GitHub Issues, Ossicone, Jira or Linear. **Test connection** lists your projects so you can pick one. |
 | **4** | For Ossicone the wizard checks whether the server allows **sign-up** and links you to *Create an account*, *Sign in* and *Get an API token*. |
+
+**Repository analysis.** As soon as access checks out, the wizard takes a quick read-only look at the code and shows a **Code health** card:
+
+- **Ratings (A to E)** for size, tests, duplication, upkeep (huge files, TODO/FIXME) and committed secrets (it reports the file, never the key).
+- **How changes will be verified**: the detected test command (npm, pnpm, yarn, pytest, go, cargo, make, or an app in a subfolder such as `cd engine && npm test`). It is editable, so fix it here if it guessed wrong.
+- **Warnings**, such as "no way to run tests was found: pull requests will be UNVERIFIED".
+
+The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. This is a fast, line-based scan in the spirit of SonarQube's dashboard, not a full static analyser.
 
 <img src="guide/img/architecture.svg" alt="Architecture: ticket sources and code hosts around the factory, with the Docker sandbox below" width="100%">
 
@@ -281,7 +289,7 @@ node src/cli.mjs service      # follow the three commands in its header
 |---|---|
 | "Run" does nothing | Open **Health**: a paused factory, a missing token or a stopped Docker blocks work |
 | A ticket is never picked up | It must be created by *you* and carry `agent-ready` (or use the intake box). New issues can take a few seconds to appear in GitHub's lists; tickets created from the UI are found immediately |
-| Ticket bounced as "too vague" | Open the **Inbox**, add the file/function and the expected behaviour, **Requeue** |
+| Ticket is waiting for info | Open the **Inbox**, read the agent's questions, answer them in one line each, **Requeue** |
 | `Could not connect` in the wizard | The message comes straight from the service: usually a wrong token scope or URL |
 | `docker: permission denied` | Add your user to the `docker` group and log in again |
 | Health says the agent image is missing | `npm run build-image` |
@@ -300,4 +308,4 @@ node src/cli.mjs service      # follow the three commands in its header
 | **The line** | The six stations a job passes through |
 | **Route sheet** | The per-station timing of a finished work order |
 | **Inbox** | Everything that needs a human decision or review |
-| **Clarity check** | The test that stops a vague ticket from wasting an agent run |
+| **Needs info** | The agent (or the too-short check) wants an answer before building; answer it in the inbox |

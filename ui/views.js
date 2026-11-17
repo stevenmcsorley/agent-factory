@@ -164,6 +164,20 @@ export const projectsPage = {
     projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', null, h('a', { class: 'btn primary', href: '#/new' }, 'Add one')))]; },
 };
 
+// ---- repository analysis ("code health"): ratings in the SonarQube style, but a fast heuristic scan, and it says so
+const RATING_LABEL = { size: 'Size', tests: 'Tests', duplication: 'Duplication', maintainability: 'Upkeep', security: 'Secrets' };
+const RATING_HELP = { size: 'Smaller code is easier for an agent to work in', tests: 'Test code relative to source code', duplication: 'Repeated blocks across files', maintainability: 'Very large files and TODO/FIXME count', security: 'Committed keys or tokens' };
+const healthCard = (pr, { onReanalyze, verifyInput } = {}) => {
+  if (!pr) return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), onReanalyze ? h('button', { class: 'btn', onclick: onReanalyze }, 'Analyze now') : null), h('p', { class: 'muted' }, 'This repository has not been analyzed yet.'));
+  const m = pr.metrics;
+  return card('health', h('div', { class: 'card-h' }, h('h2', {}, 'Code health'), h('span', { class: 'muted small mono' }, [pr.languages?.join(' · ') || 'no recognised language', pr.packageManager ? ` · ${pr.packageManager}` : '', pr.framework ? ` · ${pr.framework}` : ''].join('')), onReanalyze ? h('button', { class: 'btn', onclick: onReanalyze }, 'Re-analyze') : null),
+    pr.warnings?.length ? pr.warnings.map((w) => h('div', { class: 'note bad' }, icon('alert', 14), ' ', w)) : null,
+    m ? h('div', { class: 'ratings' }, Object.entries(m.ratings).map(([k, v]) => h('div', { class: 'rating', title: RATING_HELP[k] }, h('b', { class: `grade r-${v}` }, v), h('span', {}, RATING_LABEL[k])))) : null,
+    m ? h('div', { class: 'facts' }, [[num(m.codeLines), 'lines of code'], [num(m.sourceFiles), 'source files'], [`${m.testFiles} (${m.testRatioPct}%)`, 'test files'], [`${m.duplicatedPct}%`, 'duplicated'], [num(m.todoCount), 'TODO / FIXME']].map(([v, l]) => h('div', { class: 'fact' }, h('b', {}, v), h('span', {}, l)))) : null,
+    h('div', { class: 'verify-row' }, h('label', {}, 'How changes are verified'), verifyInput ?? h('code', {}, pr.verify || 'nothing: pull requests will be unverified'), pr.verifyReason && !verifyInput ? h('span', { class: 'muted small' }, ` (${pr.verifyReason})`) : null),
+    m?.hotspots?.length ? h('details', {}, h('summary', {}, 'Largest files and details'), h('ul', { class: 'plain' }, m.hotspots.map((x) => h('li', { class: 'mono small' }, `${x.file} · ${x.lines} lines`)), (pr.notes ?? []).map((n) => h('li', { class: 'muted small' }, n)), pr.ci ? h('li', { class: 'muted small' }, `CI: ${pr.ci}`) : null, h('li', { class: 'muted small' }, 'Heuristic line-based scan, not a full static analyser like SonarQube.'))) : null);
+};
+
 // ---- single project
 let projTab = 'board';
 export const project = {
@@ -181,7 +195,7 @@ export const project = {
           m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
           h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
-      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), body]; },
+      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis updated', ctx.rerender) }) : null, body]; },
 };
 
 function board(tickets) {
@@ -277,7 +291,7 @@ export const health = {
 // ---- add / create project
 // The wizard is driven by /api/catalog, so a new tracker or code host appears here automatically once it is registered on the server.
 let npMode = 'existing';
-const wiz = { host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '' };
+const wiz = { host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '', analysis: null, verify: '' };
 const slugId = (r) => (r.split(/[?#]/)[0].replace(/\/+$/, '').replace(/\.git$/i, '').split(/[/:]/).pop() || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
 
 export const newProject = {
@@ -312,8 +326,9 @@ export const newProject = {
 
     const existing = () => {
       const hd = hostDef(), sd = srcDef();
-      const repoInput = h('input', { value: wiz.repo, placeholder: hd.repoHint ?? 'owner/name', oninput: (e) => { wiz.repo = e.target.value; wiz.hostCheck = null; if (!wiz.id) wiz.idAuto = true; } });
-      const testHost = h('button', { class: 'btn', onclick: act(async () => { wiz.hostCheck = await api('/hosts/test', { method: 'POST', body: { kind: wiz.host.kind, fields: wiz.host.fields, token: wiz.host.token, repo: wiz.repo.trim() } }).catch((e) => ({ error: e.message })); if (wiz.hostCheck.repo) wiz.repo = wiz.hostCheck.repo; /* show the canonical owner/name */ paint(); }) }, 'Check access');
+      const repoInput = h('input', { value: wiz.repo, placeholder: hd.repoHint ?? 'owner/name', oninput: (e) => { wiz.repo = e.target.value; wiz.analysis = null; wiz.hostCheck = null; if (!wiz.id) wiz.idAuto = true; } });
+      const runAnalysis = async () => { wiz.analysis = { loading: true }; paint(); wiz.analysis = await api('/hosts/analyze', { method: 'POST', body: { kind: wiz.host.kind, fields: wiz.host.fields, token: wiz.host.token, repo: wiz.repo.trim(), base: wiz.base.trim() || undefined } }).catch((e) => ({ error: e.message })); wiz.verify = wiz.analysis.profile?.verify ?? ''; paint(); };
+      const testHost = h('button', { class: 'btn', onclick: act(async () => { wiz.hostCheck = await api('/hosts/test', { method: 'POST', body: { kind: wiz.host.kind, fields: wiz.host.fields, token: wiz.host.token, repo: wiz.repo.trim() } }).catch((e) => ({ error: e.message })); if (wiz.hostCheck.repo) wiz.repo = wiz.hostCheck.repo; /* show the canonical owner/name */ wiz.analysis = null; paint(); if (!wiz.hostCheck.error) runAnalysis(); }) }, 'Check access');
       const testSrc = h('button', { class: 'btn', onclick: act(async () => { wiz.srcCheck = await api('/sources/test', { method: 'POST', body: { kind: wiz.source.kind, fields: wiz.source.fields, token: wiz.source.token } }).catch((e) => ({ error: e.message })); if (wiz.srcCheck.projects?.length && !wiz.source.pick) wiz.source.pick = String(wiz.srcCheck.projects[0].id); paint(); }) }, sd.kind === 'github' ? 'Check' : 'Test connection');
       const ready = wiz.hostCheck && !wiz.hostCheck.error && (sd.kind === 'github' || (wiz.srcCheck && !wiz.srcCheck.error && (!sd.pick || wiz.source.pick)));
       const name = h('input', { value: wiz.id || slugId(wiz.repo), placeholder: 'short-name', oninput: (e) => { wiz.id = e.target.value; } });
@@ -321,12 +336,14 @@ export const newProject = {
       const add = h('button', { class: 'btn primary', disabled: !ready, onclick: act(async () => {
         const id = (wiz.id || slugId(wiz.repo)); const body = { id, repo: wiz.repo.trim(), ...(wiz.base.trim() ? { base: wiz.base.trim() } : {}),
           ...(wiz.host.kind !== 'github' ? { host: { kind: wiz.host.kind, ...wiz.host.fields }, hostSecret: wiz.host.token || undefined } : {}),
-          source: { kind: wiz.source.kind, fields: wiz.source.fields, ...(sd.pick ? { pick: wiz.source.pick } : {}) }, ...(wiz.source.token ? { secret: wiz.source.token } : {}) };
-        const r = await api('/projects', { method: 'POST', body }); wiz.host.token = wiz.source.token = ''; location.hash = `#/project/${r.id}`; }, 'Project added') }, icon('plus', 15), 'Add project');
+          source: { kind: wiz.source.kind, fields: wiz.source.fields, ...(sd.pick ? { pick: wiz.source.pick } : {}) }, ...(wiz.source.token ? { secret: wiz.source.token } : {}),
+          ...(wiz.analysis?.profile ? { profile: wiz.analysis.profile, ...(wiz.verify.trim() && wiz.verify.trim() !== wiz.analysis.profile.verify ? { verify: wiz.verify.trim() } : {}) } : {}) };
+        const r = await api('/projects', { method: 'POST', body }); wiz.host.token = wiz.source.token = ''; wiz.analysis = null; wiz.verify = ''; location.hash = `#/project/${r.id}`; }, 'Project added') }, icon('plus', 15), 'Add project');
       return h('div', { class: 'wiz' },
         card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, '1'), h('div', {}, h('h2', {}, 'Where does your code live?'), h('p', { class: 'muted small' }, 'The factory pushes a branch and opens a draft pull request here. It never merges.'))),
           h('div', { class: 'opts' }, catalog.hosts.map(hostCard)), h('div', { class: 'fields' }, hd.fields.map((f) => fieldRow(f, wiz.host))),
           h('label', {}, 'Repository *'), h('div', { class: 'row nowrap' }, repoInput, testHost), wiz.hostCheck ? (wiz.hostCheck.error ? check(false, wiz.hostCheck.error) : check(true, `Connected as ${wiz.hostCheck.user} · default branch ${wiz.hostCheck.defaultBranch} · ${wiz.hostCheck.private ? 'private' : 'public'}${wiz.hostCheck.supportsPrs === false ? ' · no PR automation (a branch is pushed for you to open a PR)' : ''}`)) : null),
+        wiz.analysis ? (wiz.analysis.loading ? card('', h('p', { class: 'muted' }, 'Analyzing the repository (a quick read-only look at the code)…')) : wiz.analysis.error ? card('', check(false, `Could not analyze: ${wiz.analysis.error}. You can still add the project.`)) : healthCard(wiz.analysis.profile, { verifyInput: h('input', { value: wiz.verify, placeholder: 'e.g. npm ci && npm test (leave empty for none)', oninput: (e) => { wiz.verify = e.target.value; } }) })) : null,
         card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, '2'), h('div', {}, h('h2', {}, 'Where do your tickets live?'), h('p', { class: 'muted small' }, 'Where you write the work you want done. Only tickets by you can queue work.'))),
           h('div', { class: 'opts' }, catalog.sources.map(srcCard)), h('div', { class: 'fields' }, sd.fields.map((f) => fieldRow(f, wiz.source))), sd.signup ? signupPanel() : null,
           sd.kind !== 'github' ? h('div', { class: 'row gap-t' }, testSrc) : null,

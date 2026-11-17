@@ -12,6 +12,7 @@ import { spentToday, runsToday } from './budget.mjs';
 import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
 import { normalizeRepo } from './repoRef.mjs';
+import { analyzeRepo, profileSummary } from './analyze.mjs';
 import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
@@ -19,6 +20,15 @@ import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.m
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
 // The engine owns projects and runs them. Adapter factories are injectable so the whole thing is testable without GitHub/Docker.
+// A profile arrives from the browser: keep only known, bounded fields so it cannot smuggle anything into the agent prompt.
+const sanitizeMetrics = (m) => { if (!m || typeof m !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e9, Math.round(v))) : 0); const r = (v) => (/^[A-E]$/.test(v) ? v : 'E');
+  return { files: n(m.files), codeLines: n(m.codeLines), commentLines: n(m.commentLines), blankLines: n(m.blankLines), sourceFiles: n(m.sourceFiles), testFiles: n(m.testFiles), testRatioPct: n(m.testRatioPct), duplicatedPct: n(m.duplicatedPct), todoCount: n(m.todoCount), largeFiles: n(m.largeFiles), heuristic: true, capped: !!m.capped,
+    languages: (Array.isArray(m.languages) ? m.languages : []).slice(0, 6).map((l) => ({ name: String(l?.name ?? '').slice(0, 20), lines: n(l?.lines) })), hotspots: (Array.isArray(m.hotspots) ? m.hotspots : []).slice(0, 5).map((h) => ({ file: String(h?.file ?? '').replace(/[^\w./@+-]/g, '').slice(0, 120), lines: n(h?.lines) })),
+    secrets: (Array.isArray(m.secrets) ? m.secrets : []).slice(0, 10).map((x) => ({ file: String(x?.file ?? '').replace(/[^\w./@+-]/g, '').slice(0, 120), kind: String(x?.kind ?? '').slice(0, 30) })), ratings: Object.fromEntries(['size', 'tests', 'duplication', 'maintainability', 'security'].map((k) => [k, r(m.ratings?.[k])])) }; };
+const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null); const arr = (v, n, m) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, m)).slice(0, n) : []);
+  return { languages: arr(p.languages, 6, 30), packageManager: str(p.packageManager, 20), framework: str(p.framework, 30), verify: str(p.verify, 500), image: str(p.image, 80), verifyReason: str(p.verifyReason), tests: !!p.verify, hasRepoConfig: !!p.hasRepoConfig, hasReadme: !!p.hasReadme, ci: str(p.ci, 30),
+    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
+
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
@@ -52,7 +62,7 @@ export class Engine {
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -145,7 +155,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -231,7 +241,7 @@ export class Engine {
 
   // Add a project. Any ticket source × any code host. Tokens arrive as `secret` (tickets) / `hostSecret` (code host), are verified
   // against the real service BEFORE anything is saved, are written only to the secrets file, and never appear in the config or any response.
-  async addProject({ id, repo: repoInput, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors }) {
+  async addProject({ id, repo: repoInput, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors, profile, verify }) {
     const bad = (m) => Object.assign(new Error(m), { status: 400 });
     const kindGuess = host?.kind ?? (normalizeRepo(repoInput).host ?? 'github');
     const repo = this._repoFor(kindGuess, repoInput); if (!host && kindGuess !== 'github') host = { kind: kindGuess }; // pasted a GitLab/Bitbucket URL with no host chosen: use it
@@ -258,7 +268,7 @@ export class Engine {
     }
     t ??= hk === 'github' ? { kind: 'github', allowedAuthors: hostInfo.user ? [hostInfo.user] : [] } : null;
     if (!t) throw bad(`Choose where tickets live (GitHub Issues only works with a GitHub repo): Jira, Linear or Ossicone`);
-    const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...(config ? { config } : {}), ...(allowedRepos ? { allowedRepos } : {}),
+    const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...((config || verify) ? { config: { ...(config ?? {}), ...(verify ? { verify: String(verify).slice(0, 500) } : {}) } } : {}), ...(profile && typeof profile === 'object' ? { profile: sanitizeProfile(profile) } : {}), ...(allowedRepos ? { allowedRepos } : {}),
       ...((feedbackAuthors ?? (t.kind !== 'github' && hostInfo.user ? [hostInfo.user] : null)) ? { feedbackAuthors: feedbackAuthors ?? [hostInfo.user] } : {}) };
     const problems = validateConfig({ ...this.cfg, projects: [...this.cfg.projects, p] });
     if (problems.length) throw bad(problems.join('; '));
@@ -268,6 +278,25 @@ export class Engine {
     if (t.kind === 'github') await this.gh.ensureLabels(repo);
     this.cfg.projects.push(p); this._persist();
     return p;
+  }
+  // Shallow, read-only clone -> profile. Nothing is executed from the repo and nothing is persisted here.
+  async _analyzeWith(hostAdapter, repo, base) {
+    const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, log: path.join(this.cfg.stateDir, 'analyze.log') });
+    let ws;
+    try { ws = await sb.create({ cloneUrl: hostAdapter.cloneUrl(repo), branch: 'analyze', base, newBranch: false, gitEnv: hostAdapter.gitEnv(), depth: 1 }); return analyzeRepo(ws.dir); }
+    catch (e) { const m = String(e.message ?? e); if (/clone failed/.test(m) && /(Remote branch .* not found|empty|did not match)/i.test(m)) return { ...analyzeRepo(os.tmpdir() + '/__nonexistent__'), warnings: ['the base branch was not found or the repository is empty'], languages: [], topLevel: [] }; throw Object.assign(new Error(m.slice(0, 300)), { status: 400 }); }
+    finally { try { ws?.destroy(); } catch { /* best effort */ } }
+  }
+  async analyzeDraft({ kind = 'github', fields = {}, token, repo: input, base }) {
+    const repo = this._repoFor(kind, input); const env = { ...this.env }; const draft = { id: 'draft', repo, host: { kind, ...fields, tokenEnv: 'AF_DRAFT_GIT_TOKEN' } };
+    if (token) env.AF_DRAFT_GIT_TOKEN = token; else if (fields.tokenEnv) env.AF_DRAFT_GIT_TOKEN = this.env[fields.tokenEnv];
+    const hostAdapter = buildHost(draft, { env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const baseBranch = base || (kind === 'github' ? (await this.gh.inspectRepo(repo)).defaultBranch : (await this._testHost({ kind, fields, token, repo })).defaultBranch);
+    return { repo, base: baseBranch, profile: await this._analyzeWith(hostAdapter, repo, baseBranch) };
+  }
+  async analyzeProject(id) {
+    const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    p.profile = await this._analyzeWith(hostAdapter, p.repo, p.base); this._persist(); return p.profile;
   }
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }

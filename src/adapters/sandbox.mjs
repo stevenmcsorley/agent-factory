@@ -21,9 +21,9 @@ export function destroyDir(dir, log) {
 export function sandbox({ kind = 'docker', image = 'node:22-bookworm', network = 'bridge', extraEnv = {}, log }) {
   return {
     kind,
-    async create({ cloneUrl, branch, base = 'main', newBranch = true, gitEnv = {} }) {
+    async create({ cloneUrl, branch, base = 'main', newBranch = true, gitEnv = {}, depth = 50 }) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-'));
-      const c = await run('git', ['clone', '--depth', '50', '--branch', base, cloneUrl, dir], { log, env: { ...process.env, ...gitEnv } });
+      const c = await run('git', ['clone', '--depth', String(depth), '--branch', base, cloneUrl, dir], { log, env: { ...process.env, ...gitEnv } });
       if (c.code !== 0) throw new Error(`clone failed: ${c.out.replace(/Authorization: [^\s]+/g, 'Authorization: ***').slice(0, 400)}`);
       if (newBranch) {
         const b = await run('git', ['checkout', '-b', branch], { cwd: dir, log });

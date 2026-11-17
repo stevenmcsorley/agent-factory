@@ -30,6 +30,8 @@ export async function doctor(cfg, { exec = run, env = process.env } = {}) {
   }
   const missing = (cfg.projects ?? []).flatMap((p) => [p.tickets?.tokenEnv, p.host?.tokenEnv].filter(Boolean).filter((n) => !env[n]).map((n) => `${p.id}: ${n}`));
   add('secrets', missing.length === 0, missing.length ? `Missing tokens: ${missing.join(', ')}` : 'All project tokens present', 'Re-add the project in the UI, or put NAME=token lines in state/secrets.env');
+  const unverified = (cfg.projects ?? []).filter((p) => !(p.config?.verify || p.profile?.verify) && !p.profile?.hasRepoConfig).map((p) => p.id);
+  add('verification', unverified.length === 0, unverified.length ? `No test command known for: ${unverified.join(', ')}. Pull requests there may be unverified (re-analyze or set a verify command)` : 'Every project has a way to verify changes', 'Open the project and press Re-analyze, or set `config.verify` / add .agent-factory.json to the repo');
   const problems = validateConfig(cfg);
   add('config', problems.length === 0, problems.length ? problems.join('; ') : `${cfg.projects.length} project(s), valid`, 'Fix the listed config problems');
   add('running', !fs.existsSync(path.join(cfg.stateDir, 'STOP')), fs.existsSync(path.join(cfg.stateDir, 'STOP')) ? 'Paused (STOP file present)' : 'Not paused', 'Resume from the UI or delete the STOP file');

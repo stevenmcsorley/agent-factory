@@ -39,6 +39,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/catalog$/, async () => engine.catalog()],
     ['POST', /^\/api\/sources\/test$/, async (_m, b) => engine.testSource(b)],
     ['POST', /^\/api\/hosts\/test$/, async (_m, b) => engine.testHost(b)],
+    ['POST', /^\/api\/hosts\/analyze$/, async (_m, b) => engine.analyzeDraft(b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.analyzeProject(m[1])],
     ['POST', /^\/api\/sources\/signup-info$/, async (_m, b) => engine.signupInfo(b.baseUrl).catch((e) => { throw fail(400, e.message); })],
     ['GET', /^\/api\/inbox$/, async () => engine.inbox()],
     ['GET', /^\/api\/inbox\/count$/, async () => engine.inboxCount()],
