@@ -9,6 +9,10 @@ const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...k
 const head = (title, sub, ...actions) => h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, title), sub ? h('p', { class: 'sub' }, sub) : null), h('div', { class: 'row' }, actions));
 const ATTENTION = ['failed', 'needs-info', 'needs-human'];
 const HOST_LABEL = { github: 'GitHub', gitlab: 'GitLab', bitbucket: 'Bitbucket', git: 'git' }; const SRC_LABEL = { github: 'GitHub Issues', ossicone: 'Ossicone', jira: 'Jira', linear: 'Linear', file: 'file' };
+// The pre-check only blocks tickets too short to act on. Anything else is fine: the agent proceeds on reasonable assumptions, or asks a specific
+// question if the request is genuinely open-ended. So the live hint is encouraging, with an optional tip, never a scary refusal.
+const hintFor = (r) => (r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Good to go', r.tips?.length ? h('span', { class: 'tip' }, ` · tip: ${r.tips[0]}`) : null)
+  : h('span', { class: 'warn' }, icon('alert', 14), ' ', r.problems.join('; ')));
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour12: false });
 const woId = (id) => `WO-${String(id).toUpperCase()}`;
 
@@ -27,7 +31,7 @@ function intake(projects, rerender) {
   const body = h('textarea', { rows: 3, placeholder: 'Which files or functions, the expected behaviour, and how we will know it is done.', 'aria-label': 'Ticket details', hidden: true });
   const hint = h('div', { class: 'hint' }); let t;
   const check = () => { clearTimeout(t); t = setTimeout(async () => { if (!title.value && !body.value) return hint.replaceChildren(); try { const r = await api('/check-ticket', { method: 'POST', body: { title: title.value, body: body.value } });
-    hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' Add detail: ', r.problems.join('; '))); } catch { /* ignore */ } }, 300); };
+    hint.replaceChildren(hintFor(r)); } catch { /* ignore */ } }, 300); };
   title.addEventListener('focus', () => { body.hidden = false; }); title.addEventListener('input', check); body.addEventListener('input', check);
   const go = act(async () => { if (sel.value === '__new') { location.hash = '#/new'; return; } await api(`/projects/${sel.value}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; hint.replaceChildren(); }, 'Work order issued. The factory picks it up on its next cycle.', rerender);
   return h('section', { class: 'card intake reg' }, h('div', { class: 'eyebrow' }, icon('spark', 13), 'Work order intake', h('span', { class: 'kbd-hint' }, 'CTRL+K for commands')), h('span', { class: 'caret' }, '›'), title, body,
@@ -116,7 +120,7 @@ function decisionCard(it, ctx) {
   const reason = lastFactory?.body?.replace(/\*\*/g, '') ?? (it.run?.error ? `Last run: ${it.run.status} (${it.run.error})` : it.run ? `Last run: ${it.run.status}` : 'The factory stopped on this ticket.');
   const note = h('textarea', { rows: 3, placeholder: it.state === 'needs-info' ? 'Say exactly what should change and how we will know it is done: name the files or functions and the expected behaviour.' : 'Optional: add guidance for the retry, e.g. “use exponential backoff, and test the failure path”.' });
   const hint = h('div', { class: 'hint' }); let t;
-  const check = () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: it.title, body: `${it.body ?? ''}\n${note.value}` } }).catch(() => null); if (r) hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' Still too vague: ', r.problems.join('; '))); }, 300); };
+  const check = () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: it.title, body: `${it.body ?? ''}\n${note.value}` } }).catch(() => null); if (r) hint.replaceChildren(hintFor(r)); }, 300); };
   note.addEventListener('input', check);
   const base = `/projects/${it.project}/tickets/${it.id}`; const rerender = ctx.rerender;
   const [tone, label] = STATE_LABEL[it.state] ?? ['', it.state];
@@ -195,7 +199,7 @@ const prsList = (prs) => card('', prs.length ? h('ul', { class: 'runs' }, prs.ma
 
 function ticketForm(id, ctx) {
   const title = h('input', { placeholder: 'Short title', maxlength: 200 }), body = h('textarea', { rows: 6, placeholder: 'What should change, and how will we know it is done? Name files/functions and expected behaviour.' }), hint = h('div', { class: 'hint' }); let t;
-  const check = () => { clearTimeout(t); t = setTimeout(async () => { if (!title.value && !body.value) return hint.replaceChildren(); const r = await api('/check-ticket', { method: 'POST', body: { title: title.value, body: body.value } }).catch(() => null); if (r) hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' The factory will ask for more detail: ', r.problems.join('; '))); }, 300); };
+  const check = () => { clearTimeout(t); t = setTimeout(async () => { if (!title.value && !body.value) return hint.replaceChildren(); const r = await api('/check-ticket', { method: 'POST', body: { title: title.value, body: body.value } }).catch(() => null); if (r) hint.replaceChildren(hintFor(r)); }, 300); };
   title.addEventListener('input', check); body.addEventListener('input', check);
   return card('form', h('label', {}, 'Title'), title, h('label', {}, 'Details'), body, hint, h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: act(async () => { await api(`/projects/${id}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; projTab = 'board'; }, 'Work order issued.', ctx.rerender) }, 'Issue work order'), h('span', { class: 'muted small' }, 'Creates a ticket labelled agent-ready in your tracker.')));
 }
@@ -218,6 +222,8 @@ export const runPage = {
         return h('li', { class: ph ? (last ? 'bad' : 'done') : 'todo' }, h('span', { class: 'n' }, ph ? (last ? icon('x', 14) : icon('check', 14)) : `0${i + 1}`), h('span', { class: 'pn' }, stationGlyph(k, 22), label, ph?.detail ? h('small', {}, String(ph.detail).slice(0, 60)) : null),
           h('div', { class: `bar-x ph-${k}` }, ph ? h('i', { style: { width: `${Math.max(3, ((ph.ms ?? 0) / maxMs) * 100)}%` } }) : null), h('span', { class: 't' }, ph ? dur(ph.ms) : '–')); }))),
       run.error ? h('div', { class: 'callout bad' }, icon('alert', 16), run.error) : null,
+      run.assumptions ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Assumptions the agent made'), h('span', { class: 'stamp warn' }, 'please check')), h('pre', { class: 'log-pre wrap' }, run.assumptions)) : null,
+      run.question ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'What the agent asked'), h('span', { class: 'stamp warn' }, 'needs your answer')), h('pre', { class: 'log-pre wrap' }, run.question), h('div', { class: 'row gap-t' }, h('a', { class: 'btn primary', href: '#/inbox' }, 'Answer in the inbox'))) : null,
       h('div', { class: 'cols-2' },
         run.agentSummary ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Operator notes')), h('pre', { class: 'log-pre wrap' }, run.agentSummary)) : null,
         run.changed?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, `Parts changed · ${run.changed.length}`)), h('div', { class: 'files' }, run.changed.map((f) => h('code', {}, f)))) : null),
@@ -333,7 +339,7 @@ export const newProject = {
 
     const create = () => { const f = {}; f.name = h('input', { placeholder: 'my-new-app' }); f.desc = h('input', { placeholder: 'One-line description' }); f.tpl = h('select', {}, templates.map((t) => h('option', { value: t }, t))); f.vis = h('select', {}, h('option', { value: 'private' }, 'private'), h('option', { value: 'public' }, 'public'));
       f.spec = h('textarea', { rows: 7, placeholder: 'Describe what to build: features, behaviour, what “done” looks like. This becomes the first ticket, and the factory starts on it straight away.' }); const hint = h('div', { class: 'hint' }); let t;
-      f.spec.addEventListener('input', () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: `Build ${f.name.value}`, body: f.spec.value } }).catch(() => null); if (r) hint.replaceChildren(r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Clear enough to start') : h('span', { class: 'warn' }, icon('alert', 14), ' ', r.problems.join('; '))); }, 300); });
+      f.spec.addEventListener('input', () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: `Build ${f.name.value}`, body: f.spec.value } }).catch(() => null); if (r) hint.replaceChildren(hintFor(r)); }, 300); });
       return card('form', h('div', { class: 'note info' }, 'Creating a brand-new repository is available for GitHub. For GitLab, Bitbucket or another host, create the empty repo there and use “Existing repo”.'),
         h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Repository name'), f.name), h('div', {}, h('label', {}, 'Description'), f.desc)), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Starter template'), f.tpl), h('div', {}, h('label', {}, 'Visibility'), f.vis)),
         h('label', {}, 'What should it do?'), f.spec, hint, h('p', { class: 'muted small' }, `Creates ${who.login || 'your'}/<name> on GitHub, scaffolds the template and queues your description as the first ticket.`),

@@ -67,3 +67,26 @@ test('STOP file halts the factory', async () => {
   const [rec] = await tick(deps);
   assert.equal(rec.status, 'stopped');
 });
+
+import { gitVcs as gitVcs2 } from '../src/adapters/vcs.mjs';
+test('agent answers NEEDS_INFO: no changes pushed, the specific question lands on the ticket, state is needs-info', async () => {
+  const { deps, remote, tpath } = setup('echo "NEEDS_INFO: Faster how? Which operation is slow, and what is the target time?"', undefined);
+  deps.config.gate = false; const [rec] = await tick(deps);
+  assert.equal(rec.status, 'needs-info'); assert.match(rec.question, /Which operation is slow/);
+  const t = JSON.parse(fs.readFileSync(tpath))[0];
+  assert.ok(t.labels.includes('agent-needs-info') && !t.labels.includes('agent-working')); assert.match(t.comments.at(-1), /needs a little more information[\s\S]*Which operation is slow[\s\S]*inbox/);
+  assert.doesNotMatch(execFileSync('git', ['branch', '-a'], { cwd: remote }).toString(), /agent\//);
+});
+
+test('agent proceeds on reasonable assumptions: they are put in the PR body and on the ticket', async () => {
+  let pr; const { deps, tpath } = setup("echo hi > b.txt; printf 'Created b.txt.\\n\\nAssumptions:\\n- the file is named b.txt\\n- it lives in the repo root\\n'", 'test -f b.txt');
+  deps.vcs = gitVcs2({ openPr: (a) => { pr = a; return 'https://example.test/pr/1'; } }); deps.config.gate = false;
+  const [rec] = await tick(deps);
+  assert.equal(rec.status, 'ok'); assert.match(rec.assumptions, /named b\.txt/); assert.match(pr.body, /### Assumptions the agent made\n- the file is named b\.txt/);
+  assert.match(JSON.parse(fs.readFileSync(tpath))[0].comments.at(-1), /Assumptions the agent made \(please check\):\n- the file is named b\.txt/);
+});
+
+test('a normal summary that merely mentions NEEDS_INFO is not a request for information', async () => {
+  const { deps } = setup("echo hi > b.txt; echo 'Done. (Did not need NEEDS_INFO: this time.)'", 'test -f b.txt'); deps.config.gate = false;
+  assert.equal((await tick(deps))[0].status, 'ok');
+});

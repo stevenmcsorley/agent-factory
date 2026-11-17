@@ -204,3 +204,5 @@ h2 .icon { display: none; } .stage-wrap { padding: 8px 4px 4px; }
 .why { background: var(--bg-2); border: 1px solid var(--line); padding: 12px 15px; margin: 12px 0; } .why p { margin: 7px 0 0; font: 500 13.5px/1.55 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; } .ticket-text summary { cursor: pointer; font: 600 11px var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--muted); padding: 6px 0; } .ticket-text pre { margin-top: 8px; max-height: 220px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } .odo { position: relative; } .odo-col { user-select: none; -webkit-user-select: none; }
 @media (max-width: 1100px) { .spec-link { border-bottom: 1px solid var(--line); } }
+
+.hint .tip { color: var(--muted); }

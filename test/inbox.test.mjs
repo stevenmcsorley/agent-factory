@@ -17,7 +17,7 @@ function setup(tickets) {
   const e = new Engine(cfg, { configPath: path.join(root, 'c.json'), factories: { tickets: (p) => fileTickets(p.tickets.path), hostAdapter: () => ({ pr: { listAgentPrs: async () => [{ number: 9, branch: 'agent/3-add-it', sha: 's', title: 'Add it' }] }, prUrl: (_r, n) => `https://example.test/pr/${n}`, gitEnv: () => ({}), cloneUrl: () => 'x' }) } });
   return { e, tp, read: () => JSON.parse(fs.readFileSync(tp, 'utf8')) };
 }
-const vague = { id: 1, title: 'Make it better', body: 'Improve it', labels: ['agent-needs-info'], comments: ['agent-factory did not start work: it is very short'] };
+const vague = { id: 1, title: 'Fix it', body: 'Now', labels: ['agent-needs-info'], comments: ['agent-factory did not start work: it is too short to act on'] };
 const failed = { id: 2, title: 'Add a retry helper', body: 'Add `retry(fn, n)` to util.js that retries fn up to n times and rethrows the last error; test it.', labels: ['agent-failed'], comments: ['agent-factory gave up: verify-failed after 2 attempt(s).'] };
 const review = { id: 3, title: 'Add it', body: 'Add `it()` to it.js returning 1, and it should have a test.', labels: ['agent-review'], comments: [] };
 const other = { id: 4, title: 'unrelated', body: 'x', labels: [] };
@@ -37,10 +37,9 @@ test('requeue: vague tickets are refused with advice; adding detail fixes and re
   const { e, read } = setup([vague]);
   await assert.rejects(e.ticketAction('app', 1, 'requeue', {}), /Still too vague/);
   assert.deepEqual(read()[0].labels, ['agent-needs-info']);                                                    // untouched on refusal
-  await assert.rejects(e.ticketAction('app', 1, 'requeue', { details: 'more please' }), /Still too vague/);
   const r = await e.ticketAction('app', 1, 'requeue', { details: 'Add an exported `improve(list)` function to math.js that returns a sorted copy of list, without mutating the input, and add tests for it.' });
   assert.equal(r.requeued, true); const t = read()[0];
-  assert.deepEqual(t.labels, ['agent-ready']); assert.match(t.body, /Improve it\n\n---\nAdditional detail:\nAdd an exported `improve/); assert.match(t.comments.at(-1), /requeued by you with extra detail/);
+  assert.deepEqual(t.labels, ['agent-ready']); assert.match(t.body, /Now\n\n---\nAdditional detail:\nAdd an exported `improve/); assert.match(t.comments.at(-1), /requeued by you with extra detail/);
   e.outcomes.set('app#1', { status: 'needs-info', at: Date.now() }); await e.ticketAction('app', 1, 'requeue', {}); assert.equal(e.outcomes.has('app#1'), false);
 });
 

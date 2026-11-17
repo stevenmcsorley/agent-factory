@@ -14,12 +14,18 @@ import { gitVcs } from '../src/adapters/vcs.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fa-'));
 
-test('gate: rejects vague/short tickets, accepts concrete ones, configurable', () => {
-  assert.equal(assessTicket({ title: 'Make the math module better', body: 'It could be better. Improve it.' }).ok, false);
-  assert.equal(assessTicket({ title: 'Fix bug', body: '' }).problems.length, 2);
-  assert.ok(assessTicket({ title: 'Add clamp function', body: 'Add an exported `clamp(n, min, max)` to math.mjs that limits n, throwing RangeError if min > max. Add tests.' }).ok);
-  assert.ok(assessTicket({ title: 'Improve the login form so it works for everybody', body: 'Users should see an error when the password is wrong.' }).ok);
-  assert.ok(assessTicket({ title: 'x', body: '' }, { minWords: 1, requireAnchor: false }).ok);
+test('gate: only stops tickets too short to act on; everything else passes (tips are advice, not refusals)', () => {
+  assert.equal(assessTicket({ title: 'Fix', body: '' }).ok, false);                                                 // 1 word
+  assert.equal(assessTicket({ title: 'Improve it', body: 'better' }).ok, false);                                    // 3 words: nothing to act on
+  // the reported false positive: a perfectly clear everyday ticket must NOT be refused
+  const user = assessTicket({ title: 'just add a blank text file in the root directory', body: 'just add a blank text file in the root directory that says hello world' });
+  assert.equal(user.ok, true); assert.deepEqual(user.problems, []);
+  assert.equal(assessTicket({ title: 'add a notes', body: 'add a notes file that says hello factory' }).ok, true);   // the other bounced ticket (11 words)
+  assert.equal(assessTicket({ title: 'Make the math module better', body: 'It could be better. Improve it.' }).ok, true); // open-ended: the AGENT decides and asks
+  assert.equal(assessTicket({ title: 'Do the thing for the app please', body: '' }).tips.length, 1);              // no anchor -> a tip
+  assert.equal(assessTicket({ title: 'Add `clamp(n, min, max)` to math.mjs', body: 'It should throw when min > max.' }).tips.length, 0);
+  const strict = assessTicket({ title: 'Do the thing for the app please', body: '' }, { requireAnchor: true }); assert.equal(strict.ok, false); assert.match(strict.problems[0], /nothing concrete/);
+  assert.equal(assessTicket({ title: 'x', body: '' }, { minWords: 1 }).ok, true);
 });
 
 test('detectVerify picks the right command per ecosystem; explicit npm test absent -> null', () => {
@@ -72,7 +78,7 @@ test('tick: vague ticket is bounced with a question, no sandbox, no run counted'
   assert.equal(rec.status, 'needs-info');
   const t = JSON.parse(fs.readFileSync(f.tpath))[0];
   assert.ok(t.labels.includes('agent-needs-info') && !t.labels.includes('agent-ready'));
-  assert.match(t.comments[0], /how to tell it is done/);
+  assert.match(t.comments[0], /too short to act on/);
   const runs = fs.readFileSync(path.join(f.deps.stateDir, 'runs.jsonl'), 'utf8');
   assert.ok(!runs.includes('"finished"'));
 });

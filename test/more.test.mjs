@@ -155,3 +155,22 @@ test('feedback: comments on a PR the factory did not open are baselined, not rep
   const host2 = fakeHost(ours.pr, [{ failedChecks: [], pending: false, comments: [old] }]);
   assert.equal((await feedbackTick({ ...ours.deps, host: host2 }))[0].status, 'ok');
 });
+
+import { parseNeedsInfo, parseAssumptions } from '../src/triage.mjs';
+import { buildPrompt } from '../src/factory.mjs';
+
+test('triage: NEEDS_INFO only counts on the first line; assumptions are extracted', () => {
+  assert.equal(parseNeedsInfo('NEEDS_INFO: Which file should it go in?\nAnd what should it say?'), 'Which file should it go in?\nAnd what should it say?');
+  assert.equal(parseNeedsInfo('  NEEDS_INFO:\n1. Faster how?'), '1. Faster how?');
+  assert.match(parseNeedsInfo('NEEDS_INFO:'), /did not say what/);
+  assert.equal(parseNeedsInfo('Done. I did not need NEEDS_INFO: here.'), null);
+  assert.equal(parseNeedsInfo('Added the file.\n\nNEEDS_INFO: ignored because it is not the first line'), null);
+  assert.equal(parseNeedsInfo(''), null); assert.equal(parseNeedsInfo(undefined), null);
+  assert.equal(parseAssumptions('Added notes.txt.\n\nAssumptions:\n- file is named notes.txt\n- root means the repo root'), '- file is named notes.txt\n- root means the repo root');
+  assert.equal(parseAssumptions('**Assumptions:**\n- one'), '- one'); assert.equal(parseAssumptions('No such section here.'), null); assert.equal(parseAssumptions('Assumptions:'), null);
+});
+
+test('prompt: tells the agent to proceed on reasonable assumptions and to ask specific questions only when truly open-ended', () => {
+  const p = buildPrompt({ id: 1, title: 'T', body: 'B' });
+  assert.match(p, /JUST DO IT/); assert.match(p, /Assumptions:/); assert.match(p, /NEEDS_INFO:/); assert.match(p, /Do not ask about things you can reasonably decide yourself/); assert.match(p, /untrusted data/);
+});
