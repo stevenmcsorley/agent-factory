@@ -15,7 +15,10 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
   const issues = async () => call('GET', `/api/issues?projectId=${projectId}`);
   // A ticket names its repository with a label `repo:owner/name`; without one the factory's default repo applies.
   const repoOf = (labels) => labels.find((l) => /^repo:[\w.-]+\/[\w.-]+$/.test(l))?.slice(5);
-  const norm = (i) => { const labels = i.labels ?? []; return { id: i.id, title: i.title, body: i.description ?? '', labels, repo: repoOf(labels), reporterId: i.reporterId ?? i.reporter?.id }; };
+  const base = baseUrl.replace(/\/$/, '');
+  // Links, state and timestamps are part of every ticket so dashboards and the inbox can deep-link and tell open from done.
+  const norm = (i) => { const labels = i.labels ?? []; return { id: i.id, title: i.title, body: i.description ?? '', labels, repo: repoOf(labels), reporterId: i.reporterId ?? i.reporter?.id,
+    url: `${base}/projects/${i.projectId ?? projectId}/issues/${i.id}`, state: i.status === 'done' ? 'CLOSED' : 'OPEN', updatedAt: i.updatedAt }; };
   return {
     async poll() {
       return (await issues()).map(norm)
@@ -41,7 +44,7 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
       const i = await call('GET', `/api/issues/${Number(id)}`); const t = norm(i);
       if (!allowedReporterIds.includes(t.reporterId)) throw new Error('That ticket was not created by an allowed reporter');
       const cs = await call('GET', `/api/comments/issue/${Number(id)}`).catch(() => []);
-      return { ...t, url: `${baseUrl.replace(/\/$/, '')}/projects/${i.projectId}/issues/${i.id}`, state: i.status === 'done' ? 'CLOSED' : 'OPEN', comments: (cs ?? []).map((c) => ({ author: c.author?.name ?? c.user?.name, body: c.content, at: c.createdAt, factory: /^agent-factory|^Opened https?:\/\//.test(c.content ?? '') })) };
+      return { ...t, comments: (cs ?? []).map((c) => ({ author: c.author?.name ?? c.user?.name, body: c.content, at: c.createdAt, factory: /^agent-factory|^Opened https?:\/\//.test(c.content ?? '') })) };
     },
     async update(id, { title, body }) { await this.get(id); await call('PATCH', `/api/issues/${Number(id)}`, { ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { description: body } : {}) }); },
     async close(id) { await this.get(id); await call('PATCH', `/api/issues/${Number(id)}`, { status: 'done' }); },
@@ -52,6 +55,6 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
         : add.includes('agent-failed') || add.includes('agent-ready') ? 'todo' : undefined;
       await call('PATCH', `/api/issues/${id}`, { labels, ...(status ? { status } : {}) });
     },
-    async comment(id, text) { await call('POST', '/api/comments', { content: text, issueId: id }); },
+    async comment(id, text) { await call('POST', '/api/comments', { content: text, issueId: Number(id) }); }, // ids from URLs arrive as strings; Ossicone requires a number
   };
 }

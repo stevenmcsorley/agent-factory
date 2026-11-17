@@ -87,3 +87,18 @@ test('Jira get returns the comment thread; close is honestly unsupported', async
   const g = await t.get('PRJ-1'); assert.equal(g.comments[0].factory, true); assert.equal(g.body, 'D'); await assert.rejects(t.close('PRJ-1'), /not supported for Jira/);
   await assert.rejects(jiraTickets({ baseUrl: 'https://x.atlassian.net', projectKey: 'PRJ', email: 'e', token: 't', allowedReporters: ['someone'], fetchImpl: f }).get('PRJ-1'), /not created by an allowed reporter/);
 });
+
+import { ossiconeTickets } from '../src/adapters/tickets-ossicone.mjs';
+test('Ossicone tickets carry a deep link, open/closed state and updatedAt (dashboards and the inbox rely on them)', async () => {
+  const issues = [{ id: 7, title: 'a', description: 'd', labels: ['agent-review'], reporterId: 4, projectId: 27, status: 'code_review', updatedAt: '2026-11-17T20:00:00Z' }, { id: 8, title: 'b', description: 'd', labels: ['agent-review'], reporterId: 4, projectId: 27, status: 'done', updatedAt: '2026-11-16T20:00:00Z' }];
+  const f = async () => res(200, issues);
+  const t = ossiconeTickets({ baseUrl: 'https://o.example.com/', token: 'tok', projectId: 27, allowedReporterIds: [4], fetchImpl: f });
+  const all = await t.listAgentTickets();
+  assert.deepEqual(all.map((x) => [x.id, x.state, x.url, x.updatedAt]), [[7, 'OPEN', 'https://o.example.com/projects/27/issues/7', '2026-11-17T20:00:00Z'], [8, 'CLOSED', 'https://o.example.com/projects/27/issues/8', '2026-11-16T20:00:00Z']]);
+});
+
+test('Ossicone comment() sends a numeric issueId even when the id arrives as a string (inbox URLs)', async () => {
+  const sent = []; const f = async (url, init) => { sent.push(JSON.parse(init.body)); return res(201, {}); };
+  await ossiconeTickets({ baseUrl: 'https://o.example.com', token: 't', projectId: 1, allowedReporterIds: [4], fetchImpl: f }).comment('1002', 'hi');
+  assert.deepEqual(sent[0], { content: 'hi', issueId: 1002 }); assert.equal(typeof sent[0].issueId, 'number');
+});
