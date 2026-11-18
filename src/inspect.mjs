@@ -46,8 +46,9 @@ export function inspectCode(recs, { maxWindows = 400_000 } = {}) {
   const known = new Set(); for (const r of recs.filter((x) => x.isTest)) { known.add(base(r.rel)); r.refs?.forEach((x) => known.add(x)); }
   const sources = src.filter((r) => CODE_LANGS.has(r.lang) && r.lines >= 15);
   const untestedAll = sources.filter((r) => !known.has(base(r.rel)));
+  const files = [...src].sort((a, b) => b.lines - a.lines).slice(0, 40).map((r) => ({ file: r.rel, lines: r.lines, lang: r.lang, tested: CODE_LANGS.has(r.lang) ? known.has(base(r.rel)) : null }));
   return {
-    structure: { dirs: [...dirs.values()].sort((a, b) => b.lines - a.lines).slice(0, 14), sourceFiles: sources.length, testedFiles: sources.length - untestedAll.length, untested: untestedAll.sort((a, b) => b.lines - a.lines).slice(0, 12).map((r) => ({ file: r.rel, lines: r.lines, key: `untested:${r.rel}:1` })) },
+    structure: { files, dirs: [...dirs.values()].sort((a, b) => b.lines - a.lines).slice(0, 14), sourceFiles: sources.length, testedFiles: sources.length - untestedAll.length, untested: untestedAll.sort((a, b) => b.lines - a.lines).slice(0, 12).map((r) => ({ file: r.rel, lines: r.lines, key: `untested:${r.rel}:1` })) },
     duplicates: { dupLines, blocks: dupBlocks },
   };
 }

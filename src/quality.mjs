@@ -32,6 +32,15 @@ const RULES = [
 const STRINGS = /(["'`])(?:\\.|(?!\1).){0,200}?\1/g;
 const stripLine = (l) => l.replace(STRINGS, '""').replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
 
+const MASK = '••••••••';
+// The line a finding points at, for display. Anything that looks like a secret is masked, so a leaked key is never copied into state files, logs or the UI.
+export function redact(line) {
+  let t = String(line ?? '').trim(); if (t.length > 300) return '';
+  for (const [re] of KEYS) t = t.replace(new RegExp(re.source, 'g'), MASK);
+  t = t.replace(new RegExp(ASSIGN.source, 'ig'), (m, v) => m.replace(v, MASK));
+  return t.replace(/\s+/g, ' ').slice(0, 160);
+}
+
 export function scanText(rel, text, { isTest = false } = {}) {
   const ext = path.extname(rel).slice(1).toLowerCase(); const out = []; const lines = text.split('\n'); const push = (f) => { if (out.length < MAX_PER_FILE) out.push({ file: rel, ...f }); };
   const rules = RULES.filter((r) => r.langs(ext) && !(r.skipTests && isTest) && !r.skipPaths?.test(rel));
@@ -46,6 +55,7 @@ export function scanText(rel, text, { isTest = false } = {}) {
   });
   if (JS.has(ext)) structureJs(lines, push); else if (PY.has(ext)) structurePy(lines, push);
   const code = lines.filter((l) => l.trim()).length; if (code > 800 && !isTest) push({ rule: 'long-file', type: 'code_smell', severity: 'MINOR', line: 1, message: `File is ${code} lines long; consider splitting it` });
+  for (const f of out) f.snippet = redact(lines[f.line - 1]);
   return out;
 }
 
@@ -73,14 +83,18 @@ function structurePy(lines, push) {
   });
 }
 
-export const bySeverity = (a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9);
+export const bySeverity = (a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9) || String(a.file).localeCompare(String(b.file)) || (a.line ?? 0) - (b.line ?? 0);
 export const findingKey = (f) => `${f.rule}:${f.file}:${f.line}`;
 export function countFindings(list) {
   const secrets = list.filter((f) => f.rule === 'secret').length;
   return { secrets, vulnerabilities: list.filter((f) => f.type === 'vulnerability' && f.rule !== 'secret').length, bugs: list.filter((f) => f.type === 'bug').length, smells: list.filter((f) => f.type === 'code_smell').length, total: list.length };
 }
 export const isTestPath = (rel) => /(^|\/)(tests?|__tests__|spec|e2e)\//i.test(rel) || /\.(test|spec)\.[a-z]+$/i.test(rel) || /_test\.(go|py)$/.test(rel) || /^test_.*\.py$/.test(path.basename(rel));
-export const topFindings = (list, n = 12) => [...list].sort(bySeverity).slice(0, n).map((f) => ({ key: findingKey(f), rule: f.rule, type: f.type, severity: f.severity, file: f.file, line: f.line, message: f.message }));
+export const topFindings = (list, n = 12) => [...list].sort(bySeverity).slice(0, n).map((f) => ({ key: findingKey(f), rule: f.rule, type: f.type, severity: f.severity, file: f.file, line: f.line, message: f.message, snippet: f.snippet ?? '' }));
+export function summarizeFindings(list) {
+  const count = (k) => list.reduce((m, f) => { m[f[k]] = (m[f[k]] ?? 0) + 1; return m; }, {});
+  return { byRule: count('rule'), bySeverity: count('severity') };
+}
 
 // ---- the gate. Limits for NEW code (the agent's change); `block` lists conditions that stop the pull request outright after the retry.
 export const DEFAULT_GATE = { maxNewSecrets: 0, maxNewVulnerabilities: 0, maxNewBugs: 0, maxNewSmells: null, block: ['secrets'] };

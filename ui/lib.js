@@ -72,3 +72,6 @@ export const anim = { on: true };
 export const keyed = (node, key, sig) => { node.dataset.key = key; if (sig !== undefined) node.dataset.sig = typeof sig === 'string' ? sig : JSON.stringify(sig); return node; };
 // A section that lives for the whole page visit and is updated in place (so CSS animations and transitions are never restarted).
 export const persist = (key, state, create) => { const n = document.createElement('div'); n.dataset.key = key; n.__persist = { state, create }; return n; };
+
+// A click handler that disables its button while the work runs, toasts the result or the error, and optionally re-renders.
+export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };

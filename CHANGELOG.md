@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Code explorer redesign:** the Code tab now has Overview, Findings, Files, Repeated code, Tests and Ignored sub-tabs. Findings show the real code line (secrets masked), why it matters and how to fix it, deep links to the line on the code host, search, severity/kind filters, grouping, and per-finding Queue fix / Ignore file. Files view with sizes, test status and findings per file. The CLI honours `.gitignore` in your own working copy.
 - **Ignore files in the analysis and the PR gate:** lock files, minified/generated files, snapshots, build output and images are skipped by default; add your own patterns per project (Code tab), globally or in the repo's `.agent-factory.json`. The Code tab shows what was skipped.
 - **Security fix:** git commands on the host no longer run repository-controlled code (hooks, fsmonitor, sshCommand, credential helpers, `ext::` or redirected remotes planted by the agent in `.git`). See SECURITY.md.
 - **Built-in code inspection** (no server, no download): a Code tab per project with folder layout, repeated code (exact files and lines), untested files, and our own quality rules with a trend; each finding can be queued as a ticket. `agent-factory analyze <folder|url>` prints the same report in the terminal.

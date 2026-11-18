@@ -33,8 +33,9 @@ export function globToRegExp(pattern) {
 }
 
 // matcher.test(relPath) -> null | 'default' | 'yours'
-export function makeIgnore({ patterns = [], useDefaults = true } = {}) {
+export function makeIgnore({ patterns = [], useDefaults = true, exclude = [] } = {}) {
   const compile = (list) => cleanPatterns(list).patterns.map((p) => ({ p, re: globToRegExp(p) }));
   const defaults = useDefaults ? compile(DEFAULT_IGNORE) : []; const yours = compile(patterns);
-  return { yours: yours.map((x) => x.p), useDefaults, test(rel) { const r = String(rel).replace(/\\/g, '/'); for (const { re } of yours) if (re.test(r)) return 'yours'; for (const { re } of defaults) if (re.test(r)) return 'default'; return null; } };
+  const skip = (Array.isArray(exclude) ? exclude : []).map((e) => String(e).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '')).filter(Boolean);   // exact repo-relative paths (e.g. what git says is ignored)
+  return { yours: yours.map((x) => x.p), useDefaults, test(rel) { const r = String(rel).replace(/\\/g, '/'); for (const e of skip) if (r === e || r.startsWith(`${e}/`)) return 'gitignore'; for (const { re } of yours) if (re.test(r)) return 'yours'; for (const { re } of defaults) if (re.test(r)) return 'default'; return null; } };
 }

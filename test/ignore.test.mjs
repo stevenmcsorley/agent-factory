@@ -77,3 +77,13 @@ test('CLI: --ignore and --no-default-ignore change the report', () => {
   assert.equal(lines_of([]), 330); assert.equal(lines_of(['--ignore=src/gen/']), 30); assert.equal(lines_of(['--no-default-ignore']), 370);
   assert.match(execFileSync('node', [cli, 'analyze', d, '--ignore=src/gen/'], { cwd: os.tmpdir() }).toString(), /Ignored: .*by default rules/);
 });
+
+test('CLI honours .gitignore in your own working copy; findings keep a masked snippet and counts per rule', () => {
+  const d = mk({ 'src/a.js': lines(30, 'a'), 'state/log.txt': 'AKIAABCDEFGHIJKLMNOP\n', 'secrets.js': 'const apiKey = "AKIAABCDEFGHIJKLMNOP"; const password = "hunter2hunter2";\neval(x);\n', '.gitignore': 'state/\n' });
+  execFileSync('git', ['init', '-q', d]); const cli = path.resolve('src/cli.mjs');
+  const prof = JSON.parse(execFileSync('node', [cli, 'analyze', d, '--json'], { cwd: os.tmpdir() }).toString());
+  assert.ok(prof.ignored.folders >= 1); assert.ok(!JSON.stringify(prof.quality.findings).includes('state/log.txt'));
+  const sec = prof.quality.findings.filter((f) => f.rule === 'secret'); assert.ok(sec.length >= 1); for (const f of sec) assert.doesNotMatch(f.snippet, /AKIA[0-9A-Z]{16}|hunter2/); assert.ok(sec.some((f) => f.snippet.includes('••••')));
+  assert.equal(prof.quality.byRule.eval, 1); assert.ok(prof.quality.bySeverity.BLOCKER >= 1); assert.equal(prof.quality.findings.find((f) => f.rule === 'eval').snippet, 'eval(x);');
+  assert.ok(prof.structure.files.every((f) => 'findings' in f && 'lines' in f)); assert.equal(prof.structure.files.find((f) => f.file === 'secrets.js').findings >= 2, true);
+});

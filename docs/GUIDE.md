@@ -132,16 +132,18 @@ Open **Cells → Add project**. You make two independent choices, so you can mix
 
 ### Inspect the code (the Code tab)
 
-Every project has a **Code** tab: a plain-English look at the files, with no server and nothing to install.
+Every project has a **Code** tab: a plain-English explorer for the files, with no server and nothing to install. It has six sub-tabs:
 
-| Section | What it tells you | Button |
-|---|---|---|
-| **Where the code lives** | Lines of code per folder, as bars, so you can see where the weight is | |
-| **Repeated code** | Blocks of 6 or more identical code lines that appear in two places, with the exact files and line numbers (`a.js:40-52` is the same as `b.js:12-24`) | *Queue cleanup* |
-| **Tests** | How many source files have a test (matched by name, or because a test imports them) and the biggest ones with none | *Queue tests* |
-| **Quality gate** | Committed secrets, dangerous calls (`eval`, `innerHTML =`, `shell=True`, TLS checks off), empty error handlers, leftover `debugger`/`console.log`, very long or deeply nested functions, plus a trend over your last 30 analyses | *Queue fix* |
+| Sub-tab | What you get |
+|---|---|
+| **Overview** | The quality gate, key numbers, A–E ratings, a short **"What to look at first"** list (serious findings, the biggest file, the biggest untested file, the biggest repeat) each with a one-click button, folder sizes and a trend |
+| **Findings** | Every problem with **the actual line of code**, a severity badge, a plain-English rule name, **why it matters and how to fix it**, and a link to that exact line on GitHub/GitLab/Bitbucket. Search it, filter by severity or kind, group by file, rule or severity. Per finding: **Queue fix** (ticket for the agent), **Ignore file**, **copy location**. Secrets are always shown masked (`••••••••`) |
+| **Files** | The 40 largest source files with size bars, whether each has a test, and how many findings each has. Sort by size, findings or untested-first; filter to untested, with findings, or over 300 lines. **Queue tests** / **Queue split** per file |
+| **Repeated code** | Blocks of 6 or more identical lines in two places, side by side (original and copy, with line ranges and links) and **Queue cleanup** |
+| **Tests** | How many source files have a test (matched by name, or because a test imports them), and the biggest ones with none, with **Queue tests** |
+| **Ignored** | What the analysis skipped, and your own ignore patterns (next section) |
 
-Each button turns the finding into a normal ticket (for example "Remove duplicated code in src/b.js"), so the agent can tidy its own project. **Re-analyze** re-runs it any time and shows live progress.
+Each button turns the finding into a normal ticket (for example "Remove duplicated code in src/b.js"), so the agent can tidy its own project. **Re-analyze** re-runs it any time and shows live progress. The Board tab keeps a compact summary with buttons that jump straight into the Findings and Overview views.
 
 It is a fast, line-based scan: good for orientation, not a full static analyser. Add `quality-ignore` at the end of a line to skip a deliberate one (for example a fake key in an example).
 

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { detectVerify, loadRepoConfig } from './repoconfig.mjs';
 import { inspectCode, importedNames } from './inspect.mjs';
 import { makeIgnore, cleanPatterns } from './ignore.mjs';
-import { scanText, isTestPath, countFindings, topFindings, evaluateRepoGate } from './quality.mjs';
+import { scanText, isTestPath, countFindings, topFindings, summarizeFindings, evaluateRepoGate } from './quality.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', 'vendor']);
 const safePath = (s) => String(s).replace(/[^\w./@+-]/g, '').slice(0, 120);
@@ -18,8 +18,8 @@ const rate = (v, [a, b, c, d]) => (v <= a ? 'A' : v <= b ? 'B' : v <= c ? 'C' : 
 
 // Code-health measures without a server: a bounded, dependency-free scan. It is a HEURISTIC (line-based, no parsing), good for "is this repo in shape to automate", not a substitute for a real analyser.
 export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore } = {}) {
-  const ignored = { yours: 0, default: 0, folders: 0, examples: [] }; const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 8) return; let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of es) { if (SKIP.has(e.name) || e.isSymbolicLink()) continue; const full = path.join(d, e.name); const why = ignore?.test(path.relative(dir, full)); if (why) { if (e.isDirectory()) ignored.folders++; else ignored[why]++; if (ignored.examples.length < 8) ignored.examples.push({ path: safePath(path.relative(dir, full)) + (e.isDirectory() ? '/' : ''), why }); continue; } if (e.isDirectory()) walk(full, depth + 1); else if (e.isFile()) files.push(full); if (files.length >= maxFiles) return; } };
+  const ignored = { yours: 0, default: 0, gitignore: 0, folders: 0, examples: [] }; const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 8) return; let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) { if (SKIP.has(e.name) || e.isSymbolicLink()) continue; const full = path.join(d, e.name); const why = ignore?.test(path.relative(dir, full)); if (why) { if (e.isDirectory()) ignored.folders++; else ignored[why] = (ignored[why] ?? 0) + 1; if (ignored.examples.length < 8) ignored.examples.push({ path: safePath(path.relative(dir, full)) + (e.isDirectory() ? '/' : ''), why }); continue; } if (e.isDirectory()) walk(full, depth + 1); else if (e.isFile()) files.push(full); if (files.length >= maxFiles) return; } };
   walk(dir, 0);
   const findings = []; const recs = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
   for (const f of files) {
@@ -50,7 +50,7 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore }
   return { _findings: findings, _inspect: insp, _ignored: ignored, files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
 }
 
-export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreList, ignoreDefaults = true } = {}) {
+export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreList, ignoreDefaults = true, exclude } = {}) {
   const has = (f) => fs.existsSync(path.join(dir, f));
   const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return ''; } };
   let entries = []; try { entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => !SKIP.has(e.name)); } catch { /* unreadable dir: empty profile */ }
@@ -101,14 +101,16 @@ export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreLis
   const ci = has('.github/workflows') ? 'GitHub Actions' : has('.gitlab-ci.yml') ? 'GitLab CI' : has('bitbucket-pipelines.yml') ? 'Bitbucket Pipelines' : has('Jenkinsfile') ? 'Jenkins' : null;
   if (!ci) notes.push('no CI configuration found: the factory can only rely on its own verify step');
   const dedupe = [...new Set(languages)];
-  const matcher = makeIgnore({ patterns: [...(Array.isArray(ignoreList) ? ignoreList : []), ...(Array.isArray(repoCfg.analysis?.ignore) ? repoCfg.analysis.ignore : [])], useDefaults: ignoreDefaults !== false && repoCfg.analysis?.ignoreDefaults !== false });
+  const matcher = makeIgnore({ patterns: [...(Array.isArray(ignoreList) ? ignoreList : []), ...(Array.isArray(repoCfg.analysis?.ignore) ? repoCfg.analysis.ignore : [])], useDefaults: ignoreDefaults !== false && repoCfg.analysis?.ignoreDefaults !== false, exclude });
   const metrics = empty || sub ? null : codeMetrics(dir, { ignore: matcher }); const found = metrics?._findings ?? []; const insp = metrics?._inspect ?? null; const ign = metrics?._ignored ?? null; if (metrics) { delete metrics._findings; delete metrics._inspect; delete metrics._ignored; }
   if (metrics && !dedupe.length) dedupe.push(...metrics.languages.filter((l) => !['CSS', 'HTML'].includes(l.name)).slice(0, 3).map((l) => l.name));
   if (metrics?.secrets.length) warnings.push(`possible secrets committed in ${metrics.secrets.map((x) => x.file).slice(0, 3).join(', ')}: rotate them and remove them from history`);
   if (metrics && metrics.sourceFiles && metrics.testFiles === 0) notes.push('no test files found: the agent cannot prove its changes work here');
   if (metrics && metrics.duplicatedPct >= 10) notes.push(`about ${metrics.duplicatedPct}% duplicated code: changes may need to be repeated in several places`);
-  const quality = metrics ? { counts: countFindings(found), findings: topFindings(found, 15), gate: evaluateRepoGate({ metrics, findings: found }, gateCfg) } : null;
-  const ignored = ign ? { defaults: ign.default, yours: ign.yours, folders: ign.folders, examples: ign.examples, patterns: matcher.yours, useDefaults: matcher.useDefaults } : null;
+  const quality = metrics ? { counts: countFindings(found), ...summarizeFindings(found), findings: topFindings(found, 80), gate: evaluateRepoGate({ metrics, findings: found }, gateCfg) } : null;
+  const ignored = ign ? { defaults: ign.default, gitignored: ign.gitignore, yours: ign.yours, folders: ign.folders, examples: ign.examples, patterns: matcher.yours, useDefaults: matcher.useDefaults } : null;
+  const perFile = {}; for (const f of found) perFile[f.file] = (perFile[f.file] ?? 0) + 1;
+  if (insp?.structure?.files) insp.structure.files = insp.structure.files.map((f) => ({ ...f, findings: perFile[f.file] ?? 0 }));
   const profile = { ignored, metrics, quality, structure: insp?.structure ?? null, duplicates: insp ? { pct: metrics.duplicatedPct, blocks: insp.duplicates.blocks } : null, languages: dedupe, packageManager, framework, verify, image, verifyReason, tests, hasRepoConfig, hasReadme, ci, topLevel, notes, warnings, analyzedAt: new Date().toISOString() };
   return profile;
 }

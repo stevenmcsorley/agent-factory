@@ -69,7 +69,8 @@ WantedBy=default.target
       const r = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--quiet', target, tmp], { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       if (r.code !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); console.error(`Could not clone: ${r.out.trim().slice(0, 300)}`); process.exit(1); }
     } else if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) { console.error(`Not a folder: ${dir}`); process.exit(1); }
-    try { const prof = analyzeRepo(dir, { ignore: String(flags.ignore ?? '').split(',').filter(Boolean), ignoreDefaults: !flags['no-default-ignore'] }); console.log(flags.json ? JSON.stringify(prof, null, 2) : textReport(prof, tmp ? target : path.basename(dir))); } finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); }
+    let exclude = []; if (!tmp && fs.existsSync(path.join(dir, '.git'))) { const g = await run('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], { cwd: dir }); if (g.code === 0) exclude = g.out.split('\n').filter(Boolean); }   // honour .gitignore when looking at your own working copy
+    try { const prof = analyzeRepo(dir, { exclude, ignore: String(flags.ignore ?? '').split(',').filter(Boolean), ignoreDefaults: !flags['no-default-ignore'] }); console.log(flags.json ? JSON.stringify(prof, null, 2) : textReport(prof, tmp ? target : path.basename(dir))); } finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); }
     return;
   }
   if (cmd === 'build-image') process.exit((await buildImage(root)) ? 0 : 1);

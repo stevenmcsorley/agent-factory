@@ -29,7 +29,7 @@ export function textReport(p, name = '') {
   }
   for (const w of p.warnings) L.push('', `! ${w}`);
   for (const n of p.notes) L.push(`  note: ${n}`);
-  if (p.ignored && (p.ignored.defaults || p.ignored.yours || p.ignored.folders)) L.push('', `Ignored: ${p.ignored.defaults} files by default rules (lock files, minified, generated…), ${p.ignored.yours} by your patterns, ${p.ignored.folders} folders${p.ignored.examples.length ? ` — e.g. ${p.ignored.examples.slice(0, 4).map((x) => x.path).join(', ')}` : ''}`);
+  if (p.ignored && (p.ignored.defaults || p.ignored.yours || p.ignored.folders || p.ignored.gitignored)) L.push('', `Ignored: ${p.ignored.defaults} files by default rules (lock files, minified, generated…), ${p.ignored.yours} by your patterns${p.ignored.gitignored ? `, ${p.ignored.gitignored} by .gitignore` : ''}, ${p.ignored.folders} folders${p.ignored.examples.length ? ` — e.g. ${p.ignored.examples.slice(0, 4).map((x) => x.path).join(', ')}` : ''}`);
   L.push('', 'This is a fast, line-based scan: good for orientation, not a full static analyser.');
   return L.join('\n');
 }

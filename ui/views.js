@@ -1,8 +1,9 @@
-import { h, icon, api, toast, ago, dur, num, pct, ext, pill, STAGES, STATES, session, keyed, persist } from './lib.js';
+import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, STATES, session, keyed, persist } from './lib.js';
+export { act };
+import { codeTab, openCode } from './code.js';
 import { createLine, odometer, miniBars, bars, barcode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
-export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };
 const since = (iso) => h('span', { class: 'since', 'data-since': iso }, dur(Date.now() - new Date(iso)));
 const empty = (title, body, action) => h('div', { class: 'empty' }, h('div', { class: 'empty-art' }, icon('spark', 24)), h('b', {}, title), body ? h('p', {}, body) : null, action);
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
@@ -168,15 +169,15 @@ export const projectsPage = {
 const RATING_LABEL = { size: 'Size', tests: 'Tests', duplication: 'Duplication', maintainability: 'Upkeep', security: 'Secrets' };
 const RATING_HELP = { size: 'Smaller code is easier for an agent to work in', tests: 'Test code relative to source code', duplication: 'Repeated blocks across files', maintainability: 'Very large files and TODO/FIXME count', security: 'Committed keys or tokens' };
 const SEV = { BLOCKER: 'bad', CRITICAL: 'bad', MAJOR: 'warn', MINOR: '', INFO: '' };
-const qualityBlock = (q, history, { onFix } = {}) => {
+const qualityBlock = (q, history, { onInspect } = {}) => {
   if (!q) return null; const ok = q.gate.status === 'OK'; const pts = (history ?? []).map((x) => x.findings).filter((v) => Number.isFinite(v));
   return h('div', { class: 'quality' }, h('div', { class: 'card-h' }, h('h3', {}, 'Quality gate'), h('span', { class: `stamp ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'failed')),
     q.gate.failed?.length ? q.gate.failed.map((f) => h('div', { class: 'note bad' }, icon('x', 14), ' ', f)) : h('p', { class: 'muted small' }, 'No committed secrets, no critical findings, duplication within limits.'),
     h('div', { class: 'facts' }, [[q.counts.secrets, 'secrets'], [q.counts.vulnerabilities, 'vulnerabilities'], [q.counts.bugs, 'bugs'], [q.counts.smells, 'code smells']].map(([x, l]) => h('div', { class: 'fact' }, h('b', {}, num(x)), h('span', {}, l)))),
     pts.length > 1 ? h('div', { class: 'trend' }, miniBars(pts.slice(-20), { w: 240, h: 30 }), h('span', { class: 'muted small' }, `findings over the last ${Math.min(pts.length, 20)} analyses`)) : h('p', { class: 'muted small' }, 'A trend appears after the next analysis.'),
-    q.findings?.length ? h('details', {}, h('summary', {}, `Top findings (${q.findings.length} of ${num(q.counts.total)})`), h('ul', { class: 'plain issues' }, q.findings.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}:${i.line}`), onFix ? h('button', { class: 'btn small', onclick: () => onFix(i) }, 'Queue fix') : null)))) : null);
+    onInspect && q.counts.total ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn small', onclick: () => onInspect('findings') }, `See all ${num(q.counts.total)} findings with the code →`)) : null);
 };
-const healthCard = (pr, { onReanalyze, verifyInput, job, onFix } = {}) => {
+const healthCard = (pr, { onReanalyze, verifyInput, job, onInspect } = {}) => {
   const running = job?.state === 'running';
   const reBtn = onReanalyze ? h('button', { class: 'btn', disabled: running, onclick: onReanalyze }, running ? `Analyzing… ${job.phase ?? ''}` : pr ? 'Re-analyze' : 'Analyze now') : null;
   if (job?.state === 'error' && !pr) pr = null;
@@ -188,45 +189,12 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, onFix } = {}) => {
     m ? h('div', { class: 'ratings' }, Object.entries(m.ratings).map(([k, v]) => h('div', { class: 'rating', title: RATING_HELP[k] }, h('b', { class: `grade r-${v}` }, v), h('span', {}, RATING_LABEL[k])))) : null,
     m ? h('div', { class: 'facts' }, [[num(m.codeLines), 'lines of code'], [num(m.sourceFiles), 'source files'], [`${m.testFiles} (${m.testRatioPct}%)`, 'test files'], [`${m.duplicatedPct}%`, 'duplicated'], [num(m.todoCount), 'TODO / FIXME']].map(([v, l]) => h('div', { class: 'fact' }, h('b', {}, v), h('span', {}, l)))) : null,
     h('div', { class: 'verify-row' }, h('label', {}, 'How changes are verified'), verifyInput ?? h('code', {}, pr.verify || 'nothing: pull requests will be unverified'), pr.verifyReason && !verifyInput ? h('span', { class: 'muted small' }, ` (${pr.verifyReason})`) : null),
-    qualityBlock(pr.quality, pr.history, { onFix }),
-    m?.hotspots?.length ? h('details', {}, h('summary', {}, 'Largest files and details'), h('ul', { class: 'plain' }, m.hotspots.map((x) => h('li', { class: 'mono small' }, `${x.file} · ${x.lines} lines`)), (pr.notes ?? []).map((n) => h('li', { class: 'muted small' }, n)), pr.ci ? h('li', { class: 'muted small' }, `CI: ${pr.ci}`) : null, h('li', { class: 'muted small' }, 'Heuristic line-based scan, not a full static analyser.'))) : null);
+    qualityBlock(pr.quality, pr.history, { onInspect }),
+    (pr.notes ?? []).length ? h('ul', { class: 'plain notes' }, pr.notes.map((n) => h('li', { class: 'muted small' }, n))) : null,
+    onInspect ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: () => onInspect('overview') }, 'Inspect the code in detail →'), m?.hotspots?.length ? h('span', { class: 'muted small' }, `largest file: ${m.hotspots[0].file} (${num(m.hotspots[0].lines)} lines)`) : null) : null);
 };
 
 let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
-// ---- the Code tab: layout, repeated code, untested files (plain English, with a one-click ticket for each)
-const meter = (frac) => { const e = h('i', { class: 'mfill' }); e.style.width = `${Math.max(1, Math.round(frac * 100))}%`; return h('span', { class: 'mtrack' }, e); };
-const ignoreCard = (pr, onIgnore) => {
-  const ig = pr.ignored ?? { defaults: 0, yours: 0, folders: 0, examples: [], patterns: [], useDefaults: true };
-  const box = h('textarea', { rows: 4, placeholder: 'one pattern per line, e.g.\n*.sql\ndocs/api/*.md\ngenerated/', spellcheck: 'false' }, (ig.patterns ?? []).join('\n'));
-  const dflt = h('input', { type: 'checkbox' }); dflt.checked = ig.useDefaults !== false;
-  return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Ignored from analysis'), h('span', { class: 'muted small mono' }, `${ig.defaults} by built-in rules · ${ig.yours} by yours · ${ig.folders} folders`)),
-    h('p', { class: 'muted small' }, 'Skipped completely: not counted, not scanned, not checked on the agent’s changes. Built-in rules cover lock files (package-lock.json, yarn.lock, …), minified, generated and snapshot files, build output (dist/, build/, coverage/) and images or fonts.'),
-    ig.examples?.length ? h('p', { class: 'small mono muted' }, 'e.g. ', ig.examples.map((x) => `${x.path}${x.why === 'yours' ? ' (yours)' : ''}`).join(' · ')) : null,
-    h('label', {}, 'Your own patterns'), box,
-    h('label', { class: 'check' }, dflt, ' Also skip the built-in list (recommended)'),
-    h('p', { class: 'muted small' }, 'name.ext matches anywhere · dir/ matches a folder anywhere · a/b/c or /a is from the repository root · * ? ** wildcards. The repo can also add its own under "analysis": { "ignore": [...] } in .agent-factory.json.'),
-    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => onIgnore({ patterns: box.value.split('\n').map((x) => x.trim()).filter(Boolean), useDefaults: dflt.checked }) }, 'Save and re-analyze')));
-};
-const codeTab = (pr, { onFix, onReanalyze, onIgnore, job }) => {
-  const running = job?.state === 'running'; const re = h('button', { class: 'btn', disabled: running, onclick: onReanalyze }, running ? `Analyzing… ${job.phase ?? ''}` : pr ? 'Re-analyze' : 'Analyze now');
-  if (!pr?.metrics) return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Inspect the code'), re), h('p', { class: 'muted' }, pr ? 'Nothing to inspect: the repository has no code yet.' : 'This project has not been inspected yet. Press Analyze to see how the code is laid out, where code is repeated, and which files have no test.'));
-  const st = pr.structure, du = pr.duplicates, max = st?.dirs?.[0]?.lines ?? 1;
-  const fixBtn = (key, label = 'Queue fix') => h('button', { class: 'btn small', onclick: () => onFix({ key }) }, label);
-  return [
-    card('', h('div', { class: 'card-h' }, h('h2', {}, 'Inspect the code'), h('span', { class: 'muted small mono' }, `${num(pr.metrics.codeLines)} lines · ${pr.metrics.sourceFiles} files · analyzed ${ago(pr.analyzedAt)}`), re),
-      h('p', { class: 'muted small' }, 'A quick, line-based look at the files. It is good for orientation, not a full static analyser. Each problem has a button that turns it into a ticket for the agent.')),
-    st?.dirs?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Where the code lives')), h('div', { class: 'rows' }, st.dirs.map((d) => h('div', { class: 'row-bar' }, h('code', {}, d.path), meter(d.lines / max), h('span', { class: 'mono small' }, `${num(d.lines)} lines · ${d.files} files`, d.testLines ? ` · ${d.testLines === d.lines ? 'all tests' : `${num(d.testLines)} test`}` : ''))))) : null,
-    ignoreCard(pr, onIgnore),
-    card('', h('div', { class: 'card-h' }, h('h2', {}, 'Repeated code'), h('span', { class: `stamp ${du?.blocks?.length ? 'warn' : 'ok'}` }, `${du?.pct ?? 0}% copied`)),
-      du?.blocks?.length ? h('ul', { class: 'plain issues dup' }, du.blocks.map((b) => h('li', {}, h('span', { class: 'stamp' }, `${b.lines} lines`), h('span', { class: 'mono small' }, `${b.a.file}:${b.a.start}-${b.a.end}`), h('span', { class: 'muted small' }, 'is the same as'), h('span', { class: 'mono small' }, `${b.b.file}:${b.b.start}-${b.b.end}`), fixBtn(b.key, 'Queue cleanup'))))
-        : h('p', { class: 'muted' }, 'No repeated blocks found (6 or more identical lines in two places).')),
-    st ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Tests'), h('span', { class: `stamp ${st.testedFiles === st.sourceFiles ? 'ok' : 'warn'}` }, `${st.testedFiles} of ${st.sourceFiles} files covered`)),
-      h('p', { class: 'muted small' }, 'A source file counts as covered when a test has the same name or imports it. Files with no test are the riskiest for the agent to change.'),
-      st.untested.length ? h('ul', { class: 'plain issues dup' }, st.untested.map((u) => h('li', {}, h('span', { class: 'stamp' }, `${u.lines} lines`), h('span', { class: 'mono small' }, u.file), h('span', {}), fixBtn(u.key, 'Queue tests')))) : h('p', { class: 'muted' }, 'Every source file has a matching test.')) : null,
-    card('', qualityBlock(pr.quality, pr.history, { onFix }) ?? h('p', { class: 'muted' }, 'No quality data yet.')),
-  ];
-};
-
 // ---- single project
 let projTab = 'board';
 export const project = {
@@ -237,7 +205,7 @@ export const project = {
     const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
     if (d.job?.state === 'running') pollSoon(ctx);
     const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['new', 'New ticket'], ['code', 'Code'], ['log', 'Log']];
-    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'code' ? codeTab(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
+    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'code' ? codeTab(p.profile, { proj: p, job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
     const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
     return [h('a', { class: 'back', href: '#/projects' }, icon('arrow', 12, 'flip'), 'All cells'),
       h('div', { class: 'page-head' }, h('div', {}, h('div', { class: 'row' }, h('i', { class: `lamp ${state}` }), h('h1', {}, id)),
@@ -245,7 +213,7 @@ export const project = {
           m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
           h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
-      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Fix queued as a new ticket', ctx.rerender)() }) : null, body]; },
+      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null, body]; },
 };
 
 function board(tickets) {
@@ -294,7 +262,7 @@ export const runPage = {
       run.quality ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Quality gate on this change'), h('span', { class: `stamp ${run.quality.status === 'OK' ? 'ok' : run.quality.status === 'WARN' ? 'warn' : 'bad'}` }, run.quality.status === 'OK' ? 'passed' : run.quality.status === 'WARN' ? 'flagged' : 'blocked')),
         h('p', { class: 'muted small' }, `Only the lines this run added or changed were checked (${run.quality.files} file${run.quality.files === 1 ? '' : 's'}).`),
         [...(run.quality.blockers ?? []), ...(run.quality.warnings ?? [])].map((m) => h('div', { class: 'note bad' }, icon('x', 14), ' ', m)),
-        run.quality.findings?.length ? h('ul', { class: 'plain issues' }, run.quality.findings.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}:${i.line}`)))) : h('p', { class: 'muted small' }, 'No new secrets, vulnerabilities or bugs.')) : null,
+        run.quality.findings?.length ? h('ul', { class: 'plain issues' }, run.quality.findings.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}:${i.line}`), i.snippet ? h('code', { class: 'snip-line' }, i.snippet) : null))) : h('p', { class: 'muted small' }, 'No new secrets, vulnerabilities or bugs.')) : null,
       run.verifyTail ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Quality check'), h('span', { class: `stamp ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'see output')), h('pre', { class: `log-pre ${ok ? 'good' : 'fail'}` }, run.verifyTail)) : null]; },
 };
 const OUT = { 'verify-failed': 'Tests failed', timeout: 'Timed out', error: 'Error', 'no-change': 'No change', 'protected-path': 'Protected path', 'needs-info': 'Needs info', 'repo-not-allowed': 'Repo not allowed', stopped: 'Paused', 'budget-exhausted': 'Budget reached' };
