@@ -171,3 +171,8 @@ export function publishFiles(pack, dir) {
   for (const s of pack.sources) if (s.file) { try { files.set(`.factory/sources/${path.basename(s.file)}`, fs.readFileSync(path.join(dir, 'sources', path.basename(s.file)))); } catch { /* skip */ } }
   return files;
 }
+
+// A short fingerprint of what the agent was told (brief, conventions, decisions and the sources attached), so a change records which agreement it was built against.
+export function revision(pack) {
+  const h = crypto.createHash('sha1'); h.update(JSON.stringify({ b: pack.brief, s: pack.stack, d: pack.decisions, src: (pack.sources ?? []).map((x) => [x.id, x.bytes, x.url ?? '']) })); return h.digest('hex').slice(0, 8);
+}

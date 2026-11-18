@@ -212,6 +212,13 @@ When a plan is launched, its **epics are created in your tracker too** (Ossicone
 
 The library holds more than code. Part kinds now include **theme** (design tokens), **pattern** (a UX pattern), **form** and **skill** (a Markdown playbook: "how we build forms"). **Library → House styles** groups a set of them with **conventions** into a named profile ("Acme SaaS"). Apply it to a project and **every ticket**, even an unrelated one, gets the conventions and skills in its prompt and the profile's parts to copy. So a PRD that says "signup form" is built with your form pattern, your theme and your validation skill. Over time the library becomes your taste and your standards.
 
+### Keeping the agent honest (new)
+
+* **It cannot mark its own homework.** If a run removes assertions from an existing test, deletes a test file, or switches a test off, the quality gate flags it, sends the agent back once ("restore the test and fix the code; if an expectation is wrong, say why"), and flags the PR if it persists. New tests are always welcome. Make it stricter with `"qualityGate": { "blockTestWeakening": true }`, or protect specific files outright with `protectedPaths` (for example `test/fixtures/`) in the repo's `.agent-factory.json`, which the agent cannot edit.
+* **A run that was replaced cannot publish.** Every claim on a ticket carries a token that is checked again just before anything is pushed or written to the tracker. If a run's claim expired or another run took over, it pushes nothing, touches nothing, and cannot delete the newer run's claim.
+* **Don't start more than review can absorb.** `"limits": { "maxOpenReviews": 5 }` stops claiming new tickets while that many agent PRs wait for a human. Without it, the factory keeps building while the review queue grows.
+* **A pass names its revisions.** Each PR says which brief revision it was built from and that the verify command passed on the working tree committed as a given commit (or that nothing machine-checked it). The work-order page shows the same.
+
 ### Several projects at once
 
 By default projects take turns. Set `"limits": { "parallelProjects": 3 }` in `agent-factory.json` and up to that many projects build **at the same time**, each in its own lane (the Control room and Portfolio show what is building now). Mind disk space (every run clones a repository and starts a container) and your agent's rate limits: **Health** warns when the disk is getting full, more strictly with parallel builds.

@@ -24,6 +24,8 @@ const RULES = {
   'deep-nesting': { title: 'Deeply nested code', why: 'Many levels of if/for make the logic hard to follow.', fix: 'Use early returns and move inner blocks into helper functions.' },
   'long-file': { title: 'Very long file', why: 'Big files mix many responsibilities and are slow to understand and review.', fix: 'Split it along its natural boundaries into smaller modules.' },
 };
+RULES['test-weakened'] = { title: 'Existing test weakened', why: 'The change removed assertions, deleted a test file or switched a test off. When the code and its test are written by the same agent, a green run can just mean the test was loosened to match.', fix: 'Restore the test and fix the code. If an expectation is genuinely wrong, change it deliberately and explain why in the PR so the owner can confirm.' };
+RULES['reinvented-part'] = { title: 'Rewrites a library part', why: 'This new file is almost the same as a part already in the reuse library, so a fix or improvement would now have to be made in two places.', fix: 'Copy the library part (keeping its factory-part header) instead, or improve the part in the library and use that.' };
 const ruleOf = (id) => RULES[id] ?? { title: id, why: '', fix: '' };
 
 const view = { sub: 'overview', sev: new Set(), type: new Set(), q: '', group: 'file', shown: 15, fsort: 'lines', fq: '', fonly: 'all' };

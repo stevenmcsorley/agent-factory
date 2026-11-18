@@ -21,6 +21,11 @@ export function buildPrompt(t, extra = '', profile = '', context = '', rules = g
   ].join('\n');
 }
 
+// What this change was built from and what was actually checked, so a pass is tied to the revisions it names.
+function provenanceNote(rec) {
+  const bits = [rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, rec.agentRuns ? null : null].filter(Boolean);
+  return bits.length ? `\n\n### Provenance\n${bits.join('\n')}\n- If this branch changes after this point, the result above no longer applies to it.` : '';
+}
 // A short, honest note for the PR and the ticket about the quality gate on the change.
 function qualityNote(q, plain = false) {
   if (!q) return '';
@@ -36,6 +41,8 @@ export async function tick({ tickets, sandbox, agent, vcs, config, stateDir }) {
   if (overBudget(config.runsDir ?? stateDir, config)) return [{ status: 'budget-exhausted' }];
   const leases = leaseStore(stateDir);
   const recovered = await recover({ tickets, leases });
+  // Do not start more work than review can absorb: once this many agent PRs are waiting for a human, stop claiming until some are merged or closed.
+  if (config.maxOpenReviews) { const waiting = (await tickets.listAgentTickets()).filter((x) => x.state !== 'CLOSED' && (x.labels ?? []).includes('agent-review')).length; if (waiting >= config.maxOpenReviews) return [{ status: 'review-backlog', open: waiting, cap: config.maxOpenReviews }]; }
   const queue = (await tickets.poll()).slice(0, config.maxConcurrent ?? 1);
   const runs = await Promise.all(queue.map((t) => processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases })));
   return [...recovered.map((r) => ({ status: `recovered-${r.action}`, ticket: r.ticket })), ...runs];
@@ -70,7 +77,9 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     return rec;
   }
   run.phase('claim');
-  leases.acquire(t.id, (config.timeoutMs ?? 900_000) * ((config.maxAttempts ?? 2) + 1) + 120_000); // lease first, then label
+  const token = leases.acquire(t.id, (config.timeoutMs ?? 900_000) * ((config.maxAttempts ?? 2) + 1) + 120_000); // lease first, then label
+  const owns = () => leases.valid(t.id, token);
+  try { rec.briefRev = config.briefRev?.(); } catch { /* provenance is best effort */ }
   await tickets.label(t.id, ['agent-working'], ['agent-ready']); // claim
   try {
     run.phase('sandbox', 'cloning the repository');
@@ -114,13 +123,17 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       rec.status = 'ok';
       break;
     }
-    if (rec.status === 'ok') {
+    if (!owns()) { rec.status = 'lost-claim'; rec.error = 'This run no longer holds the claim on the ticket (it expired, or another run took over), so nothing was pushed and the tracker was left alone.'; }
+    if (rec.status === 'lost-claim') { /* the replacement run owns the ticket: write nothing */ }
+    else if (rec.status === 'ok') {
       try { rec.parts = await config.recordParts?.(ws.dir, t); } catch { /* tracking is best effort */ }
       run.phase('push', branch);
       await vcs.commitAndPush(ws, { branch, message: `${t.title}\n\nRefs #${t.id} (agent-factory)` });
+      try { rec.commit = await vcs.head?.(ws); } catch { /* best effort */ }
+      rec.verifyCmd = cfg.verify || undefined;
       run.phase('pr');
       const assumptions = parseAssumptions(rec.agentSummary); if (assumptions) rec.assumptions = assumptions;
-      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${rec.parts?.length ? `\n\n### Reused library parts\n${rec.parts.map((x) => `- ${x.slug}@${x.version}`).join('\n')}` : ''}${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
+      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${rec.parts?.length ? `\n\n### Reused library parts\n${rec.parts.map((x) => `- ${x.slug}@${x.version}`).join('\n')}` : ''}${provenanceNote(rec)}${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
       await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).${qualityNote(rec.quality, true)}${assumptions ? `\n\nAssumptions the agent made (please check):\n${assumptions}` : ''}`);
       await tickets.label(t.id, ['agent-review'], ['agent-working']);
     } else if (rec.status === 'needs-info') {
@@ -132,10 +145,9 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     }
   } catch (e) {
     rec.status = 'error'; rec.error = String(e.message ?? e);
-    await tickets.comment(t.id, `agent-factory error: ${rec.error.slice(0, 500)}`);
-    await tickets.label(t.id, ['agent-failed'], ['agent-working']);
+    if (owns()) { await tickets.comment(t.id, `agent-factory error: ${rec.error.slice(0, 500)}`); await tickets.label(t.id, ['agent-failed'], ['agent-working']); }
   } finally {
-    leases.release(t.id);
+    leases.release(t.id, token);
     rec.finished = new Date().toISOString();
     run.finish();
     recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...rec }); // state first: nothing after this line may lose the run's result

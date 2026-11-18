@@ -15,6 +15,7 @@ export function gitVcs({ log, openPr = false, gitEnv = {} }) {
         if (r.code !== 0) throw new Error(`git ${a[0]} failed: ${r.out.replace(/Authorization: [^\s]+/g, 'Authorization: ***').slice(0, 400)}`);
       }
     },
+    async head(ws) { return (await run('git', [...SAFE_GIT, 'rev-parse', 'HEAD'], { cwd: ws.dir, log })).out.trim(); },
     async openPr(ws, args) { return typeof openPr === 'function' ? openPr(args) : null; },
   };
 }

@@ -95,6 +95,7 @@ export class Engine {
     const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
+      briefRev: () => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); return pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions) ? pk.revision(pack) : undefined; },
       promptRules: () => getPrompt('task-rules', {}, this._promptDirs()),
       libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };

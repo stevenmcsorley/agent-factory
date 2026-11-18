@@ -137,6 +137,10 @@ Put `prompts/task-rules.md` next to your config to replace the rules every build
 
 **Let the factory improve itself.** Add this repository as a project and queue tickets against it. The repository's `.agent-factory.json` marks the **security core as protected paths** (git safety, sandbox, egress proxy, the server's auth, the plugin loader, the scenario engine, the CI and licence files). A run that touches them is rejected, so self-improvement cannot quietly weaken the guarantees. Change those files by hand, review them, and merge.
 
+## Verification you can tighten
+
+Three settings decide how much the factory trusts the agent's own work: `qualityGate.blockTestWeakening` (block instead of flag weakened tests), repo-level `protectedPaths` (files the agent can never change: CI, fixtures, golden files), and `limits.maxOpenReviews` (stop starting work while review is backed up). The checks that *decide* acceptance run on the factory host, after the agent exits, from configuration the agent cannot edit. What is still not independent: the test files themselves live in the repository the agent edits, so protect the ones that encode agreed decisions.
+
 ## Honest limits
 
 * Plugins are trusted code. There is no sandbox for them; the hash pin is a tripwire, not a cage.

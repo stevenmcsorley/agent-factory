@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Tests cannot be quietly weakened:** removed assertions, deleted test files and switched-off tests in a run are flagged by the quality gate (retry once, then flag; `blockTestWeakening` to block). New tests are never penalised.
+- **Fencing:** claims carry a token that is re-checked before anything is pushed or written to the tracker; a run that was replaced or expired pushes nothing and cannot release the replacement's lease.
+- **Review backlog cap:** `limits.maxOpenReviews` stops claiming new tickets while that many agent PRs wait for review.
+- **Provenance:** PRs and work orders name the brief revision and the verified commit (or say nothing machine-checked it).
+- Ideas and gaps in this round came from a review of Mark McDonald's draft "Agentic-First Engineering Playbook".
 - **Studio** replaces the Control room's intake box (which moved to the Studio as "Add work to a project"): start a project from a brief with a **target** (prototype or deploy) and an optional house style; the Control room now opens with a launcher and a live "building now" strip. "Cells" left the header (the Portfolio covers it).
 - **Targets and readiness:** `set_target`, `project_readiness`; the Portfolio shows "Ready to deploy: n of m checks" with the checklist. A human still approves any go-live.
 - **Plans in the tracker:** launching a plan creates **epics in Ossicone (verified live) and Jira (tested against a fake)** with tickets linked to them. Epics show tracker links on the Plan tab. The agent on a plan ticket is told **where it fits** (plan, done, in flight, what depends on it).

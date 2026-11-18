@@ -122,11 +122,28 @@ export function parseAddedLines(diff) {
   }
   return added;
 }
+// The agent must not mark its own homework. Compare what the agent did to EXISTING test files: assertions removed without being replaced, whole test files deleted,
+// tests switched off. (Adding tests is always fine.) Returns findings; the gate turns them into a warning or a block.
+const ASSERT = /\b(?:assert\w*|expect|should|toBe\w*|toEqual|toThrow\w*|toHaveBeen\w+|toMatch\w*|strictEqual|deepEqual|deepStrictEqual|notEqual|rejects|throws|self\.assert\w+|t\.(?:is|true|false|deepEqual|throws|assert))\b/;
+const SKIPPED = /(?:\b(?:xit|xdescribe|xtest)\s*\(|\.(?:skip|todo)\s*\(|\bit\.skip\b|@(?:Ignore|Disabled)\b|pytest\.mark\.skip|unittest\.skip|t\.Skip\()/;
+export function testTampering(diffText, { ignore } = {}) {
+  const out = []; const files = diffText.split(/^diff --git /m).slice(1);
+  for (const f of files) {
+    const head = /^a\/(.+?) b\/(.+)$/m.exec(f.split('\n')[0] ?? ''); if (!head) continue; const rel = head[2] === '/dev/null' ? head[1] : head[2]; if (!isTestPath(rel) || ignore?.test(rel)) continue;
+    if (/^new file mode/m.test(f)) continue;                                   // a new test is always welcome
+    const deleted = /^deleted file mode/m.test(f); let removed = 0, added = 0, skipped = 0;
+    for (const l of f.split('\n')) { if (l.startsWith('---') || l.startsWith('+++')) continue; if (l[0] === '-' && ASSERT.test(l)) removed++; else if (l[0] === '+') { if (ASSERT.test(l)) added++; if (SKIPPED.test(l)) skipped++; } }
+    if (deleted) out.push({ file: rel, line: 1, rule: 'test-weakened', type: 'code_smell', severity: 'MAJOR', message: 'An existing test file was deleted. Do not remove tests to make a change pass; if the test is obsolete, say why in the PR.', snippet: '' });
+    else if (removed > added) out.push({ file: rel, line: 1, rule: 'test-weakened', type: 'code_smell', severity: 'MAJOR', message: `This test lost ${removed - added} assertion${removed - added > 1 ? 's' : ''} (${removed} removed, ${added} added). Do not loosen tests to make code pass; if an expectation is wrong, say why in the PR.`, snippet: '' });
+    if (skipped && !deleted) out.push({ file: rel, line: 1, rule: 'test-weakened', type: 'code_smell', severity: 'MAJOR', message: `${skipped} test${skipped > 1 ? 's were' : ' was'} switched off (skip/todo). Do not disable tests to make a change pass.`, snippet: '' });
+  }
+  return out;
+}
 async function changedLines(dir, log) {
   lockGit(dir);                                                                    // never trust .git hooks/config the agent could have written
   const g = (a) => run('git', [...SAFE_GIT, ...a], { cwd: dir, log });
   const diff = await g(['diff', '--no-ext-diff', '--no-textconv', '--no-color', '-U0', 'HEAD']);
-  const added = parseAddedLines(diff.out);
+  const added = parseAddedLines(diff.out); added.diffText = diff.out;
   for (const f of (await g(['ls-files', '--others', '--exclude-standard'])).out.split('\n').filter(Boolean)) added.set(f, 'all');   // brand-new file: every line is new
   return added;
 }
@@ -140,7 +157,10 @@ export async function changeQuality(dir, gateCfg, { log, ignore, parts } = {}) {
     for (const f of scanText(rel, text, { isTest: isTestPath(rel) })) { const touched = lines === 'all' || lines.has(f.line) || (f.endLine && [...lines].some((n) => n >= f.line && n <= f.endLine)); if (touched) found.push(f); }
   }
   if (parts?.length) for (const r of reinvented(fresh, parts)) found.push({ file: r.file, line: 1, rule: 'reinvented-part', type: 'code_smell', severity: 'MAJOR', message: `Looks like the library part ${r.slug}@${r.version} (${r.similarity}% similar): use or adapt the part instead of rewriting it`, snippet: '' });
+  for (const f of testTampering(added.diffText ?? '', { ignore })) found.push(f);
   const counts = countFindings(found); const gate = evaluateGate(counts, gateCfg);
+  const weak = found.filter((f) => f.rule === 'test-weakened').length;                          // weakening the agreed checks earns a retry, then a flag (or a block if you ask for one)
+  if (weak > (gateCfg?.maxTestWeakening ?? 0)) { (gateCfg?.blockTestWeakening ? gate.blockers : gate.warnings).push(`${weak} test change${weak > 1 ? 's' : ''} weakened existing checks`); gate.passed = false; }
   const reuse = found.filter((f) => f.rule === 'reinvented-part').length;                      // rewriting a library part earns a retry, then a flag on the PR
   if (reuse > (gateCfg?.maxNewReuse ?? 0)) { gate.warnings.push(`${reuse} file${reuse > 1 ? 's' : ''} rewrite${reuse > 1 ? '' : 's'} a library part (use or adapt the part)`); gate.passed = false; }
   return { ...gate, status: gate.passed ? 'OK' : gate.blockers.length ? 'ERROR' : 'WARN', counts, files, findings: topFindings(found, 12) };
