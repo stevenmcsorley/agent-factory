@@ -7,6 +7,7 @@
     "start": "node src/cli.mjs start",
     "init": "node src/cli.mjs init",
     "doctor": "node src/cli.mjs doctor",
+    "analyze": "node src/cli.mjs analyze",
     "build-image": "node src/cli.mjs build-image",
     "test": "node --test --test-force-exit test/*.test.mjs"
   },

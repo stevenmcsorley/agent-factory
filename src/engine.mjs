@@ -13,7 +13,6 @@ import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
 import { normalizeRepo } from './repoRef.mjs';
 import { analyzeRepo, profileSummary } from './analyze.mjs';
-import { sonarApi, scanProject, ensureManaged, stopManaged, waitUp, MANAGED, SONAR_TOKEN_ENV, projectKey } from './sonar.mjs';
 import { checkBaseUrl } from './sources.mjs';
 import { addHistory } from './quality.mjs';
 import { assessTicket } from './gate.mjs';
@@ -31,15 +30,20 @@ const sanitizeMetrics = (m) => { if (!m || typeof m !== 'object') return null; c
 const sanitizeQuality = (q) => { if (!q || typeof q !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e6, Math.round(v))) : 0); const t = (v, m) => String(v ?? '').replace(/[^\w./@+ :,%()'-]/g, '').slice(0, m);
   return { counts: Object.fromEntries(['secrets', 'vulnerabilities', 'bugs', 'smells', 'total'].map((k) => [k, n(q.counts?.[k])])), gate: { status: q.gate?.status === 'ERROR' ? 'ERROR' : 'OK', failed: (Array.isArray(q.gate?.failed) ? q.gate.failed : []).slice(0, 6).map((x) => t(x, 120)) },
     findings: (Array.isArray(q.findings) ? q.findings : []).slice(0, 15).map((f) => ({ key: t(f?.key, 200), rule: t(f?.rule, 40), type: t(f?.type, 20), severity: ['BLOCKER', 'CRITICAL', 'MAJOR', 'MINOR', 'INFO'].includes(f?.severity) ? f.severity : 'INFO', file: t(f?.file, 120), line: n(f?.line), message: t(f?.message, 160) })) }; };
+const sanitizeStructure = (st) => { if (!st || typeof st !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e7, Math.round(v))) : 0); const pth = (v) => String(v ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120);
+  return { sourceFiles: n(st.sourceFiles), testedFiles: n(st.testedFiles), dirs: (Array.isArray(st.dirs) ? st.dirs : []).slice(0, 14).map((d) => ({ path: pth(d?.path), files: n(d?.files), lines: n(d?.lines), testLines: n(d?.testLines) })),
+    untested: (Array.isArray(st.untested) ? st.untested : []).slice(0, 12).map((u) => ({ file: pth(u?.file), lines: n(u?.lines), key: `untested:${pth(u?.file)}:1` })) }; };
+const sanitizeDuplicates = (d) => { if (!d || typeof d !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e7, Math.round(v))) : 0); const pth = (v) => String(v ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120); const loc = (x) => ({ file: pth(x?.file), start: n(x?.start), end: n(x?.end) });
+  return { pct: Math.min(100, n(d.pct)), blocks: (Array.isArray(d.blocks) ? d.blocks : []).slice(0, 12).map((b) => ({ lines: n(b?.lines), a: loc(b?.a), b: loc(b?.b), key: `dup:${pth(b?.b?.file)}:${n(b?.b?.start)}` })) }; };
 const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null); const arr = (v, n, m) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, m)).slice(0, n) : []);
   return { languages: arr(p.languages, 6, 30), packageManager: str(p.packageManager, 20), framework: str(p.framework, 30), verify: str(p.verify, 500), image: str(p.image, 80), verifyReason: str(p.verifyReason), tests: !!p.verify, hasRepoConfig: !!p.hasRepoConfig, hasReadme: !!p.hasReadme, ci: str(p.ci, 30),
-    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
+    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), structure: sanitizeStructure(p.structure), duplicates: sanitizeDuplicates(p.duplicates), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
-    this.jobs = new Map(); this.sonarJob = null;
+    this.jobs = new Map();
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -162,7 +166,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, sonarUrl: this.cfg.sonar ? `${this.sonarCfg().url}/dashboard?id=${projectKey(p.id)}` : null, verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -284,70 +288,32 @@ export class Engine {
     if (secret && t.tokenEnv) this.saveSecret(t.tokenEnv, secret);
     if (t.kind === 'github') await this.gh.ensureLabels(repo);
     this.cfg.projects.push(p); this._persist();
-    if (this.cfg.sonar) this.startAnalysis(p.id); // SonarQube is on: scan the new project in the background
     return p;
   }
   // Shallow, read-only clone -> profile. Nothing is executed from the repo and nothing is persisted here.
-  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, sonarFor, gate } = {}) {
+  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, gate } = {}) {
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, log: path.join(this.cfg.stateDir, 'analyze.log') });
     let ws;
     onPhase?.('cloning the repository');
     try {
       ws = await sb.create({ cloneUrl: hostAdapter.cloneUrl(repo), branch: 'analyze', base, newBranch: false, gitEnv: hostAdapter.gitEnv(), depth: 1 });
       onPhase?.('reading the code'); const profile = analyzeRepo(ws.dir, { gate }); onProfile?.(profile);
-      if (sonarFor) profile.sonar = await this._sonarScan(ws.dir, sonarFor, onPhase).catch((e) => ({ error: String(e.message ?? e).slice(0, 400), analyzedAt: new Date().toISOString() }));
       return profile;
     } catch (e) { const m = String(e.message ?? e); if (/clone failed/.test(m) && /(Remote branch .* not found|empty|did not match)/i.test(m)) return { ...analyzeRepo(os.tmpdir() + '/__nonexistent__'), warnings: ['the base branch was not found or the repository is empty'], languages: [], topLevel: [] }; throw Object.assign(new Error(m.slice(0, 300)), { status: 400 }); }
     finally { try { ws?.destroy(); } catch { /* best effort */ } }
   }
 
-  // ---- SonarQube (optional, the real analyser). Settings live in cfg.sonar; the token only in secrets.env.
-  sonarCfg() {
-    const c = this.cfg.sonar; if (!c) return null;
-    const managed = c.mode === 'managed'; const url = managed ? MANAGED.hostUrl : c.url; const host = (() => { try { return new URL(url).hostname.replace(/^\[|\]$/g, ''); } catch { return ''; } })();
-    return { mode: c.mode, url, innerUrl: managed ? MANAGED.innerUrl : url, network: managed ? MANAGED.network : ['localhost', '127.0.0.1', '::1'].includes(host) ? 'host' : undefined, token: this.env[SONAR_TOKEN_ENV] };
-  }
-  async _sonarScan(dir, { id }, onPhase) {
-    const c = this.sonarCfg(); if (!c?.token) throw new Error('SonarQube is not set up (Health page → Code quality)');
-    return (this.f.sonarScan ?? scanProject)({ dir, id, name: id, url: c.url, innerUrl: c.innerUrl, token: c.token, network: c.network, exec: this.f.dockerExec, fetchImpl: this.f.fetch, onPhase, log: path.join(this.cfg.stateDir, 'sonar.log') });
-  }
-  async sonarStatus() {
-    const c = this.sonarCfg(); const job = this.sonarJob;
-    if (job?.state === 'running') return { enabled: false, state: 'starting', phase: job.phase, mode: 'managed' };
-    if (!c) return { enabled: false, state: job?.state === 'error' ? 'error' : 'off', error: job?.error, mode: null };
-    const up = await this._cached('sonar', 8000, async () => { try { const s = await sonarApi({ url: c.url, fetchImpl: this.f.fetch, timeoutMs: 2500 }).get('/api/system/status'); return s?.status === 'UP' ? s.version : null; } catch { return null; } });
-    return { enabled: true, mode: c.mode, url: c.url, state: up ? 'ready' : 'down', version: up || undefined, hasToken: !!c.token };
-  }
-  async sonarEnable({ mode, url, token } = {}) {
-    const bad = (m) => Object.assign(new Error(m), { status: 400 });
-    if (this.sonarJob?.state === 'running') throw bad('SonarQube is already being set up');
-    this.cache.delete('sonar');
-    if (mode === 'external') {
-      let base; try { base = checkBaseUrl(url ?? ''); } catch (e) { throw bad(e.message); }
-      if (typeof token !== 'string' || !token.trim()) throw bad('Paste a SonarQube token (My Account → Security → Generate)');
-      const v = await sonarApi({ url: base, token: token.trim(), fetchImpl: this.f.fetch }).get('/api/authentication/validate').catch((e) => { throw bad(`Could not connect: ${e.message}`); });
-      if (!v?.valid) throw bad('SonarQube rejected that token');
-      this.saveSecret(SONAR_TOKEN_ENV, token.trim()); this.cfg.sonar = { mode: 'external', url: base }; this._persist(); return this.sonarStatus();
-    }
-    if (mode !== 'managed') throw bad('Choose "managed" (the factory runs SonarQube) or "external" (your own server)');
-    const job = this.sonarJob = { state: 'running', phase: 'starting' };
-    (this.f.ensureManaged ?? ensureManaged)({ exec: this.f.dockerExec, fetchImpl: this.f.fetch, env: this.env, saveSecret: (n, v) => this.saveSecret(n, v), onPhase: (ph) => { job.phase = ph; } })
-      .then(() => { this.cfg.sonar = { mode: 'managed' }; this._persist(); this.sonarJob = null; this.cache.delete('sonar'); })
-      .catch((e) => { this.sonarJob = { state: 'error', error: String(e.message ?? e).slice(0, 400) }; });
-    return { enabled: false, state: 'starting', phase: job.phase, mode: 'managed' };
-  }
-  async sonarDisable({ stop } = {}) {
-    const was = this.cfg.sonar; delete this.cfg.sonar; this.sonarJob = null; this.cache.delete('sonar'); this._persist();
-    if (stop && was?.mode === 'managed') await (this.f.stopManaged ?? stopManaged)({ exec: this.f.dockerExec });
-    return { enabled: false, state: 'off', mode: null };
-  }
-  // "Queue a fix": turn one SonarQube finding from the last scan into a normal ticket (it still goes through the usual pipeline and review).
-  async sonarIssueTicket(id, issueKey) {
-    const p = this.project(id); const sq = p.profile?.sonar?.issues?.find((x) => x.key === issueKey); const own = p.profile?.quality?.findings?.find((x) => x.key === issueKey); const i = sq ?? own;
-    if (!i) throw Object.assign(new Error('That finding is not in the last analysis; re-analyze first'), { status: 404 });
-    const where = `${i.file}${i.line ? `:${i.line}` : ''}`; const src = sq ? 'SonarQube' : 'the code quality scan';
-    return this.createTicket(id, { title: `Fix ${i.type.toLowerCase().replace('_', ' ')}: ${i.message}`.slice(0, 120),
-      body: `${src} rule ${i.rule} (${i.severity}) reports at ${where}: ${i.message}\n\nFix this finding with the smallest correct change and keep the existing tests passing. Do not touch unrelated code.` });
+  // "Queue a fix": turn one finding from the last scan into a normal ticket (it still goes through the usual pipeline and review).
+  async findingTicket(id, key) {
+    const p = this.project(id); const pr = p.profile ?? {}; const gone = () => Object.assign(new Error('That finding is not in the last analysis; re-analyze first'), { status: 404 });
+    const tail = 'Keep the existing behaviour and tests passing, make the smallest correct change, and do not touch unrelated code.';
+    const dup = pr.duplicates?.blocks?.find((x) => x.key === key);
+    if (dup) return this.createTicket(id, { title: `Remove duplicated code in ${dup.b.file}`.slice(0, 120), body: `The same ${dup.lines} lines of code appear in ${dup.a.file} (lines ${dup.a.start}-${dup.a.end}) and ${dup.b.file} (lines ${dup.b.start}-${dup.b.end}). Move the shared logic into one function or module and use it from both places. ${tail}` });
+    const un = pr.structure?.untested?.find((x) => x.key === key);
+    if (un) return this.createTicket(id, { title: `Add tests for ${un.file}`.slice(0, 120), body: `${un.file} (${un.lines} lines) has no test. Add focused tests that cover its current behaviour, using the repo's existing test setup. Do not change ${un.file} itself unless a test exposes a clear bug (then describe it). ${tail}` });
+    const i = pr.quality?.findings?.find((x) => x.key === key); if (!i) throw gone();
+    const where = `${i.file}${i.line ? `:${i.line}` : ''}`;
+    return this.createTicket(id, { title: `Fix ${i.type.toLowerCase().replace('_', ' ')}: ${i.message}`.slice(0, 120), body: `The code quality scan reports ${i.rule} (${i.severity}) at ${where}: ${i.message}\n\nFix this finding. ${tail}` });
   }
 
   async analyzeDraft({ kind = 'github', fields = {}, token, repo: input, base }) {
@@ -357,7 +323,7 @@ export class Engine {
     const baseBranch = base || (kind === 'github' ? (await this.gh.inspectRepo(repo)).defaultBranch : (await this._testHost({ kind, fields, token, repo })).defaultBranch);
     return { repo, base: baseBranch, profile: await this._analyzeWith(hostAdapter, repo, baseBranch) };
   }
-  // Re-analysis is a background job (the SonarQube scan takes a minute or two): start it, then poll analysisJob().
+  // Re-analysis is a background job (a big repository takes a few seconds): start it, then poll analysisJob().
   startAnalysis(id) {
     this.project(id); const cur = this.jobs.get(id); if (cur?.state === 'running') return cur;
     const job = { state: 'running', phase: 'starting', startedAt: Date.now() }; this.jobs.set(id, job);
@@ -368,10 +334,8 @@ export class Engine {
   analysisJob(id) { this.project(id); return this.jobs.get(id) ?? { state: 'idle' }; }
   async analyzeProject(id, { onPhase } = {}) {
     const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
-    const prev = p.profile?.sonar; const prevHistory = p.profile?.history; const wantSonar = !!this.cfg.sonar;
-    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, onPhase, sonarFor: wantSonar ? { id: p.id } : null,
-      onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [], ...(prev ? { sonar: prev } : {}) }; this._persist(); } }); // the fast scan shows up at once; the SonarQube result follows
-    if (!profile.sonar && prev) profile.sonar = prev;
+    const prevHistory = p.profile?.history;
+    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, onPhase, onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [] }; this._persist(); } });
     profile.history = addHistory(prevHistory, profile);
     p.profile = profile; this._persist(); return p.profile;
   }

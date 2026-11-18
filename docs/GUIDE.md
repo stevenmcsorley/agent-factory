@@ -105,6 +105,14 @@ Done. Start the factory:  npm start
 
 6. **Review the pull request** (the orange button). Merge it, ask for changes by commenting on it, or close it. If you comment, or CI fails, the agent pushes a follow-up commit (up to three rounds, then it hands back to you).
 
+### Try the code checks in 10 minutes
+
+1. Add a project (any repo you own) and open its **Code** tab. Read the folders, repeated code and untested files.
+2. Press **Queue tests** on the biggest untested file. A ticket appears on the board.
+3. Press **Run** (header) and watch the line. The agent writes tests, the verify step runs them, the quality gate checks the new lines, and a draft PR opens.
+4. Open the work order: the **Quality gate on this change** card shows what was checked and the result.
+5. Merge the PR if you like it, press **Re-analyze**, and watch "files covered" go up and the trend update.
+
 ---
 
 ## 5. Connect your own tools
@@ -120,26 +128,41 @@ Open **Cells → Add project**. You make two independent choices, so you can mix
 | **3** | **Where your tickets live**: GitHub Issues, Ossicone, Jira or Linear. **Test connection** lists your projects so you can pick one. |
 | **4** | For Ossicone the wizard checks whether the server allows **sign-up** and links you to *Create an account*, *Sign in* and *Get an API token*. |
 
-**Repository analysis.** As soon as access checks out, the wizard takes a quick read-only look at the code and shows a **Code health** card:
+**Repository analysis.** As soon as access checks out, the wizard takes a quick read-only look at the code and shows a **Code health** card: A to E ratings (size, tests, duplication, upkeep, committed secrets), the detected languages and package manager, and **how changes will be verified** (an editable test command such as `npm ci && npm test`, or `cd engine && npm test` for an app in a subfolder). If no way to run tests is found it warns that pull requests will be opened *unverified*. The result is saved with the project and summarised for the agent on every run. **Health** warns about any project with no way to verify.
 
-- **Ratings (A to E)** for size, tests, duplication, upkeep (huge files, TODO/FIXME) and committed secrets (it reports the file, never the key).
-- **How changes will be verified**: the detected test command (npm, pnpm, yarn, pytest, go, cargo, make, or an app in a subfolder such as `cd engine && npm test`). It is editable, so fix it here if it guessed wrong.
-- **Warnings**, such as "no way to run tests was found: pull requests will be UNVERIFIED".
+### Inspect the code (the Code tab)
 
-The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. **The quality gate (built in, no download).** The same card shows a quality gate for the whole repository (no committed secrets, no critical findings, duplication within limits), the count of secrets, vulnerabilities, bugs and code smells from our own small rule set, and a trend over your last analyses. Each finding has a **Queue fix** button that turns it into a ticket.
+Every project has a **Code** tab: a plain-English look at the files, with no server and nothing to install.
 
-The rules are deliberately few and our own: committed secrets and keys, `eval`/`new Function`, `innerHTML =`, `shell=True`, switched-off TLS checks, empty error handlers, leftover `debugger`/`console.log`, and functions that are very long or deeply nested. They are line-based heuristics, not a full analyser. Add `quality-ignore` at the end of a line to skip a deliberate one (for example a fake key in an example).
+| Section | What it tells you | Button |
+|---|---|---|
+| **Where the code lives** | Lines of code per folder, as bars, so you can see where the weight is | |
+| **Repeated code** | Blocks of 6 or more identical code lines that appear in two places, with the exact files and line numbers (`a.js:40-52` is the same as `b.js:12-24`) | *Queue cleanup* |
+| **Tests** | How many source files have a test (matched by name, or because a test imports them) and the biggest ones with none | *Queue tests* |
+| **Quality gate** | Committed secrets, dangerous calls (`eval`, `innerHTML =`, `shell=True`, TLS checks off), empty error handlers, leftover `debugger`/`console.log`, very long or deeply nested functions, plus a trend over your last 30 analyses | *Queue fix* |
 
-**The same gate checks the agent's own pull request.** Before a PR is opened, only the lines the agent *added or changed* are checked ("clean as you code"; old problems are not blamed on the change). If the gate fails, the agent is told exactly what to fix and gets another attempt. A leftover secret stops the PR entirely (nothing is pushed); other findings are shown on the PR and on the work-order page as *flagged*. Tune it with `qualityGate` in `agent-factory.json` (`{ "maxNewVulnerabilities": 0, "maxNewBugs": 0, "maxNewSmells": null, "block": ["secrets"] }`), or `"qualityGate": false` to switch it off.
+Each button turns the finding into a normal ticket (for example "Remove duplicated code in src/b.js"), so the agent can tidy its own project. **Re-analyze** re-runs it any time and shows live progress.
 
-**Advanced and optional: real SonarQube.** If you already run SonarQube (or SonarCloud), the next paragraph connects it. It is not needed for any of the above.
+It is a fast, line-based scan: good for orientation, not a full static analyser. Add `quality-ignore` at the end of a line to skip a deliberate one (for example a fake key in an example).
 
-Open **Health → Advanced: SonarQube** and choose one:
+**Try it on any folder from the terminal** (no config, nothing is changed):
 
-- **Run it for me:** the factory starts the official SonarQube Community container on this machine (127.0.0.1 only), sets an admin password and creates a token for itself. The first start downloads about 1 GB and needs about 2 GB of memory.
-- **I already have one:** paste the URL of your own server or SonarCloud, plus a token (*My Account → Security*).
+```bash
+npm run analyze -- .                       # this folder
+npm run analyze -- ~/code/my-app           # any folder
+npm run analyze -- https://github.com/owner/repo.git   # shallow, read-only clone
+npm run analyze -- . --json                # the raw data
+```
 
-Once it is on, every new project is scanned in the background, and **Re-analyze** on a project re-runs both the fast scan and SonarQube. The Code health card then adds a **SonarQube** section: the quality gate (passed or failed, and why), bugs, vulnerabilities, code smells, security hotspots, coverage, duplication, reliability/security/maintainability ratings, and the top findings. Each finding has a **Queue fix** button that turns it into a normal ticket for the agent. The agent is also told the gate status and finding counts on every run. Scanning runs in a throwaway container with your code mounted read-only.
+### The same gate checks the agent's own pull request
+
+Before a PR is opened, only the lines the agent *added or changed* are checked ("clean as you code"; old problems are not blamed on the change). If the gate fails, the agent is told exactly what to fix and gets another attempt. A leftover secret stops the PR entirely (nothing is pushed); other findings are shown on the PR and on the work-order page as *flagged*. Tune it in `agent-factory.json`:
+
+```json
+{ "limits": { "qualityGate": { "maxNewVulnerabilities": 0, "maxNewBugs": 0, "maxNewSmells": null, "block": ["secrets"] } } }
+```
+
+(`"qualityGate": false` switches it off.) In a real test, a ticket asked the agent to commit a literal AWS-style key: the gate rejected the first attempt, the agent switched to reading it from an environment variable, and the PR opened with "Quality gate: passed".
 
 <img src="guide/img/architecture.svg" alt="Architecture: ticket sources and code hosts around the factory, with the Docker sandbox below" width="100%">
 

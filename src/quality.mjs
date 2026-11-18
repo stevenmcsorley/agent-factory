@@ -1,4 +1,4 @@
-// Our own, light code-quality engine: the useful ideas of SonarQube without the server.
+// Our own, light code-quality engine, with no server: a few rules, a quality gate, and a trend.
 //  * a small set of line/structure rules (secrets, dangerous calls, empty error handlers, huge or deeply nested functions)
 //  * "clean as you code": check only the lines the agent CHANGED, and gate the pull request on them
 //  * a quality gate with configurable limits, and a history so you can see the trend
@@ -26,7 +26,7 @@ const RULES = [
   { id: 'empty-except', type: 'bug', severity: 'MAJOR', msg: 'except/pass hides failures; handle or log the error', langs: (e) => PY.has(e), re: /^\s*except\b[^:]{0,80}:\s*pass\s*$/ },
   { id: 'debugger', type: 'code_smell', severity: 'MAJOR', msg: 'Leftover debugger statement', langs: (e) => JS.has(e), re: /^\s*debugger\s*;?\s*$/ },
   { id: 'py-debug', type: 'code_smell', severity: 'MAJOR', msg: 'Leftover debugger call', langs: (e) => PY.has(e), re: /^\s*(?:breakpoint\(\)|import pdb|pdb\.set_trace\(\))/ },
-  { id: 'console', type: 'code_smell', severity: 'MINOR', msg: 'Leftover console.log/debug', langs: (e) => JS.has(e), re: /\bconsole\.(?:log|debug)\s*\(/, skipTests: true, skipPaths: /(^|\/)(bin|cli|scripts?|tools?)\// },
+  { id: 'console', type: 'code_smell', severity: 'MINOR', msg: 'Leftover console.log/debug', langs: (e) => JS.has(e), re: /\bconsole\.(?:log|debug)\s*\(/, skipTests: true, skipPaths: /(^|\/)(bin|cli|scripts?|tools?)(\/|\.[a-z]+$)/ },
 ];
 
 const STRINGS = /(["'`])(?:\\.|(?!\1).){0,200}?\1/g;

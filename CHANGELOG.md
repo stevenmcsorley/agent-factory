@@ -2,8 +2,9 @@
 
 ## Unreleased
 - **Security fix:** git commands on the host no longer run repository-controlled code (hooks, fsmonitor, sshCommand, credential helpers, `ext::` or redirected remotes planted by the agent in `.git`). See SECURITY.md.
-- **Built-in quality engine** (no server, no download): our own rules, a quality gate for the whole repo with a trend over time, and the same gate on the agent's own change, checking only the lines it added or changed (one retry; a leftover secret stops the PR, other findings are flagged on it). SonarQube is now an optional, advanced add-on.
-- **Optional SonarQube integration** (Health page): run the official Community container for you, or connect your own server/SonarCloud. New projects are scanned in the background and Re-analyze re-scans; results (quality gate, bugs, vulnerabilities, smells, coverage, findings with a Queue fix button) appear on the project's Code health card. Re-analysis is now a background job with live progress.
+- **Built-in code inspection** (no server, no download): a Code tab per project with folder layout, repeated code (exact files and lines), untested files, and our own quality rules with a trend; each finding can be queued as a ticket. `agent-factory analyze <folder|url>` prints the same report in the terminal.
+- **Quality gate on the agent's own change**: only the lines it added or changed are checked (one retry; a leftover secret stops the PR, other findings are flagged on it). Tested with a real agent.
+- Re-analysis is a background job with live progress. (An optional SonarQube integration was built and then removed again: it needed a 1.4 GB download and 10% free disk.)
 - **Repository analysis** on add (and Re-analyze): language, package manager, detected test command (including apps in subfolders), A–E ratings for size, tests, duplication, upkeep and committed secrets, with an editable verify command. Saved with the project, summarised in the agent prompt, and flagged on Health when a project has no way to verify.
 - The ticket pre-check now only blocks tickets too short to act on; the agent proceeds on stated assumptions or asks specific questions (`NEEDS_INFO:`).
 - Pasting any repository URL (web, `.git`, ssh) is accepted.

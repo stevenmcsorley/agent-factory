@@ -120,5 +120,5 @@ test('engine: repo findings can be queued as a fix ticket; the profile quality f
   e.gh = { whoami: async () => 'me', inspectRepo: async () => ({ defaultBranch: 'main' }), ensureLabels: async () => {} };
   const evil = { quality: { counts: { secrets: 1e12, total: -5 }, gate: { status: 'ERROR', failed: ['<script>x</script> 3 secrets'] }, findings: Array.from({ length: 40 }, (_, i) => ({ key: `eval:a.js:${i}`, rule: 'eval', type: 'vulnerability', severity: 'WHATEVER', file: 'a.js', line: i, message: '`rm -rf`\nnow' })) } };
   const p = await e.addProject({ repo: 'o/app', profile: evil }); assert.equal(p.profile.quality.findings.length, 15); assert.equal(p.profile.quality.findings[0].severity, 'INFO'); assert.ok(p.profile.quality.counts.secrets <= 1e6); assert.doesNotMatch(JSON.stringify(p.profile.quality), /<script>|`|\n/); assert.equal(p.profile.history.length, 1);
-  const made = []; e.createTicket = async (id, t) => { made.push(t); return {}; }; await e.sonarIssueTicket('app', 'eval:a.js:3'); assert.match(made[0].title, /^Fix vulnerability:/); assert.match(made[0].body, /the code quality scan rule eval/);
+  const made = []; e.createTicket = async (id, t) => { made.push(t); return {}; }; await e.findingTicket('app', 'eval:a.js:3'); assert.match(made[0].title, /^Fix vulnerability:/); assert.match(made[0].body, /code quality scan reports eval/);
 });

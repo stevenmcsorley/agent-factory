@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { detectVerify, loadRepoConfig } from './repoconfig.mjs';
-import { sonarSummary } from './sonar.mjs';
+import { inspectCode, importedNames } from './inspect.mjs';
 import { scanText, isTestPath, countFindings, topFindings, evaluateRepoGate } from './quality.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', 'vendor']);
@@ -11,15 +11,16 @@ const safePath = (s) => String(s).replace(/[^\w./@+-]/g, '').slice(0, 120);
 const safeName = (s) => String(s).replace(/[^\w.@+-]/g, '').slice(0, 40);
 
 const LANG = { js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', go: 'Go', rs: 'Rust', java: 'Java', kt: 'Kotlin', rb: 'Ruby', php: 'PHP', cs: 'C#', c: 'C', h: 'C', cpp: 'C++', swift: 'Swift', sh: 'Shell', css: 'CSS', scss: 'CSS', html: 'HTML', sql: 'SQL', vue: 'Vue', svelte: 'Svelte' };
+const TRIVIAL = /^(?:[)}\];,]+|import\b|from\b|export\s*(?:\*|\{)|#include|using\b|package\b|use\b|require\()/;
 const LINE_COMMENT = /^\s*(\/\/|#|--|\*|\/\*)/;
 const rate = (v, [a, b, c, d]) => (v <= a ? 'A' : v <= b ? 'B' : v <= c ? 'C' : v <= d ? 'D' : 'E');
 
-// SonarQube-style measures without a server: a bounded, dependency-free scan. It is a HEURISTIC (line-based, no parsing), good for "is this repo in shape to automate", not a substitute for a real analyser.
+// Code-health measures without a server: a bounded, dependency-free scan. It is a HEURISTIC (line-based, no parsing), good for "is this repo in shape to automate", not a substitute for a real analyser.
 export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000 } = {}) {
   const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 8) return; let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of es) { if (SKIP.has(e.name) || e.isSymbolicLink()) continue; const full = path.join(d, e.name); if (e.isDirectory()) walk(full, depth + 1); else if (e.isFile()) files.push(full); if (files.length >= maxFiles) return; } };
   walk(dir, 0);
-  const findings = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = [], windows = new Map(); let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
+  const findings = []; const recs = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
   for (const f of files) {
     const ext = path.extname(f).slice(1).toLowerCase(); const lang = LANG[ext]; const rel = path.relative(dir, f);
     let st; try { st = fs.statSync(f); } catch { continue; } if (st.size > maxBytes || st.size === 0) continue;
@@ -28,10 +29,12 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000 } = {}) {
     for (const f of scanText(rel, txt, { isTest })) { if (findings.length < 600) findings.push({ ...f, file: safePath(f.file) }); if (f.rule === 'secret' && secrets.length < 10 && !secrets.some((x) => x.file === safePath(rel))) secrets.push({ file: safePath(rel), kind: f.message.replace('Possible hard-coded ', '') }); }
     if (!lang) continue;
     const lines = txt.split('\n'); let c = 0; const norm = [];
-    for (const l of lines) { if (!l.trim()) blank++; else if (LINE_COMMENT.test(l)) { comment++; if (/\b(TODO|FIXME|HACK|XXX)\b/.test(l)) todos.n++; } else { c++; code++; const t = l.trim(); if (t.length > 12 && !/^[)}\];,]+$/.test(t)) norm.push(t); } }
+    lines.forEach((l, idx) => { const t = l.trim(); if (!t) blank++; else if (LINE_COMMENT.test(l)) { comment++; if (/\b(TODO|FIXME|HACK|XXX)\b/.test(l)) todos.n++; } else { c++; code++; if (t.length > 12 && t.length < 300 && !TRIVIAL.test(t)) norm.push({ t, n: idx + 1 }); } });
     byLang[lang] = (byLang[lang] ?? 0) + c; srcFiles++;
-    if (isTest) { testFiles++; testLines += c; } else { if (c > 500) { longFiles++; } if (big.length < 200) big.push({ file: safePath(rel), lines: c }); if (!/\.(json|lock)$/.test(rel)) for (let i = 0; i + 6 <= norm.length; i += 3) { const k = norm.slice(i, i + 6).join('\n'); if (windows.has(k) && windows.get(k) !== rel) dupLines += 6; else windows.set(k, rel); } }
+    recs.push({ rel: safePath(rel), lang, isTest, lines: c, norm: /\.(json|lock)$/.test(rel) ? [] : norm, refs: isTest ? importedNames(txt) : null });
+    if (isTest) { testFiles++; testLines += c; } else { if (c > 500) longFiles++; if (big.length < 200) big.push({ file: safePath(rel), lines: c }); }
   }
+  const insp = inspectCode(recs); dupLines = insp.duplicates.dupLines;
   const prod = Math.max(0, code - testLines); const dupPct = prod ? Math.min(100, Math.round((dupLines / prod) * 100)) : 0;
   const testRatio = prod ? Math.round((testLines / prod) * 100) : 0;
   const languages = Object.entries(byLang).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name, lines]) => ({ name, lines }));
@@ -43,7 +46,7 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000 } = {}) {
     maintainability: rate(longFiles + todos.n / 10, [1, 3, 6, 12]),
     security: secrets.length ? 'E' : 'A',
   };
-  return { _findings: findings, files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
+  return { _findings: findings, _inspect: insp, files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
 }
 
 export function analyzeRepo(dir, { sub = false, gate: gateCfg } = {}) {
@@ -97,13 +100,13 @@ export function analyzeRepo(dir, { sub = false, gate: gateCfg } = {}) {
   const ci = has('.github/workflows') ? 'GitHub Actions' : has('.gitlab-ci.yml') ? 'GitLab CI' : has('bitbucket-pipelines.yml') ? 'Bitbucket Pipelines' : has('Jenkinsfile') ? 'Jenkins' : null;
   if (!ci) notes.push('no CI configuration found: the factory can only rely on its own verify step');
   const dedupe = [...new Set(languages)];
-  const metrics = empty || sub ? null : codeMetrics(dir); const found = metrics?._findings ?? []; if (metrics) delete metrics._findings;
+  const metrics = empty || sub ? null : codeMetrics(dir); const found = metrics?._findings ?? []; const insp = metrics?._inspect ?? null; if (metrics) { delete metrics._findings; delete metrics._inspect; }
   if (metrics && !dedupe.length) dedupe.push(...metrics.languages.filter((l) => !['CSS', 'HTML'].includes(l.name)).slice(0, 3).map((l) => l.name));
   if (metrics?.secrets.length) warnings.push(`possible secrets committed in ${metrics.secrets.map((x) => x.file).slice(0, 3).join(', ')}: rotate them and remove them from history`);
   if (metrics && metrics.sourceFiles && metrics.testFiles === 0) notes.push('no test files found: the agent cannot prove its changes work here');
   if (metrics && metrics.duplicatedPct >= 10) notes.push(`about ${metrics.duplicatedPct}% duplicated code: changes may need to be repeated in several places`);
   const quality = metrics ? { counts: countFindings(found), findings: topFindings(found, 15), gate: evaluateRepoGate({ metrics, findings: found }, gateCfg) } : null;
-  const profile = { metrics, quality, languages: dedupe, packageManager, framework, verify, image, verifyReason, tests, hasRepoConfig, hasReadme, ci, topLevel, notes, warnings, analyzedAt: new Date().toISOString() };
+  const profile = { metrics, quality, structure: insp?.structure ?? null, duplicates: insp ? { pct: metrics.duplicatedPct, blocks: insp.duplicates.blocks } : null, languages: dedupe, packageManager, framework, verify, image, verifyReason, tests, hasRepoConfig, hasReadme, ci, topLevel, notes, warnings, analyzedAt: new Date().toISOString() };
   return profile;
 }
 
@@ -114,7 +117,6 @@ export function profileSummary(p) {
   if (p.languages?.length) bits.push(`Languages: ${p.languages.join(', ')}${p.framework ? ` (${safeName(p.framework)})` : ''}${p.packageManager ? `; package manager: ${p.packageManager}` : ''}.`);
   if (p.verify) bits.push(`Changes are verified with: ${String(p.verify).slice(0, 200)}. Make sure that passes.`); else bits.push('No automated tests are configured here; keep the change small and add tests only if a test setup obviously exists.');
   if (p.metrics?.hotspots?.length) bits.push(`Largest source files: ${p.metrics.hotspots.slice(0, 3).map((h) => `${safePath(h.file)} (${Number(h.lines) || 0} lines)`).join(', ')}.`);
-  const sq = sonarSummary(p.sonar); if (sq) bits.push(sq);
   if (p.topLevel?.length) bits.push(`Top-level layout: ${p.topLevel.slice(0, 20).join(' ')}`);
   return bits.join('\n');
 }
