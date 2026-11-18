@@ -32,6 +32,7 @@ const HELP = `agent-factory <command>
   brief <proj>   show or set the project brief:  --goal= --scope= --users= --non-goals= --success= --constraints= --stack= --decisions=  (@file reads a file)
   source <proj> <file|url|->   attach a PRD, research or design:  --kind=prd|research|design|reference  --title=
   plan <proj>    draft a delivery plan from the brief:  --wait to follow it, --launch to approve, --show to just print
+  library <sub>  the reuse library: status | create | connect | search <q> | get <part> | candidates | promote <proj> <files> --name= | use <part> <proj> | upgrades
   ops            list every operation (the same ones MCP exposes);  op <name> [json] --key=value  runs one
   agents-md      print docs/AGENT-GUIDE.md: the guide to give any AI agent so it can drive the factory
   build-image    build the agent sandbox image
@@ -84,7 +85,7 @@ WantedBy=default.target
   const cfg = boot();
   if (cmd === 'token') return console.log(`http://${cfg.ui.host}:${cfg.ui.port}/#token=${await ensureToken(cfg.stateDir)}`);
   if (cmd === 'doctor') { const r = await doctor(cfg); r.forEach((c) => (c.ok ? ok(c.detail) : bad(c.detail, c.fix))); return process.exit(r.every((c) => c.ok || c.id === 'running') ? 0 : 1); }
-  if (['ops', 'op', 'portfolio', 'brief', 'source', 'plan', 'agents-md'].includes(cmd)) { try { await clientCommand(cmd, args, flags, cfg, root); } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); } return; }
+  if (['ops', 'op', 'portfolio', 'brief', 'source', 'plan', 'library', 'agents-md'].includes(cmd)) { try { await clientCommand(cmd, args, flags, cfg, root); } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); } return; }
   const problems = validateConfig(cfg); if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
   const engine = new Engine(cfg, { configPath });
   if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo }); return console.log(`Added ${p.id} (base ${p.base})`); }

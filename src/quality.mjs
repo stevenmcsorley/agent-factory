@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { run } from './util.mjs';
 import { lockGit, SAFE_GIT } from './gitguard.mjs';
+import { reinvented } from './library.mjs';
 
 const JS = new Set(['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'vue', 'svelte']); const PY = new Set(['py']);
 const MAX_LINE = 400, MAX_FILE = 400_000, MAX_PER_FILE = 200;
@@ -123,15 +124,19 @@ async function changedLines(dir, log) {
   for (const f of (await g(['ls-files', '--others', '--exclude-standard'])).out.split('\n').filter(Boolean)) added.set(f, 'all');   // brand-new file: every line is new
   return added;
 }
-export async function changeQuality(dir, gateCfg, { log, ignore } = {}) {
-  const added = await changedLines(dir, log); const found = []; let files = 0;
+export async function changeQuality(dir, gateCfg, { log, ignore, parts } = {}) {
+  const added = await changedLines(dir, log); const found = []; let files = 0; const fresh = [];
   for (const [rel, lines] of added) {
     if (files >= 300 || /(^|\/)(node_modules|\.git|dist|build|vendor)\//.test(rel) || ignore?.test(rel)) continue;
     const full = path.join(dir, rel); let st; try { st = fs.lstatSync(full); } catch { continue; } if (!st.isFile() || st.size > MAX_FILE || st.size === 0) continue;
     let text; try { text = fs.readFileSync(full, 'utf8'); } catch { continue; } if (text.includes('\u0000')) continue; files++;
+    if (parts?.length && !isTestPath(rel) && lines === 'all') fresh.push({ rel, content: text });          // only brand-new files are compared with the library
     for (const f of scanText(rel, text, { isTest: isTestPath(rel) })) { const touched = lines === 'all' || lines.has(f.line) || (f.endLine && [...lines].some((n) => n >= f.line && n <= f.endLine)); if (touched) found.push(f); }
   }
+  if (parts?.length) for (const r of reinvented(fresh, parts)) found.push({ file: r.file, line: 1, rule: 'reinvented-part', type: 'code_smell', severity: 'MAJOR', message: `Looks like the library part ${r.slug}@${r.version} (${r.similarity}% similar): use or adapt the part instead of rewriting it`, snippet: '' });
   const counts = countFindings(found); const gate = evaluateGate(counts, gateCfg);
+  const reuse = found.filter((f) => f.rule === 'reinvented-part').length;                      // rewriting a library part earns a retry, then a flag on the PR
+  if (reuse > (gateCfg?.maxNewReuse ?? 0)) { gate.warnings.push(`${reuse} file${reuse > 1 ? 's' : ''} rewrite${reuse > 1 ? '' : 's'} a library part (use or adapt the part)`); gate.passed = false; }
   return { ...gate, status: gate.passed ? 'OK' : gate.blockers.length ? 'ERROR' : 'WARN', counts, files, findings: topFindings(found, 12) };
 }
 export function feedbackFor(q) {

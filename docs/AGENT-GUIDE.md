@@ -30,6 +30,22 @@ You can drive it two ways, with identical power:
 6. **Watch and unblock.** `agent-factory op inbox` lists what needs a human (vague tickets, failed runs, PRs to review). `agent-factory op requeue_ticket --project=... --ticket=... --details="..."` rescues a stuck ticket. `agent-factory op activity` shows what is running now.
 7. **Look after it.** `agent-factory op analyze_project --project=...` then `op get_analysis` shows quality findings, repeated code and untested files. Turn findings into tickets with the web UI's Queue buttons, or `op create_ticket`.
 
+## Reuse before you build: the library
+
+The factory keeps a **reuse library**: a git repo of tested parts (components, hooks, utilities, services, schemas) shared by all projects. Before writing anything generic, look:
+
+```bash
+agent-factory library search "format money amounts" --project=my-app   # what do we already have?
+agent-factory library get money-format --files                          # its API, usage and source
+agent-factory library use money-format my-app --note="cart totals"      # queue a ticket that adds it
+```
+
+* When a ticket matches a part, the factory already tells the building agent ("Reusable parts you already have") and drops the files under `.factory-context/library/<part>/`. Copy them in, **keep the `factory-part:` header line**, adapt imports, and copy the tests. The factory records the version in `.factory/parts.lock.json`.
+* Do not rewrite a part. New files that look like an existing part are flagged by the quality gate and sent back to you once.
+* After building something generic that more than one project could use, promote it: `agent-factory library promote my-app src/money.js --name="Money Format" --summary="..." --tags=currency,money` (opens a PR in the library repo; matching tests are included).
+* `agent-factory library candidates` lists code repeated across projects that should become parts. `agent-factory library upgrades` shows projects on an old version of a part; `agent-factory op upgrade_part_users --part=<slug>` opens the upgrade tickets.
+* First time: `agent-factory library create` (new private GitHub repo with a CI check) or `agent-factory library connect --repo=owner/name`.
+
 ## Writing a brief the factory can use
 
 * **Goal**: one or two sentences a stranger would understand. **In scope**: concrete features. **Out of scope**: say what NOT to build; it stops extras. **Done means**: checkable criteria.

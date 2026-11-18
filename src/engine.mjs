@@ -1,5 +1,10 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { run } from './util.mjs';
+import { SAFE_GIT } from './gitguard.mjs';
+import * as lb from './library.mjs';
+import { LIBRARY_README, PARTS_WORKFLOW, CHECK_PARTS } from './library-seed.mjs';
 import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
 import { buildTickets, identifySource, publicSources, SOURCES, TOKEN_ENV, ossiconeSignupInfo } from './sources.mjs';
@@ -40,15 +45,17 @@ const sanitizeDuplicates = (d) => { if (!d || typeof d !== 'object') return null
   return { pct: Math.min(100, n(d.pct)), blocks: (Array.isArray(d.blocks) ? d.blocks : []).slice(0, 12).map((b) => ({ lines: n(b?.lines), a: loc(b?.a), b: loc(b?.b), key: `dup:${pth(b?.b?.file)}:${n(b?.b?.start)}` })) }; };
 const sanitizeIgnored = (g) => { if (!g || typeof g !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e7, Math.round(v))) : 0); const pth = (v) => String(v ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120);
   return { defaults: n(g.defaults), yours: n(g.yours), folders: n(g.folders), useDefaults: g.useDefaults !== false, patterns: cleanPatterns(g.patterns).patterns, examples: (Array.isArray(g.examples) ? g.examples : []).slice(0, 8).map((x) => ({ path: pth(x?.path), why: x?.why === 'yours' ? 'yours' : 'default' })) }; };
+const sanitizeFingerprints = (list) => (Array.isArray(list) ? list : []).slice(0, 250).map((f) => ({ file: String(f?.file ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120), lines: Math.max(0, Math.min(1e6, Math.round(Number(f?.lines) || 0))), exports: (Array.isArray(f?.exports) ? f.exports : []).slice(0, 12).map((x) => String(x).replace(/[^\w$]/g, '').slice(0, 60)).filter(Boolean),
+  sig: (Array.isArray(f?.sig) ? f.sig : []).map((n) => Number(n) >>> 0) })).filter((f) => f.file && f.sig.length === 24);
 const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null); const arr = (v, n, m) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, m)).slice(0, n) : []);
   return { languages: arr(p.languages, 6, 30), packageManager: str(p.packageManager, 20), framework: str(p.framework, 30), verify: str(p.verify, 500), image: str(p.image, 80), verifyReason: str(p.verifyReason), tests: !!p.verify, hasRepoConfig: !!p.hasRepoConfig, hasReadme: !!p.hasReadme, ci: str(p.ci, 30),
-    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), ignored: sanitizeIgnored(p.ignored), structure: sanitizeStructure(p.structure), duplicates: sanitizeDuplicates(p.duplicates), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
+    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), fingerprints: sanitizeFingerprints(p.fingerprints), ignored: sanitizeIgnored(p.ignored), structure: sanitizeStructure(p.structure), duplicates: sanitizeDuplicates(p.duplicates), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
-    this.jobs = new Map(); this.planJobs = new Map();
+    this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -78,7 +85,10 @@ export class Engine {
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p), contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return pk.renderContext(pk.loadPack(d), d, t); } catch { return ''; } }, materializeContext: (wsDir) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); }, profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
+      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
+      libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -87,7 +97,7 @@ export class Engine {
     this.busy = true;
     try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; }
   }
-  tickAll() { return this._exclusive('tick', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
   feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
@@ -462,6 +472,145 @@ export class Engine {
       return { id: o.id, repo: o.repo, paused: o.paused, queue: o.queue, openPrs: o.prs, error: o.error ?? null, runs: o.metrics ? { total: o.metrics.runs, shipped: o.metrics.ok } : null,
         brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, publishedToRepo: !!pack.publishedAt,
         quality: pr?.quality ? { gate: pr.quality.gate.status, findings: pr.quality.counts.total, secrets: pr.quality.counts.secrets } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
+  }
+
+  // ================================================================ Reuse library
+  _lib() { const c = this.cfg.library; if (!c?.remote) throw Object.assign(new Error('There is no reuse library yet. Create one (Library page) or connect an existing repo.'), { status: 400 }); return { base: 'main', ...c }; }
+  _libDir() { return path.join(this.cfg.stateDir, 'library', 'repo'); }
+  async _git(args, { cwd } = {}) { const r = await run('git', [...SAFE_GIT, ...args], { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }); if (r.code !== 0) throw new Error(`git ${args.find((a) => !a.startsWith('-') && !a.includes('=')) ?? ''} failed: ${r.out.replace(/Authorization: [^\s]+/g, 'Authorization: ***').trim().slice(0, 300)}`); return r.out; }
+  async _gh(args) { const r = await (this.f.gh ?? ((a) => run('gh', a)))(args); if (r.code !== 0) throw new Error(`gh ${args.slice(0, 2).join(' ')} failed: ${String(r.out).trim().slice(0, 300)}`); return r.out; }
+  async _identity() { const login = await this.gh.whoami().catch(() => 'agent-factory'); return ['-c', `user.name=${login}`, '-c', `user.email=${login}@users.noreply.github.com`]; }
+  _catalogNow() { if (this._libCat) return this._libCat; try { this._libCat = this.cfg.library?.remote && fs.existsSync(path.join(this._libDir(), '.git')) ? lb.readCatalog(this._libDir()) : []; } catch { this._libCat = []; } return this._libCat; }
+  async libraryPull() {
+    const c = this._lib(); const dir = this._libDir(); fs.mkdirSync(path.dirname(dir), { recursive: true });
+    if (!fs.existsSync(path.join(dir, '.git'))) { fs.rmSync(dir, { recursive: true, force: true }); await this._git(['clone', '--depth', '20', '--branch', c.base, c.remote, dir]); }
+    else { await this._git(['fetch', '--depth', '20', 'origin', c.base], { cwd: dir }); await this._git(['reset', '--hard', `origin/${c.base}`], { cwd: dir }); }
+    this._libCat = null; this._libPulledAt = Date.now(); return this._catalogNow();
+  }
+  async libraryStatus() {
+    const c = this.cfg.library; if (!c?.remote) return { configured: false };
+    const cat = this._catalogNow(); const usage = this._usage().entries;
+    return { configured: true, repo: c.repo ?? null, remote: /^https?:/.test(c.remote) ? c.remote.replace(/\/\/[^@/]*@/, '//') : c.remote, base: c.base ?? 'main', parts: cat.length, tested: cat.filter((p) => p.tested).length, pulledAt: this._libPulledAt ? new Date(this._libPulledAt).toISOString() : null, uses: usage.length, url: c.repo ? `https://github.com/${c.repo}` : null };
+  }
+  _seedFiles(name) { return new Map([['README.md', LIBRARY_README(name)], ['.github/workflows/parts.yml', PARTS_WORKFLOW], ['scripts/check-parts.mjs', CHECK_PARTS], ['parts/.gitkeep', '']]); }
+  async _pushSeed(remote, name, base = 'main') {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'af-libseed-')); try {
+      await this._git(['clone', remote, tmp]); await this._git(['checkout', '-B', base], { cwd: tmp });
+      for (const [rel, content] of this._seedFiles(name)) { const full = path.join(tmp, rel); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, content); }
+      await this._git(['add', '-A'], { cwd: tmp }); await this._git([...(await this._identity()), 'commit', '-m', 'Start the reuse library (Agent Factory)'], { cwd: tmp }); await this._git(['push', '-u', 'origin', base], { cwd: tmp });
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+  // Create a new, private library repo on GitHub with the structure and CI check, and connect it.
+  async libraryInit({ name = 'factory-library', visibility = 'private' } = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 }); if (this.cfg.library?.remote) throw bad('A library is already connected');
+    if (!/^[\w.-]{1,80}$/.test(name)) throw bad('Repository name may only contain letters, numbers, dots, dashes and underscores'); if (!['private', 'public'].includes(visibility)) throw bad('visibility must be private or public');
+    const owner = await this.gh.whoami(); const repo = `${owner}/${name}`; await this._gh(['repo', 'create', repo, `--${visibility}`, '--description', 'Reusable parts managed by Agent Factory']);
+    const remote = this.f.libraryRemote?.(repo) ?? `https://github.com/${repo}.git`; await this._pushSeed(remote, name);
+    this.cfg.library = { repo, remote, base: 'main' }; this._persist(); await this.libraryPull(); return this.libraryStatus();
+  }
+  async libraryConnect({ repo, remote, base = 'main' } = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 }); if (!repo && !remote) throw bad('Give a repository (owner/name) or a clone URL');
+    if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw bad('Repository must look like owner/name'); const url = remote ?? `https://github.com/${repo}.git`;
+    if (!/^(https:\/\/|ssh:\/\/|git@|\/)/.test(url) || /[\s"'`;|&$<>]/.test(url)) throw bad('That does not look like a git remote'); if (!/^[\w./-]{1,60}$/.test(base)) throw bad('Invalid branch name');
+    const prev = this.cfg.library; this.cfg.library = { ...(repo ? { repo } : {}), remote: url, base };
+    try { try { await this.libraryPull(); } catch (e) { if (!/not found|empty|did not match|Remote branch/i.test(e.message)) throw e; await this._pushSeed(url, repo?.split('/')[1] ?? 'library', base); fs.rmSync(this._libDir(), { recursive: true, force: true }); await this.libraryPull(); } }
+    catch (e) { if (prev) this.cfg.library = prev; else delete this.cfg.library; throw bad(`Could not reach that library: ${e.message}`); }
+    this._persist(); return this.libraryStatus();
+  }
+  libraryDisconnect() { delete this.cfg.library; this._libCat = null; this._persist(); return { configured: false }; }
+  async libraryList() { if (!this.cfg.library?.remote) throw this._lib(); if (!this._libPulledAt) await this.libraryPull().catch(() => {}); const use = this._usage().entries; return this._catalogNow().map((p) => ({ ...lb.publicPart(p), usedBy: [...new Set(use.filter((u) => u.slug === p.slug).map((u) => u.project))] })); }
+  async librarySearch(query, { project, limit = 8 } = {}) { this._lib(); const stack = project ? (this.project(project).profile?.languages ?? []) : []; if (!this._libPulledAt && this.cfg.library?.remote) await this.libraryPull().catch(() => {}); return lb.searchCatalog(this._catalogNow(), query, { stack, limit }).map((r) => ({ ...lb.publicPart(r.part), score: r.score, why: r.why })); }
+  libraryPart(slug) { this._lib(); return { ...lb.readPart(this._libDir(), slug), usedBy: this._usage().entries.filter((u) => u.slug === lb.slugify(slug)) }; }
+
+  // Repeated code across (and within) your projects, from the fingerprints stored with each analysis; marks what the library already has.
+  libraryCandidates() {
+    const prints = {}; for (const p of this.cfg.projects) if (p.profile?.fingerprints?.length) prints[p.id] = p.profile.fingerprints; const cat = this._catalogNow();
+    return lb.candidates(prints).map((c) => { const hit = c.locations.map((l) => { const fp = prints[l.project]?.find((f) => f.file === l.file); let best = null; for (const part of cat) for (const pr of part.prints) { const s = fp ? lb.similarity(fp.sig, pr.sig) : 0; if (s >= 0.6 && (!best || s > best.s)) best = { s, slug: part.slug }; } return best; }).find(Boolean);
+      return { ...c, inLibrary: hit?.slug ?? null }; });
+  }
+  async _projectFiles(p, paths, { withTests = true } = {}) {
+    const d = this.deps(p); const ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'promote', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 }); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    try {
+      const want = [...new Set((Array.isArray(paths) ? paths : []).map((x) => String(x).replace(/^\.?\//, '')))]; if (!want.length || want.length > 12) throw bad('Pick between 1 and 12 files');
+      const read = (rel) => { if (rel.includes('..') || rel.startsWith('.git/') || path.isAbsolute(rel)) throw bad(`Not allowed: ${rel}`); const full = path.join(ws.dir, rel); const st = fs.lstatSync(full, { throwIfNoEntry: false }); if (!st?.isFile() || st.isSymbolicLink()) throw bad(`No such file in ${p.id}: ${rel}`); if (st.size > 200_000) throw bad(`${rel} is too large for a part (200 KB max)`); return { rel, content: fs.readFileSync(full, 'utf8') }; };
+      const files = want.map(read);
+      if (withTests) { const base = (r) => path.basename(r).toLowerCase().replace(/\.[a-z0-9]+$/, '').replace(/[._-](test|spec)$|^test[_-]/g, ''); const names = new Set(files.map((f) => base(f.rel)));
+        const walk = (dir, depth = 0, acc = []) => { if (depth > 6 || acc.length > 3000) return acc; for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (['.git', 'node_modules', 'dist', 'build'].includes(e.name) || e.isSymbolicLink()) continue; const f = path.join(dir, e.name); e.isDirectory() ? walk(f, depth + 1, acc) : acc.push(path.relative(ws.dir, f)); } return acc; };
+        for (const rel of walk(ws.dir)) if (/(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[a-z]+$|_test\.(go|py)$|^test_.*\.py$/i.test(rel) && names.has(base(rel)) && !files.some((f) => f.rel === rel)) { try { files.push(read(rel)); } catch { /* skip unreadable test */ } } }
+      return files;
+    } finally { try { ws.destroy(); } catch { /* best effort */ } }
+  }
+  // Turn files from a project into a library part and open a PR in the library (or push straight to it with direct:true).
+  async promotePart({ project, files, name, kind, summary, tags, usage, withTests, direct = false, note } = {}) {
+    const c = this._lib(); const p = this.project(project); await this.libraryPull().catch(() => {});
+    const picked = await this._projectFiles(p, files, { withTests }); const slug = lb.slugify(name); const existing = this._catalogNow().find((x) => x.slug === slug);
+    const built = lb.buildPart({ name, kind, summary, tags, usage, files: picked, existing, note, origin: { project: p.id, repo: p.repo, base: p.base, files: picked.map((f) => f.rel) } });
+    if (existing) { const cur = lb.readPart(this._libDir(), existing.slug); const key = (list) => JSON.stringify(list.sort((a, b) => a[0].localeCompare(b[0])));
+      const old = cur.files.map((f) => [f.path, f.content]); const now = [...built.files].filter(([rel]) => !/\/(part\.json|README\.md)$/.test(rel)).map(([rel, c]) => [rel.replace(`parts/${existing.slug}/`, ''), c]);
+      if (key(old) === key(now) && !summary && !tags && !usage && !kind) return { part: lb.publicPart({ ...existing, prints: [] }), changed: false, message: 'The library already has exactly this.' }; }
+    const m = built.meta; const verb = existing ? `Update ${m.slug} to ${m.version}` : `Add ${m.slug} ${m.version}`;
+    const out = await this._libPropose({ branch: `part/${m.slug}-${m.version}-${Date.now().toString(36)}`, files: built.files, message: `${verb} (from ${p.id})`, title: `${verb}`, body: `${existing ? 'Updates' : 'Adds'} the **${m.name}** part (${m.kind}), extracted from \`${p.repo}\` by Agent Factory.\n\n${m.summary || ''}\n\nExports: ${m.exports.map((e) => `\`${e.signature || e.name}\``).join(', ') || 'n/a'}\nFiles: ${m.files.map((f) => `\`${f.path}\``).join(', ')}${note ? `\n\nNote: ${note}` : ''}`, direct });
+    return { part: lb.publicPart({ ...m, prints: [] }), ...out };
+  }
+  async _libPropose({ branch, files, message, title, body, direct }) {
+    const c = this._lib(); const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'af-lib-'));
+    try {
+      await this._git(['clone', '--depth', '1', '--branch', c.base, c.remote, tmp]); if (!direct) await this._git(['checkout', '-b', branch], { cwd: tmp });
+      for (const [rel, content] of files) { const full = path.join(tmp, rel); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, content); }
+      await this._git(['add', '-A'], { cwd: tmp }); if (!(await this._git(['status', '--porcelain'], { cwd: tmp })).trim()) return { changed: false, message: 'The library already has exactly this.' };
+      await this._git([...(await this._identity()), 'commit', '-m', message], { cwd: tmp }); await this._git(['push', 'origin', direct ? c.base : branch], { cwd: tmp });
+      if (direct) { await this.libraryPull().catch(() => {}); return { changed: true, direct: true }; }
+      let pr = null; if (c.repo) { try { pr = (await this._gh(['pr', 'create', '-R', c.repo, '--head', branch, '--base', c.base, '--title', title, '--body', body])).trim().split('\n').pop(); } catch (e) { return { changed: true, branch, prError: e.message }; } }
+      return { changed: true, branch, pr };
+    } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  }
+
+  // ---- using parts: what the agent is told, what it is given, what we record afterwards
+  _partsContext(p, t) {
+    const cat = this._catalogNow().filter((x) => x.origin?.project !== p.id && !x.deprecated); if (!cat.length) return { text: '', parts: [] };
+    const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); const q = `${t?.title ?? ''} ${t?.body ?? ''} ${pack.brief.goal ?? ''} ${pack.brief.scope ?? ''}`; const stack = p.profile?.languages ?? [];
+    const found = lb.searchCatalog(cat, q, { stack, limit: 5 }).map((r) => ({ part: r.part, why: r.why }));
+    const text = `${t?.title ?? ''} ${t?.body ?? ''}`.toLowerCase(); for (const part of cat) if (!found.some((f) => f.part.slug === part.slug) && text.includes(part.slug)) found.push({ part, why: ['named in the ticket'] });
+    if (!found.length) return { text: '', parts: [] };
+    const lines = found.slice(0, 6).map(({ part: x, why }) => `- ${x.slug}@${x.version} [${x.kind}${x.tested ? ', tested' : ''}] ${x.summary || x.name}${x.exports.length ? `\n  API: ${x.exports.slice(0, 6).map((e) => e.signature || e.name).join('; ')}` : ''}\n  files: .factory-context/library/${x.slug}/src/  (matched: ${why.slice(0, 3).join(', ')})`);
+    return { parts: found.map((f) => f.part), text: `### Reusable parts you already have (prefer these over writing the same thing again)\n${lines.join('\n')}\nTo use a part: copy its src files (and its tests) into the project where the conventions say, keep the \`factory-part:\` header line at the top of each copied file, and adapt imports. Do not rewrite it from scratch; if it almost fits, copy it and make the smallest change, and say what you changed.` };
+  }
+  _materializeParts(p, t, wsDir) {
+    const { parts } = this._partsContext(p, t); if (!parts.length) return; const lib = this._libDir(); pk.excludeContext(wsDir);
+    for (const part of parts) { const meta = lb.readPart(lib, part.slug); const root = path.join(wsDir, '.factory-context', 'library', part.slug); fs.mkdirSync(root, { recursive: true }); fs.writeFileSync(path.join(root, 'README.md'), meta.readme);
+      for (const f of meta.files) { const dest = path.join(root, f.path); fs.mkdirSync(path.dirname(dest), { recursive: true }); const ext = path.extname(f.path).slice(1).toLowerCase(); fs.writeFileSync(dest, f.role === 'source' ? lb.provenanceHeader(meta, ext) + f.content : f.content); } }
+  }
+  _usage() { try { const u = JSON.parse(fs.readFileSync(path.join(this.cfg.stateDir, 'library', 'usage.json'), 'utf8')); return { entries: Array.isArray(u.entries) ? u.entries : [] }; } catch { return { entries: [] }; } }
+  _saveUsage(u) { const f = path.join(this.cfg.stateDir, 'library', 'usage.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(`${f}.tmp`, JSON.stringify(u, null, 2)); fs.renameSync(`${f}.tmp`, f); }
+  // After an agent run: which parts did it use? Write the lock file into the checkout (so it is committed with the change) and remember the use.
+  async _recordParts(p, t, wsDir) {
+    const cat = this._catalogNow(); if (!cat.length) return [];
+    const g = async (a) => (await run('git', [...SAFE_GIT, ...a], { cwd: wsDir })).out; const list = [...new Set([...(await g(['ls-files', '-m'])).split('\n'), ...(await g(['ls-files', '-o', '--exclude-standard'])).split('\n')].filter(Boolean))].filter((f) => !f.startsWith('.factory/') && !f.startsWith('.factory-context/') && !f.includes('..')).slice(0, 60);
+    const files = []; for (const rel of list) { try { const full = path.join(wsDir, rel); const st = fs.lstatSync(full); if (st.isFile() && !st.isSymbolicLink() && st.size < 200_000) files.push({ rel, content: fs.readFileSync(full, 'utf8') }); } catch { /* skip */ } }
+    const used = lb.detectUsage(files, cat); if (!used.length) return [];
+    const lockPath = path.join(wsDir, '.factory', 'parts.lock.json'); let lock = null; try { lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch { /* none yet */ }
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true }); fs.writeFileSync(lockPath, `${JSON.stringify(lb.updateLock(lock, used, { library: this.cfg.library?.repo }), null, 2)}\n`);
+    const u = this._usage(); for (const x of used) { u.entries = u.entries.filter((e) => !(e.slug === x.slug && e.project === p.id)); u.entries.push({ slug: x.slug, version: x.version, project: p.id, ticket: t?.id, file: x.file, at: new Date().toISOString() }); } this._saveUsage(u);
+    return [...new Map(used.map((x) => [x.slug, x])).values()].map(({ slug, version }) => ({ slug, version }));
+  }
+  // Ask for a part to be used in a project: a normal ticket, so the usual review and verification apply.
+  async usePart({ part, project, note = '' } = {}) {
+    const meta = this.libraryPart(part); this.project(project);
+    return this.createTicket(project, { title: `Use the ${meta.slug} library part${note ? `: ${note}`.slice(0, 60) : ''}`, body: `Add the reusable part \`${meta.slug}@${meta.version}\` (${meta.kind}) to this project${note ? ` for this purpose: ${note}` : ''}.\n\n${meta.summary}\n\nThe part's files are provided in .factory-context/library/${meta.slug}/. Copy its src files (and tests) into the project following the project conventions, keep the \`factory-part:\` header on each copied file, adapt imports, and add or adapt tests so \`npm test\` passes.\n\nAcceptance criteria:\n- the part's files are in the project with their provenance header\n- existing code that duplicated this logic uses the part instead (if any)\n- tests pass` });
+  }
+  libraryUpgrades() {
+    const cat = this._catalogNow(); const out = [];
+    for (const e of this._usage().entries) { const cur = cat.find((x) => x.slug === e.slug); if (cur && lb.cmpVersion(e.version, cur.version) < 0) out.push({ slug: e.slug, project: e.project, from: e.version, to: cur.version, ticketed: !!e.upgradeTicket, deprecated: !!cur.deprecated, replacedBy: cur.replacedBy ?? null }); }
+    return out;
+  }
+  // Open an upgrade ticket for each project still on an older version of a part.
+  async upgradeUsers(slug) {
+    const meta = this.libraryPart(slug); const u = this._usage(); const done = [];
+    for (const e of u.entries) { if (e.slug !== meta.slug || e.upgradeTicket || lb.cmpVersion(e.version, meta.version) >= 0 || !this.cfg.projects.some((p) => p.id === e.project)) continue;
+      const notes = meta.changelog.filter((c) => lb.cmpVersion(c.version, e.version) > 0).map((c) => `- ${c.version}: ${c.note}`).join('\n');
+      const r = await this.createTicket(e.project, { title: `Upgrade library part ${meta.slug} from ${e.version} to ${meta.version}`, body: `The reuse library has a newer version of \`${meta.slug}\` (this project uses ${e.version}; latest is ${meta.version}).\n\nWhat changed:\n${notes || '- see the part README'}\n\nThe new files are in .factory-context/library/${meta.slug}/. Replace the project's copies (${(e.file ?? 'see .factory/parts.lock.json')}) with the new version, keep the \`factory-part:\` header, and fix any callers that the changes affect.\n\nAcceptance criteria:\n- the copied files match ${meta.slug}@${meta.version}\n- tests pass` });
+      e.upgradeTicket = r?.url ?? true; done.push({ project: e.project, ticket: r?.url }); }
+    this._saveUsage(u); return { upgraded: done };
   }
 
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }

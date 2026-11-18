@@ -78,7 +78,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   try {
     run.phase('sandbox', 'cloning the repository');
     ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base, gitEnv: config.gitEnv });
-    try { config.materializeContext?.(ws.dir); } catch { /* context is a helper, never a blocker */ }
+    try { config.materializeContext?.(ws.dir, t); } catch { /* context is a helper, never a blocker */ }
     const cfg = effectiveConfig({ ...config, ...target.overrides }, ws.dir);
     const repoAnalysis = loadRepoConfig(ws.dir).analysis ?? {};            // read once, before the agent runs: it cannot loosen its own gate
     const ignore = makeIgnore({ patterns: [...(config.analysis?.ignore ?? []), ...(Array.isArray(repoAnalysis.ignore) ? repoAnalysis.ignore : [])], useDefaults: config.analysis?.ignoreDefaults !== false && repoAnalysis.ignoreDefaults !== false });
@@ -104,7 +104,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       }
       // Quality gate on the CHANGED lines only ("clean as you code"): one chance to fix its own change, then secrets stop the PR and anything else is flagged on it.
       if (cfg.qualityGate !== false) {
-        let q; try { q = await changeQuality(ws.dir, cfg.qualityGate, { ignore }); } catch (e) { q = null; run.note('qualityError', String(e.message ?? e).slice(0, 200)); }
+        let q; try { q = await changeQuality(ws.dir, cfg.qualityGate, { ignore, parts: config.libraryParts?.() }); } catch (e) { q = null; run.note('qualityError', String(e.message ?? e).slice(0, 200)); }
         if (q) {
           rec.quality = q;
           if (!q.passed) {
@@ -118,11 +118,12 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       break;
     }
     if (rec.status === 'ok') {
+      try { rec.parts = await config.recordParts?.(ws.dir, t); } catch { /* tracking is best effort */ }
       run.phase('push', branch);
       await vcs.commitAndPush(ws, { branch, message: `${t.title}\n\nRefs #${t.id} (agent-factory)` });
       run.phase('pr');
       const assumptions = parseAssumptions(rec.agentSummary); if (assumptions) rec.assumptions = assumptions;
-      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
+      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${rec.parts?.length ? `\n\n### Reused library parts\n${rec.parts.map((x) => `- ${x.slug}@${x.version}`).join('\n')}` : ''}${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
       await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).${qualityNote(rec.quality, true)}${assumptions ? `\n\nAssumptions the agent made (please check):\n${assumptions}` : ''}`);
       await tickets.label(t.id, ['agent-review'], ['agent-working']);
     } else if (rec.status === 'needs-info') {
