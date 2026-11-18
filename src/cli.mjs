@@ -32,7 +32,7 @@ const HELP = `agent-factory <command>
   brief <proj>   show or set the project brief:  --goal= --scope= --users= --non-goals= --success= --constraints= --stack= --decisions=  (@file reads a file)
   source <proj> <file|url|->   attach a PRD, research or design:  --kind=prd|research|design|reference  --title=
   plan <proj>    draft a delivery plan from the brief:  --wait to follow it, --launch to approve, --show to just print
-  library <sub>  the reuse library: status | create | connect | search <q> | get <part> | candidates | promote <proj> <files> --name= | use <part> <proj> | upgrades
+  library <sub>  the reuse library: status | create | connect | search <q> | get <part> | candidates | promote <proj> <files> --name= | extract <proj> --name= | try <part> <fn> --args= | use <part> <proj> | upgrades
   ops            list every operation (the same ones MCP exposes);  op <name> [json] --key=value  runs one
   agents-md      print docs/AGENT-GUIDE.md: the guide to give any AI agent so it can drive the factory
   build-image    build the agent sandbox image

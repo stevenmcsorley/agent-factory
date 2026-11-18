@@ -44,7 +44,13 @@ agent-factory library use money-format my-app --note="cart totals"      # queue 
 * Do not rewrite a part. New files that look like an existing part are flagged by the quality gate and sent back to you once.
 * After building something generic that more than one project could use, promote it: `agent-factory library promote my-app src/money.js --name="Money Format" --summary="..." --tags=currency,money` (opens a PR in the library repo; matching tests are included).
 * `agent-factory library candidates` lists code repeated across projects that should become parts. `agent-factory library upgrades` shows projects on an old version of a part; `agent-factory op upgrade_part_users --part=<slug>` opens the upgrade tickets.
+* Not sure a part does what you need? Run it: `agent-factory library try ignore-patterns cleanPatterns --args='[["*.sql","../x"]]'` (sandboxed, plain JavaScript parts).
+* Code too tangled into a project to promote? `agent-factory library extract my-app --name="Money Format" --files=src/cart.js` queues a ticket for a clean standalone module with its own tests; promote it after that PR merges.
 * First time: `agent-factory library create` (new private GitHub repo with a CI check) or `agent-factory library connect --repo=owner/name`.
+
+## Alerts and other tools can create tickets
+
+Every project has a private webhook: `agent-factory op webhook_info --project=my-app` returns its path. Anything (an error tracker, a monitor such as Skylark or Vantage, a script) can `POST` JSON `{title, body, source, severity, url, key}` to it; each alert is checked, de-duplicated by `key`, rate-limited (30 an hour) and queued as a ticket. `webhook_rotate` replaces the secret. The server listens on this machine only, so expose it through an HTTPS tunnel or reverse proxy if the sender is elsewhere.
 
 ## Writing a brief the factory can use
 

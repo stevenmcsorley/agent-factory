@@ -4,6 +4,8 @@ import path from 'node:path';
 import { run } from './util.mjs';
 import { SAFE_GIT } from './gitguard.mjs';
 import * as lb from './library.mjs';
+import { runSandboxed } from './jssandbox.mjs';
+import crypto from 'node:crypto';
 import { LIBRARY_README, PARTS_WORKFLOW, CHECK_PARTS } from './library-seed.mjs';
 import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
@@ -611,6 +613,51 @@ export class Engine {
       const r = await this.createTicket(e.project, { title: `Upgrade library part ${meta.slug} from ${e.version} to ${meta.version}`, body: `The reuse library has a newer version of \`${meta.slug}\` (this project uses ${e.version}; latest is ${meta.version}).\n\nWhat changed:\n${notes || '- see the part README'}\n\nThe new files are in .factory-context/library/${meta.slug}/. Replace the project's copies (${(e.file ?? 'see .factory/parts.lock.json')}) with the new version, keep the \`factory-part:\` header, and fix any callers that the changes affect.\n\nAcceptance criteria:\n- the copied files match ${meta.slug}@${meta.version}\n- tests pass` });
       e.upgradeTicket = r?.url ?? true; done.push({ project: e.project, ticket: r?.url }); }
     this._saveUsage(u); return { upgraded: done };
+  }
+
+  // ---- Phase 3: run a part, and ask for a clean extraction
+  // Run one exported function of a part in the QuickJS sandbox (no network, no files, time and memory limited). Pure JavaScript parts only.
+  async tryPart({ part, fn, args = [] } = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 }); const meta = this.libraryPart(part);
+    const sources = meta.files.filter((f) => f.role === 'source'); if (!sources.length || sources.some((f) => !/\.(m?js|cjs)$/.test(f.path))) throw bad('Only plain JavaScript parts can be tried here');
+    const exp = meta.exports.find((e) => e.name === fn && e.kind === 'function'); if (!exp) throw bad(`${fn} is not an exported function of ${meta.slug}`);
+    if (!Array.isArray(args) || JSON.stringify(args).length > 20_000) throw bad('args must be a JSON array (max 20 KB)');
+    for (const f of sources) if (/^\s*(import\s|import\()|require\(/m.test(f.content)) throw bad(`${f.path} imports other modules, so it cannot run on its own in the sandbox`);
+    const code = sources.map((f) => f.content.replace(/^\s*export\s+default\s+/gm, 'const __default = ').replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, '').replace(/^\s*export\s+/gm, '')).join('\n');
+    const t0 = Date.now(); const out = await runSandboxed(`async () => {\n${code}\nconst __f = ${fn};\nreturn await __f(...${JSON.stringify(args)});\n}`, {}, { timeoutMs: 3000, memoryBytes: 32 * 1024 * 1024, maxCalls: 1 }).catch((e) => ({ error: String(e.message ?? e) }));
+    if (out.error) return { ok: false, error: String(out.error).replace(/^"|"$/g, '').slice(0, 500), ms: Date.now() - t0 };
+    if (JSON.stringify(out.result ?? null).length > 50_000) return { ok: false, error: 'The result is too large to show', ms: Date.now() - t0 };
+    return { ok: true, result: out.result === undefined ? null : out.result, ms: Date.now() - t0 };
+  }
+  // Code that is tangled into a project cannot be promoted as-is. This queues a normal ticket asking the agent to extract it into a clean, standalone module with its own tests; promote it once that PR is merged.
+  async extractPartTicket({ project, name, files = [], description = '' } = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 }); this.project(project); const slug = lb.slugify(name); if (!slug) throw bad('Give the part a name');
+    const list = (Array.isArray(files) ? files : []).map((f) => String(f).replace(/[^\w./@+-]/g, '')).filter(Boolean).slice(0, 12);
+    return this.createTicket(project, { title: `Extract ${name} into a standalone reusable module`.slice(0, 120), body: `Extract the logic behind "${name}"${list.length ? ` (currently in ${list.join(', ')})` : ''} into a clean, standalone module that other projects could reuse.${description ? `\n\nWhat it should cover: ${String(description).slice(0, 600)}` : ''}\n\nRules for the extracted module:\n- put it in its own file(s), e.g. src/lib/${slug}.js (match the project's language and layout), with a short comment saying what it does\n- it must NOT import anything from this project's other modules, only the standard library or dependencies already declared; pass anything it needs in as arguments\n- export a small, clear API\n- add tests next to it that import only the new module\n- change the project to use the new module and keep its behaviour and tests passing\n\nAcceptance criteria:\n- the new module has no imports from the rest of the project\n- it has its own passing tests\n- the project's existing tests still pass\n\nAfter this PR is merged it can be promoted to the reuse library.` });
+  }
+
+  // ---- Phase 4: inbound webhooks (alerts, monitors, other tools -> tickets)
+  _hookFile(id) { return path.join(this.cfg.stateDir, 'projects', id, 'inbound.json'); }
+  _hook(id) { this.project(id); let h = {}; try { h = JSON.parse(fs.readFileSync(this._hookFile(id), 'utf8')); } catch { /* new */ }
+    if (!h.token) { h = { token: crypto.randomBytes(24).toString('base64url'), seen: {}, hourly: [] }; this._saveHook(id, h); } return h; }
+  _saveHook(id, h) { const f = this._hookFile(id); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(`${f}.tmp`, JSON.stringify(h), { mode: 0o600 }); fs.renameSync(`${f}.tmp`, f); }
+  webhookInfo(id) { const h = this._hook(id); return { path: `/hook/${id}/${h.token}`, example: { title: 'Checkout fails with a 500 when the cart is empty', body: 'Seen 14 times in the last hour. Stack: …', source: 'skylark', severity: 'high', url: 'https://…', key: 'issue-1234' }, received: Object.keys(h.seen).length }; }
+  webhookRotate(id) { const h = this._hook(id); h.token = crypto.randomBytes(24).toString('base64url'); this._saveHook(id, h); return this.webhookInfo(id); }
+  // payload: { title, body|message|text, source, severity, url, key }. Same clarity check as any ticket; a repeated key within 24h is ignored; at most 30 tickets an hour per project.
+  async inboundTicket(id, token, payload = {}) {
+    const fail = (status, error, extra = {}) => Object.assign(new Error(error), { status, ...extra }); const p = this.project(id); const h = this._hook(id);
+    const a = Buffer.from(String(token ?? '')), b = Buffer.from(h.token); if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw fail(401, 'Invalid webhook token');
+    if (p.paused) throw fail(409, 'This project is paused');
+    const clip = (v, n) => String(v ?? '').replace(/\u0000/g, '').slice(0, n); const title = clip(payload.title ?? payload.message ?? payload.name, 160).trim(); const text = clip(payload.body ?? payload.description ?? payload.text ?? payload.message, 6000).trim();
+    if (!title) throw fail(422, 'A title is required (title, message or name)');
+    const key = payload.key ? clip(payload.key, 120) : null; const now = Date.now();
+    h.seen = Object.fromEntries(Object.entries(h.seen).filter(([, t]) => now - t < 86_400_000)); h.hourly = h.hourly.filter((t) => now - t < 3_600_000);
+    if (key && h.seen[key]) return { deduped: true, key };
+    if (h.hourly.length >= 30) throw fail(429, 'Too many alerts for this project this hour');
+    const source = clip(payload.source, 40).replace(/[^\w .-]/g, '') || 'webhook'; const sev = ['low', 'medium', 'high', 'critical'].includes(String(payload.severity).toLowerCase()) ? String(payload.severity).toLowerCase() : null;
+    const body = `${text || title}\n\n---\nReported by ${source}${sev ? ` (severity: ${sev})` : ''}${payload.url && /^https?:\/\//.test(String(payload.url)) ? `\nLink: ${clip(payload.url, 400)}` : ''}${key ? `\nKey: ${key}` : ''}\n\nInvestigate and fix the root cause with the smallest correct change, and add a test that would have caught it.\n\nAcceptance criteria:\n- the reported problem no longer occurs\n- a test covers it and npm test passes`;
+    const g = assessTicket({ title, body }, this.cfg.limits.gate); if (!g.ok) throw fail(422, `Not enough to act on: ${g.problems.join('; ')}`, { problems: g.problems });
+    const r = await this.createTicket(id, { title: `[${source}] ${title}`.slice(0, 200), body }); if (key) h.seen[key] = now; h.hourly.push(now); this._saveHook(id, h); return { created: true, ticket: r?.url ?? null };
   }
 
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }

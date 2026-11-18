@@ -290,3 +290,8 @@ body { overflow-x: hidden; }
 .stg.done { border-top-color: var(--green); } .stg.done i { background: var(--green); } .stg.now { border-top-color: var(--orange); } .stg.now i { background: var(--orange); } .stg.part { border-top-color: var(--amber); } .stg.part i { background: var(--amber); } .stg.todo { opacity: .75; }
 .planbar { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; } .planbar .mtrack { flex: 1; } .row .sp { flex: 1; }
 @media (max-width: 760px) { .stages { grid-template-columns: 1fr 1fr; } }
+
+.tryit { margin: 14px 0; padding: 12px 14px; border: 1px dashed var(--line); display: grid; gap: 8px; } .tryit h3 { margin: 0; } .tryit textarea { width: 100%; font: 500 13px var(--mono); } .tryit pre.code { margin: 0; max-height: 260px; overflow: auto; }
+.snip2 { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); background: var(--bg); } .snip2 code { flex: 1; overflow-x: auto; white-space: nowrap; font: 500 12px var(--mono); }
+
+.srcin { display: grid; gap: 6px; }

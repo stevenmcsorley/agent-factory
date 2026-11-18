@@ -9,6 +9,17 @@ const b64 = (buf) => { let s = ''; const bytes = new Uint8Array(buf); for (let i
 const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
 // ================================================================== BRIEF
+// A URL other tools can POST alerts to; each alert becomes a ticket (with the same clarity check, de-duplication and a rate limit).
+function hookCard(id) {
+  const box = h('div', {}); const op = (name) => api(`/op/${name}`, { method: 'POST', body: { project: id } });
+  const draw = (info) => { const url = `${location.origin}${info.path}`; const curl = `curl -X POST '${url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(info.example)}'`;
+    box.replaceChildren(h('label', {}, 'Webhook URL (keep it private: it contains a secret)'), h('div', { class: 'snip2' }, h('code', {}, url), h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(url); toast('URL copied', 'ok'); } catch { toast('Copy failed', 'bad'); } } }, icon('copy', 12), 'Copy')),
+      h('details', {}, h('summary', {}, 'Example request'), h('pre', { class: 'code' }, h('code', {}, curl))), h('p', { class: 'muted small' }, `${info.received} alert${info.received === 1 ? '' : 's'} received in the last 24 hours. The server listens on this machine only: to receive alerts from the internet, put an HTTPS tunnel or reverse proxy in front of it.`),
+      h('div', { class: 'row gap-t' }, h('button', { class: 'btn small ghost', onclick: act(async () => draw(await op('webhook_rotate')), 'New secret generated; the old URL no longer works') }, 'Generate a new secret'))); };
+  op('webhook_info').then(draw).catch((e) => box.replaceChildren(h('div', { class: 'note bad' }, e.message)));
+  return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Alerts become tickets')), h('p', { class: 'muted small' }, 'Point an error tracker, a monitor (Skylark, Vantage, Sentry…) or any script at this URL. Each alert is checked, de-duplicated by its key, and queued as a ticket the factory fixes; you still review every PR.'), box);
+}
+
 export function briefTab(pack, { id, rerender }) {
   const drafts = {}; const status = h('span', { class: 'muted small' }, 'All changes saved'); const done = h('div', { class: 'chips' }); const bar = h('div', {});
   const paintDone = (c) => {
@@ -38,7 +49,7 @@ export function briefTab(pack, { id, rerender }) {
       await api(`/projects/${id}/pack/sources`, { method: 'POST', body }); }, 'Source added', rerender);
     addBox.replaceChildren(h('div', { class: 'seg' }, [['file', 'Upload a file'], ['link', 'Add a link'], ['text', 'Paste text']].map(([k, l]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; drawAdd(); } }, l))),
       h('div', { class: 'two' }, h('div', {}, h('label', {}, 'What is it?'), kindSel), h('div', {}, h('label', {}, 'Title'), titleIn)),
-      mode === 'file' ? [file, h('p', { class: 'muted small' }, 'Markdown, text, JSON, CSV, HTML, PDF or images (PNG, JPG, GIF, WebP, SVG), up to 5 MB each.')] : mode === 'link' ? [url, h('p', { class: 'muted small' }, 'Links are stored as references; the factory never fetches them. Paste the key text too if the agent needs to read it.')] : text,
+      h('div', { class: 'srcin' }, ...(mode === 'file' ? [file, h('p', { class: 'muted small' }, 'Markdown, text, JSON, CSV, HTML, PDF or images (PNG, JPG, GIF, WebP, SVG), up to 5 MB each.')] : mode === 'link' ? [url, h('p', { class: 'muted small' }, 'Links are stored as references; the factory never fetches them. Paste the key text too if the agent needs to read it.')] : [text])),
       h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: submit }, icon('plus', 14), 'Add source')));
   };
   drawAdd();
@@ -57,6 +68,7 @@ export function briefTab(pack, { id, rerender }) {
     card('', h('div', { class: 'card-h' }, h('h2', {}, 'Keep it with the code'), pack.publishedAt ? pill(`published ${ago(pack.publishedAt)}`, 'ok') : pill('not in the repo yet', 'muted')),
       h('p', { class: 'muted small' }, 'Publishing opens a pull request that adds a `.factory/` folder (brief, conventions, decisions, sources, plan) to the repository, so it is versioned with the code and readable by any teammate or agent, including Claude or Codex run by hand.'),
       pack.publishedPr && /^https?:/.test(pack.publishedPr) ? h('p', { class: 'small' }, 'Last pull request: ', ext(pack.publishedPr, pack.publishedPr, 'loc')) : null, h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: publish }, 'Publish to the repo (opens a PR)'))),
+    hookCard(id),
   ];
 }
 

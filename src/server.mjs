@@ -102,6 +102,12 @@ export function createServer(engine, { token, allowedHosts }) {
       if (!allowedHosts.includes(host)) return send(res, 421, { error: 'Unrecognised Host header' });
       const url = new URL(req.url, `http://${host}`);
       if (url.pathname === '/healthz' && req.method === 'GET') return send(res, 200, { ok: true, paused: engine.paused() }); // for uptime monitors: no secrets, no data
+      const hook = /^\/hook\/([a-z0-9-]{1,41})\/([\w-]{20,64})$/.exec(url.pathname);
+      if (hook) {   // inbound webhook: the secret in the path is the credential (no cookies, no UI token), JSON only, bounded
+        if (req.method !== 'POST') return send(res, 405, { error: 'POST JSON to this endpoint' }, { Allow: 'POST' });
+        try { const out = await engine.inboundTicket(hook[1], hook[2], await readJson(req)); return send(res, out.created ? 201 : 200, out); }
+        catch (e) { return send(res, e.status ?? 500, { error: e.message, ...(e.problems ? { problems: e.problems } : {}) }); }
+      }
       const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/mcp' || url.pathname === '/mcp-code';
       if (!protectedPath) {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });

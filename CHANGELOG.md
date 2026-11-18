@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- **Try it:** run an exported function of a library part in a sandbox (QuickJS: no network or files, 3 s) from the part page or `agent-factory library try`.
+- **Extract cleanly:** a ticket that asks the agent to move tangled code into a standalone module with its own tests, ready to promote (`library extract`, button on repeated-code cards).
+- **Alerts become tickets:** a private webhook per project (`/hook/<project>/<secret>`) that turns alerts from trackers, monitors or scripts into tickets: checked, de-duplicated by key, rate-limited, secret rotatable. Card on the Brief tab; `webhook_info` / `webhook_rotate` operations.
+- Fixes: the add-source panel showed `[object HTMLInputElement]`; part pages could print "null" for missing sections.
 - **Portfolio page** (every project from brief to shipped, next step for each, "Needs you" list) and a planning prompt on the Control room, so briefs, plans and the library are discoverable.
 - **Stale-tab fix:** the UI tells an already-open browser tab when the factory was updated and offers a reload (build id in `/api/status`).
 - **Library page** in the UI: set up or connect the library, searchable part cards with API, usage, file viewer, tests and who uses which version; **Repeated code** with a promote form; **Upgrades**; and a how-it-works tab. `library_*` MCP operations, `agent-factory library …` CLI, header navigation tightened for the extra item.

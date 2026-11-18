@@ -180,7 +180,21 @@ A part is a folder: `part.json` (name, kind, summary, tags, stack, **version**, 
 * **Version**: edit a part in the library repo and bump `version` (or promote again, which bumps the minor version). *Library → Upgrades* lists projects on an older version, and one click opens an upgrade ticket in each (the agent gets the new files and the changelog).
 * **Retire**: set `"deprecated": true` (and optionally `"replacedBy"`) in `part.json`. Deprecated parts are never suggested, and users show up under Upgrades.
 
-Honest limits for now: matching is keyword-based (explained, but not semantic), the usage record covers uses made by the factory, demos are not rendered yet (usage examples and source are), and tests are only run automatically by the library's CI for JavaScript parts.
+* **Try it**: on a plain-JavaScript part, pick an exported function, type its arguments as a JSON array, and run it in a sandbox (no network, no files, 3 seconds) to see it work before you use it. From the terminal: `agent-factory library try <part> <function> --args='[…]'`.
+* **Extract cleanly**: some code is too tangled into its project to promote as-is (it imports the app's own modules). On a repeated-code card press **Extract cleanly first**: the agent gets a ticket to move it into a standalone module with its own tests and no imports from the rest of the project. After you merge that PR, promote it.
+
+Honest limits for now: matching is keyword-based (explained, but not semantic), the usage record covers uses made by the factory, *Try it* only runs plain JavaScript parts that do not import other modules, and the library's CI only runs tests for JavaScript parts.
+
+### Alerts become tickets (webhooks)
+
+Open a project's **Brief** tab → **Alerts become tickets**. It shows a private URL: point an error tracker, a monitor (Skylark, Vantage, Sentry…) or any script at it with a JSON `POST`:
+
+```bash
+curl -X POST 'http://127.0.0.1:7777/hook/<project>/<secret>' -H 'Content-Type: application/json' \
+  -d '{"title":"Checkout returns 500 for an empty cart","body":"Seen 14 times. TypeError in cart.total()","source":"skylark","severity":"high","url":"https://…","key":"issue-1234"}'
+```
+
+Each alert is checked like any ticket, **de-duplicated by `key`** for 24 hours, **rate-limited** (30 an hour per project), and queued; the factory fixes it and you still review the PR. The secret in the URL is the only credential, so keep it private and use *Generate a new secret* if it leaks. The server listens on this machine only: to receive alerts from elsewhere, put an HTTPS tunnel or reverse proxy in front of it.
 
 ---
 
@@ -433,5 +447,6 @@ node src/cli.mjs service      # follow the three commands in its header
 | **Inbox** | Everything that needs a human decision or review |
 | **Part** | A reusable piece of code (component, hook, utility, service, schema) kept in the library with its API, tests and version |
 | **Library** | The git repo of parts shared by all projects; the factory suggests its parts before each build |
+| **Webhook** | A private URL per project that turns an incoming alert into a ticket |
 | **Candidate** | Code repeated across projects that should probably become a part |
 | **Needs info** | The agent (or the too-short check) wants an answer before building; answer it in the inbox |

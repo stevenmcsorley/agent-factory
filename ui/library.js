@@ -71,15 +71,27 @@ function partDetail(p, projects, ctx, close) {
   const showFile = () => { if (!full) return; const f = full.files[view.file] ?? full.files[0]; fileBox.replaceChildren(h('div', { class: 'tabs2' }, full.files.map((x, i) => h('button', { class: `chip ${i === view.file ? 'on' : ''}`, onclick: () => { view.file = i; showFile(); } }, x.path, x.role === 'test' ? ' (test)' : ''))), h('pre', { class: 'code big' }, h('code', {}, f?.content ?? '')), h('div', { class: 'row' }, h('button', { class: 'btn small ghost', onclick: () => copy(f.content, 'File') }, icon('copy', 12), 'Copy file'))); };
   const proj = h('select', { 'aria-label': 'Project' }, [h('option', { value: '' }, 'Choose a project…'), ...projects.map((x) => h('option', { value: x.id }, x.id))]); const note = h('input', { placeholder: 'What do you need it for? (optional)', 'aria-label': 'Purpose' });
   const use = act(async () => { if (!proj.value) throw new Error('Choose a project first'); await op('use_part', { part: p.slug, project: proj.value, note: note.value.trim() || undefined }); }, 'Ticket queued: the agent will add the part', null);
-  op('library_get', { part: p.slug }).then((r) => { full = r; showFile(); body.replaceChildren(
+  op('library_get', { part: p.slug }).then((r) => { full = r; showFile(); body.replaceChildren(...[
     r.usage ? h('div', {}, h('h3', {}, 'Usage'), h('pre', { class: 'code' }, h('code', {}, r.usage)), h('button', { class: 'btn small ghost', onclick: () => copy(r.usage, 'Usage') }, icon('copy', 12), 'Copy')) : null,
     r.exports.length ? h('div', {}, h('h3', {}, 'API'), h('ul', { class: 'plain' }, r.exports.map((e) => h('li', {}, h('code', {}, e.signature || e.name), h('span', { class: 'muted small' }, ` ${e.kind}`))))) : null,
+    tryBox(r),
     h('h3', {}, 'Files'), fileBox,
     r.usedBy.length ? h('div', {}, h('h3', {}, 'Used by'), h('ul', { class: 'plain' }, r.usedBy.map((u) => h('li', { class: 'small' }, h('b', {}, u.project), ` v${u.version}`, u.version !== r.version ? pill(`latest is ${r.version}`, 'warn') : pill('current', 'ok'), h('span', { class: 'muted' }, ` · ${ago(u.at)}`))))) : h('p', { class: 'muted small' }, 'No project has used this part yet.'),
     r.origin?.repo ? h('p', { class: 'muted small' }, 'Extracted from ', h('b', {}, r.origin.repo), ': ', r.origin.files.map((f, i) => [i ? ', ' : '', ghUrl(r.origin.repo, r.origin.base, f) ? ext(ghUrl(r.origin.repo, r.origin.base, f), f, 'loc') : f])) : null,
-    r.changelog.length ? h('details', {}, h('summary', {}, `Changelog (${r.changelog.length})`), h('ul', { class: 'plain' }, r.changelog.slice().reverse().map((c) => h('li', { class: 'small' }, h('b', {}, c.version), ` ${c.date.slice(0, 10)} · ${c.note}`)))) : null); }).catch((e) => body.replaceChildren(h('div', { class: 'note bad' }, e.message)));
+    r.changelog.length ? h('details', {}, h('summary', {}, `Changelog (${r.changelog.length})`), h('ul', { class: 'plain' }, r.changelog.slice().reverse().map((c) => h('li', { class: 'small' }, h('b', {}, c.version), ` ${c.date.slice(0, 10)} · ${c.note}`)))) : null].filter(Boolean)); }).catch((e) => body.replaceChildren(h('div', { class: 'note bad' }, e.message)));
   return card('detail', h('div', { class: 'card-h' }, h('h2', {}, `${p.name} `, h('span', { class: 'muted mono' }, `${p.slug}@${p.version}`)), h('button', { class: 'btn small ghost', onclick: close }, 'Close')), h('p', {}, p.summary),
     h('div', { class: 'usebox' }, h('b', {}, 'Use it in a project'), h('div', { class: 'toolbar' }, proj, note, h('button', { class: 'btn primary', onclick: use }, 'Queue a ticket to add it')), h('p', { class: 'muted small' }, 'Creates a normal ticket. The agent is given the part’s files and copies them in, then tests, the quality gate and your review apply as usual.')), body);
+}
+
+// Run an exported function of the part in the server's sandbox (no network or files), so you can see it work before using it.
+function tryBox(r) {
+  const fns = r.exports.filter((e) => e.kind === 'function'); const src = r.files.filter((f) => f.role === 'source');
+  if (!fns.length || !src.every((f) => /\.(m?js|cjs)$/.test(f.path))) return null;
+  const sel = h('select', { 'aria-label': 'Function' }, fns.map((f) => h('option', { value: f.name }, f.signature || f.name))); const args = h('textarea', { rows: 2, placeholder: 'Arguments as a JSON array, e.g. ["draft-*"]  or  [["a.sql","b.js"], 2]', spellcheck: 'false', 'aria-label': 'Arguments' }, '[]');
+  const out = h('pre', { class: 'code' }, h('code', {}, 'Run it to see the result.'));
+  const run = async (e) => { let a; try { a = JSON.parse(args.value || '[]'); if (!Array.isArray(a)) throw new Error('not an array'); } catch { out.firstChild.textContent = 'Arguments must be a JSON array, e.g. ["text", 2]'; return; }
+    const b = e.currentTarget; b.disabled = true; out.firstChild.textContent = 'Running…'; try { const x = await op('library_try', { part: r.slug, fn: sel.value, args: a }); out.firstChild.textContent = x.ok ? `${JSON.stringify(x.result, null, 2)}\n\n(${x.ms} ms, in a sandbox with no network or files)` : `Error: ${x.error}`; } catch (err) { out.firstChild.textContent = `Error: ${err.message}`; } finally { b.disabled = false; } };
+  return h('div', { class: 'tryit' }, h('h3', {}, 'Try it'), h('p', { class: 'muted small' }, 'Runs the function in a sandbox: no network, no files, 3 seconds.'), h('div', { class: 'toolbar' }, sel), args, h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: run }, icon('arrow', 13), 'Run')), out);
 }
 
 // ------------------------------------------------------------ repeated code -> promote
@@ -90,6 +102,9 @@ function candidatesTab({ candidates, projects, ctx }) {
 }
 function candidate(c, ctx) {
   const box = h('div', {});
+  const extract = () => { const projectsHere = [...new Set(c.locations.map((l) => l.project))]; const from = h('select', { 'aria-label': 'Project' }, projectsHere.map((x) => h('option', { value: x }, x))); const name = h('input', { value: c.name, 'aria-label': 'Part name' });
+    box.replaceChildren(h('div', { class: 'promote' }, h('p', { class: 'muted small' }, 'Use this when the code leans on the rest of the project and cannot be copied as-is. The agent gets a ticket to move it into a standalone module with its own tests; promote it after you merge that PR.'), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Part name'), name), h('div', {}, h('label', {}, 'In project'), from)),
+      h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: act(async () => { const r = await op('extract_part', { project: from.value, name: name.value.trim(), files: c.locations.filter((l) => l.project === from.value).map((l) => l.file) }); toast(`Ticket queued: ${r.url ?? 'see the project board'}`, 'ok'); box.replaceChildren(); }, null) }, 'Queue the extraction'), h('button', { class: 'btn ghost', onclick: () => box.replaceChildren() }, 'Cancel')))); };
   const form = () => {
     const byProject = [...new Set(c.locations.map((l) => l.project))]; const from = h('select', { 'aria-label': 'Take the code from' }, byProject.map((x) => h('option', { value: x }, x)));
     const name = h('input', { value: c.name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (x) => x.toUpperCase()), 'aria-label': 'Part name' }); const summary = h('input', { placeholder: 'What it does and when to use it', 'aria-label': 'Summary' }); const tags = h('input', { placeholder: 'tags, comma separated', 'aria-label': 'Tags' });
@@ -99,7 +114,7 @@ function candidate(c, ctx) {
     box.replaceChildren(h('div', { class: 'promote' }, h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Part name'), name), h('div', {}, h('label', {}, 'Take the code from'), from)), h('label', {}, 'Summary'), summary, h('label', {}, 'Tags'), tags, h('label', {}, 'Files (matching tests are added automatically)'), files,
       h('label', { class: 'check' }, direct, ' Add straight to the library without a pull request (your own library)'), h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: go }, 'Promote to the library'), h('button', { class: 'btn ghost', onclick: () => box.replaceChildren() }, 'Cancel'))));
   };
-  return h('article', { class: 'dup' }, h('div', { class: 'dup-h' }, h('div', { class: 'row' }, h('b', { class: 'f-title' }, c.name), pill(`${c.similarity}% similar`, 'warn'), pill(c.reason, 'muted'), c.inLibrary ? pill(`already in the library: ${c.inLibrary}`, 'ok') : null), c.inLibrary ? null : h('button', { class: 'btn small', onclick: form }, icon('plus', 12), 'Promote…')),
+  return h('article', { class: 'dup' }, h('div', { class: 'dup-h' }, h('div', { class: 'row' }, h('b', { class: 'f-title' }, c.name), pill(`${c.similarity}% similar`, 'warn'), pill(c.reason, 'muted'), c.inLibrary ? pill(`already in the library: ${c.inLibrary}`, 'ok') : null), c.inLibrary ? null : h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: form }, icon('plus', 12), 'Promote…'), h('button', { class: 'btn small ghost', title: 'The code is tangled into the project: have the agent extract a clean module first', onclick: extract }, 'Extract cleanly first'))),
     h('ul', { class: 'plain' }, c.locations.map((l) => h('li', { class: 'small mono' }, h('b', {}, l.project), ` · ${l.file} · ${l.lines} lines`))), box);
 }
 
