@@ -1,0 +1,69 @@
+{
+  "id": "cloudflare-ship",
+  "name": "Ship to Cloudflare Pages",
+  "description": "Gate, point the domain at the Pages project, deploy, verify. Needs the 'cloudflare' plugin enabled and AF_CLOUDFLARE_TOKEN in the secrets file. Always do a dry run first.",
+  "params": {
+    "zone": {
+      "label": "Zone (apex domain)",
+      "required": true,
+      "help": "e.g. example.com"
+    },
+    "hostname": {
+      "label": "Hostname",
+      "required": true,
+      "help": "e.g. app.example.com"
+    },
+    "pagesProject": {
+      "label": "Pages project name",
+      "required": true
+    },
+    "accountId": {
+      "label": "Cloudflare account id",
+      "required": true
+    }
+  },
+  "secrets": [
+    "AF_CLOUDFLARE_TOKEN"
+  ],
+  "allowHosts": [
+    "api.cloudflare.com"
+  ],
+  "steps": [
+    {
+      "id": "merged",
+      "type": "check",
+      "check": "plan-complete",
+      "title": "Every planned ticket is merged",
+      "timeoutMs": 604800000
+    },
+    {
+      "id": "gate",
+      "type": "check",
+      "check": "gate-ok",
+      "title": "The quality gate passes"
+    },
+    {
+      "id": "approve",
+      "type": "approve",
+      "title": "A human approves the go-live",
+      "message": "Point {{params.hostname}} at the Pages project {{params.pagesProject}} and deploy?"
+    },
+    {
+      "id": "dns",
+      "type": "cloudflare.dns",
+      "title": "Point the hostname at Pages",
+      "zone": "{{params.zone}}",
+      "name": "{{params.hostname}}",
+      "recordType": "CNAME",
+      "content": "{{params.pagesProject}}.pages.dev",
+      "proxied": true
+    },
+    {
+      "id": "deploy",
+      "type": "cloudflare.pages-deploy",
+      "title": "Trigger a Pages deployment",
+      "accountId": "{{params.accountId}}",
+      "project": "{{params.pagesProject}}"
+    }
+  ]
+}

@@ -4,3 +4,4 @@ agent-factory.json
 secrets.env
 *.log
 .env
+plugins.json

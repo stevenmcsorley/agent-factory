@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Extension platform:** **plugins** (hash-pinned, human-enabled, offline: add scenario steps, operations, quality rules, part kinds, ticket sources and code hosts), **scenarios** (JSON workflows with checks, ticket steps, restricted HTTPS calls and human approval gates; dry run by default; persisted runs; secrets declared and redacted; `allowHosts`), and **overridable prompts** (`prompts/task-rules.md`). Bundled `prototype` and `ship` scenarios, a `cloudflare` plugin (DNS upsert and Pages deployment; dry runs show the exact change) and a `deploy-hook` plugin. Scenarios page (runs, approvals, extensions) and `agent-factory plugin|scenario` commands. Approving a gate and enabling a plugin are not available to agents or MCP.
+- **Self-modification guardrails:** the repository's `.agent-factory.json` protects the security core (git safety, sandbox, egress, server auth, plugin loader, scenario engine, CI, licence) from the factory's own edits.
+- docs/EXTENDING.md: how to change how it works and which services it uses, what is and isn't pluggable yet, and the security model.
 - **Try it:** run an exported function of a library part in a sandbox (QuickJS: no network or files, 3 s) from the part page or `agent-factory library try`.
 - **Extract cleanly:** a ticket that asks the agent to move tangled code into a standalone module with its own tests, ready to promote (`library extract`, button on repeated-code cards).
 - **Alerts become tickets:** a private webhook per project (`/hook/<project>/<secret>`) that turns alerts from trackers, monitors or scripts into tickets: checked, de-duplicated by key, rate-limited, secret rotatable. Card on the Brief tab; `webhook_info` / `webhook_rotate` operations.

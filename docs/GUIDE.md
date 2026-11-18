@@ -89,6 +89,7 @@ Done. Start the factory:  npm start
 |---|---|
 | **Portfolio** | Every project from *brief → plan → build → ship* on one screen, with the next step for each and a "Needs you" list. Start here when you have several projects |
 | **Library** | The reuse library: parts, repeated code, upgrades |
+| **Scenarios** | Your own workflows with human approval gates (prototype only, ship to production, deploy to Cloudflare…). Run one as a **dry run** first; a real run stops at each approval until you press **Approve**. The Extensions tab shows plugins. See [EXTENDING.md](EXTENDING.md) |
 | **Cells** → a project | Tabs: *Board, Plan, Brief, Pull requests, Work orders, Code, Log* |
 
 > **Seeing the old interface after an upgrade?** An open browser tab keeps the old code in memory. The factory now notices an update and shows an orange bar, *"The factory was updated. Reload to get the new interface."* Press **Reload now** (or Ctrl/⌘+Shift+R).
@@ -197,6 +198,10 @@ curl -X POST 'http://127.0.0.1:7777/hook/<project>/<secret>' -H 'Content-Type: a
 Each alert is checked like any ticket, **de-duplicated by `key`** for 24 hours, **rate-limited** (30 an hour per project), and queued; the factory fixes it and you still review the PR. The secret in the URL is the only credential, so keep it private and use *Generate a new secret* if it leaks. The server listens on this machine only: to receive alerts from elsewhere, put an HTTPS tunnel or reverse proxy in front of it.
 
 ---
+
+### Make it work your way (scenarios and plugins)
+
+Not everyone deploys the same way, so nothing about deployment is built in. A **scenario** is a JSON file listing steps: *checks* ("everything is merged", "quality gate passes"), *approvals* (a human says yes), *tickets* (work for the agent) and *actions* (an HTTPS call, or a step from a **plugin** such as `cloudflare.dns`). Two ship with the factory: **prototype** (stop at a reviewed demo) and **ship** (checks, then your approval, then your deploy). Start with a dry run: it checks for real and only describes the rest. Plugins are trusted code that you enable on purpose (`agent-factory plugin enable <name>`); the factory pins their files so a later edit is refused until you review it. Full guide: [EXTENDING.md](EXTENDING.md).
 
 ## 5. Connect your own tools
 

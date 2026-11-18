@@ -1,0 +1,10 @@
+{
+  "name": "cloudflare",
+  "version": "1.0.0",
+  "description": "Cloudflare: upsert a DNS record and trigger a Pages deployment as scenario steps. Dry runs read the current state and show the exact change.",
+  "secrets": [
+    "AF_CLOUDFLARE_TOKEN"
+  ],
+  "main": "index.mjs",
+  "homepage": "https://developers.cloudflare.com/api/"
+}

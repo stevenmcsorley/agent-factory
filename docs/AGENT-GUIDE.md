@@ -48,6 +48,10 @@ agent-factory library use money-format my-app --note="cart totals"      # queue 
 * Code too tangled into a project to promote? `agent-factory library extract my-app --name="Money Format" --files=src/cart.js` queues a ticket for a clean standalone module with its own tests; promote it after that PR merges.
 * First time: `agent-factory library create` (new private GitHub repo with a CI check) or `agent-factory library connect --repo=owner/name`.
 
+## Scenarios (deploys and other custom workflows)
+
+`agent-factory scenario list` shows the workflows defined for this factory (for example `prototype` and `ship`). Start one on a project with `agent-factory scenario run <project> <scenario> --param=value`: it is a **dry run** (nothing changes) unless you add `--apply`, and a real run stops at every approval step until a human approves it. **You cannot approve a gate, enable a plugin or create a scenario; those are human acts.** Use dry runs to show the human exactly what would happen, then ask them to approve.
+
 ## Alerts and other tools can create tickets
 
 Every project has a private webhook: `agent-factory op webhook_info --project=my-app` returns its path. Anything (an error tracker, a monitor such as Skylark or Vantage, a script) can `POST` JSON `{title, body, source, severity, url, key}` to it; each alert is checked, de-duplicated by `key`, rate-limited (30 an hour) and queued as a ticket. `webhook_rotate` replaces the secret. The server listens on this machine only, so expose it through an HTTPS tunnel or reverse proxy if the sender is elsewhere.

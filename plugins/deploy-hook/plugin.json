@@ -1,0 +1,9 @@
+{
+  "name": "deploy-hook",
+  "version": "1.0.0",
+  "description": "Trigger any deploy by POSTing to a hook URL (Netlify, Vercel, Cloudflare deploy hooks, GitHub repository_dispatch, your own server) as a scenario step.",
+  "secrets": [
+    "AF_DEPLOY_HOOK_TOKEN"
+  ],
+  "main": "index.mjs"
+}

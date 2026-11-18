@@ -1,0 +1,33 @@
+{
+  "id": "prototype",
+  "name": "Prototype only",
+  "description": "Plan it, build it, review it: a demo you can show, with no deployment. Stop here, or run 'ship' later.",
+  "steps": [
+    {
+      "id": "brief",
+      "type": "check",
+      "check": "brief-ready",
+      "title": "The brief has a goal and scope"
+    },
+    {
+      "id": "build",
+      "type": "check",
+      "check": "plan-complete",
+      "title": "Every planned ticket is merged",
+      "timeoutMs": 604800000
+    },
+    {
+      "id": "quality",
+      "type": "check",
+      "check": "gate-ok",
+      "title": "The quality gate passes (re-analyze first)",
+      "optional": true
+    },
+    {
+      "id": "demo",
+      "type": "note",
+      "title": "Prototype ready",
+      "text": "The prototype is built and reviewed. Demo it, or run the 'ship' scenario to deploy."
+    }
+  ]
+}

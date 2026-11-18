@@ -1,0 +1,18 @@
+{
+  "protectedPaths": [
+    ".github/",
+    ".agent-factory.json",
+    ".gitlab-ci.yml",
+    "Jenkinsfile",
+    "src/gitguard.mjs",
+    "src/adapters/sandbox.mjs",
+    "src/egress.mjs",
+    "src/egress-proxy.mjs",
+    "src/server.mjs",
+    "src/plugins.mjs",
+    "src/scenarios.mjs",
+    "src/jssandbox.mjs",
+    "SECURITY.md",
+    "LICENSE"
+  ]
+}

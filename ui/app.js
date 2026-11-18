@@ -2,10 +2,11 @@ import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim } fro
 import { overview, inboxPage, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 import { library } from './library.js';
 import { portfolio } from './portfolio.js';
+import { scenarios } from './scenarios.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
-const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['inbox', '#/inbox', 'Inbox'], ['projects', '#/projects', 'Cells'], ['library', '#/library', 'Library'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
+const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['inbox', '#/inbox', 'Inbox'], ['projects', '#/projects', 'Cells'], ['library', '#/library', 'Library'], ['scenarios', '#/scenarios', 'Scenarios'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
 let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';
 let theme = null; try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
@@ -104,7 +105,7 @@ async function openPalette() {
   if (palette || !session.token) return;
   let projects = []; try { projects = await api('/projects'); } catch { /* ignore */ }
   const items = [
-    ...NAV.map(([k, href, label]) => ({ label: `Go to ${label}`, ic: { overview: 'pulse', inbox: 'alert', projects: 'folder', library: 'plug', portfolio: 'folder', runs: 'git', connect: 'plug', health: 'shield' }[k], run: () => { location.hash = href; } })),
+    ...NAV.map(([k, href, label]) => ({ label: `Go to ${label}`, ic: { overview: 'pulse', inbox: 'alert', projects: 'folder', library: 'plug', portfolio: 'folder', scenarios: 'pulse', runs: 'git', connect: 'plug', health: 'shield' }[k], run: () => { location.hash = href; } })),
     ...projects.map((p) => ({ label: `Open project ${p.id}`, ic: 'folder', hint: p.repo, run: () => { location.hash = `#/project/${p.id}`; } })),
     { label: 'Add or create a project', ic: 'plus', run: () => { location.hash = '#/new'; } },
     { label: status?.paused ? 'Resume the factory' : 'Pause the factory', ic: status?.paused ? 'play' : 'pause', run: () => api(`/control/${status?.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }).then(() => refresh(true)).catch((e) => toast(e.message, 'bad')) },

@@ -4,6 +4,10 @@ import path from 'node:path';
 import { run } from './util.mjs';
 import { SAFE_GIT } from './gitguard.mjs';
 import * as lb from './library.mjs';
+import { fileURLToPath } from 'node:url';
+import * as sc from './scenarios.mjs';
+import { loadPlugins, readEnabled, discover as discoverPlugins } from './plugins.mjs';
+import { getPrompt } from './prompts.mjs';
 import { runSandboxed } from './jssandbox.mjs';
 import crypto from 'node:crypto';
 import { LIBRARY_README, PARTS_WORKFLOW, CHECK_PARTS } from './library-seed.mjs';
@@ -57,7 +61,7 @@ export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
-    this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
+    this.pluginReport = []; this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -70,6 +74,7 @@ export class Engine {
   projectDir(p) { const d = path.join(this.cfg.stateDir, 'projects', p.id); fs.mkdirSync(path.join(d, 'logs'), { recursive: true }); return d; }
 
   async start() {
+    await this.loadPlugins().catch((e) => console.error(`plugins: ${e.message}`));
     const s = this.cfg.sandbox;
     if (s.kind === 'docker' && s.egress && !this.f.sandbox) this.egress = await (this.f.startEgress ?? startEgress)({ allow: s.egress.allow, image: s.image });
   }
@@ -90,6 +95,7 @@ export class Engine {
     const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
+      promptRules: () => getPrompt('task-rules', {}, this._promptDirs()),
       libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
@@ -99,7 +105,7 @@ export class Engine {
     this.busy = true;
     try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; }
   }
-  tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); await sc.advanceAll(this, this.scenarios()).catch(() => {}); for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
   feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
@@ -659,6 +665,25 @@ export class Engine {
     const g = assessTicket({ title, body }, this.cfg.limits.gate); if (!g.ok) throw fail(422, `Not enough to act on: ${g.problems.join('; ')}`, { problems: g.problems });
     const r = await this.createTicket(id, { title: `[${source}] ${title}`.slice(0, 200), body }); if (key) h.seen[key] = now; h.hourly.push(now); this._saveHook(id, h); return { created: true, ticket: r?.url ?? null };
   }
+
+  // ================================================================ Extensions: plugins, scenarios, prompts
+  _configDir() { return this.configPath ? path.dirname(path.resolve(this.configPath)) : this.cfg.stateDir; }
+  _root() { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); }
+  _pluginDirs() { return [path.join(this._root(), 'plugins'), path.join(this._configDir(), 'plugins')]; }
+  _scenarioDirs() { return [path.join(this._root(), 'scenarios'), path.join(this._configDir(), 'scenarios')]; }
+  _promptDirs() { return [path.join(this._configDir(), 'prompts')]; }
+  async loadPlugins() { this.pluginReport = await loadPlugins({ dirs: this._pluginDirs(), enabled: readEnabled(this._configDir()), env: this.env, log: (m) => console.error(m) }); return this.pluginReport; }
+  plugins() { return { plugins: this.pluginReport, stepTypes: sc.stepTypes(), dirs: this._pluginDirs() }; }
+  scenarios() { return sc.loadScenarios(this._scenarioDirs()); }
+  async startScenario({ project, scenario, params, apply = false } = {}) {
+    const def = this.scenarios().find((s) => s.id === scenario); if (!def || def.error) throw Object.assign(new Error(def?.error ? `Scenario ${scenario} is invalid: ${def.error}` : `No such scenario: ${scenario}`), { status: def ? 400 : 404 });
+    const run = sc.startRun(this, { scenario: def, project, params: params ?? {}, dryRun: apply !== true }); return sc.advance(this, project, run.id, { scenarios: this.scenarios() });
+  }
+  async freshTickets(id) { this.cache.delete(`t:${id}`); return this.listTickets(id); }   // scenario waits must see a ticket close the moment it does
+  async scenarioRuns(project) { return sc.listRuns(this, project); }
+  async scenarioRun(project, id) { this.project(project); return sc.advance(this, project, id, { scenarios: this.scenarios() }); }
+  scenarioApprove(project, id, stepId, by) { return sc.approveStep(this, project, id, stepId, by); }
+  scenarioCancel(project, id) { return sc.cancelRun(this, project, id); }
 
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }

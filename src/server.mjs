@@ -47,6 +47,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/hosts\/analyze$/, async (_m, b) => engine.analyzeDraft(b)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.startAnalysis(m[1])],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.analysisJob(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/scenario-runs\/([a-f0-9]{8})\/approve\/([a-z0-9-]+)$/, async (m) => engine.scenarioApprove(m[1], m[2], m[3], 'the UI user')],
+    ['GET', /^\/api\/plugins$/, async () => engine.plugins()],
     ['GET', /^\/api\/ops$/, async () => OPS.map((o) => ({ name: o.name, description: o.description, readOnly: !!o.readOnly, input: o.input }))],
     ['POST', /^\/api\/op\/([a-z_]+)$/, async (m, b) => callOp(engine, m[1], b)],
     ['GET', /^\/api\/portfolio$/, async () => engine.portfolio()],

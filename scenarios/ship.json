@@ -1,0 +1,45 @@
+{
+  "id": "ship",
+  "name": "Ship (checks and approval, then your deploy)",
+  "description": "The gate to go live: everything merged, quality gate green, queue empty, then a human says yes. Copy docs/examples/scenarios/cloudflare-ship.json into your scenarios folder to add real Cloudflare DNS and Pages steps, or add your own.",
+  "params": {
+    "environment": {
+      "label": "Environment",
+      "default": "production",
+      "help": "Shown in the approval message"
+    }
+  },
+  "steps": [
+    {
+      "id": "merged",
+      "type": "check",
+      "check": "plan-complete",
+      "title": "Every planned ticket is merged",
+      "timeoutMs": 604800000
+    },
+    {
+      "id": "quiet",
+      "type": "check",
+      "check": "queue-empty",
+      "title": "Nothing is waiting in review"
+    },
+    {
+      "id": "gate",
+      "type": "check",
+      "check": "gate-ok",
+      "title": "The quality gate passes"
+    },
+    {
+      "id": "approve",
+      "type": "approve",
+      "title": "A human approves the go-live",
+      "message": "Deploy {{project.id}} to {{params.environment}}?"
+    },
+    {
+      "id": "deploy",
+      "type": "note",
+      "title": "Deploy",
+      "text": "Approved. Run your deployment now (add a deploy step here: a plugin step such as cloudflare.pages-deploy, or an http step to your deploy hook)."
+    }
+  ]
+}

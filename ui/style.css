@@ -295,3 +295,10 @@ body { overflow-x: hidden; }
 .snip2 { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); background: var(--bg); } .snip2 code { flex: 1; overflow-x: auto; white-space: nowrap; font: 500 12px var(--mono); }
 
 .srcin { display: grid; gap: 6px; }
+
+/* ---- Scenarios ---- */
+.pipe { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; } .pipe .arr { font-style: normal; color: var(--faint); } .stp { padding: 3px 9px; border: 1px solid var(--line); font: 600 11px var(--mono); } .stp.approve { border-color: var(--amber); color: var(--amber); } .stp.check { border-color: var(--blue); color: var(--blue); } .stp.plug { border-color: var(--orange); color: var(--orange); } .stp.ticket { border-color: var(--green); color: var(--green); }
+ol.stepsrun { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; } .stepsrun li { padding: 8px 12px; border: 1px solid var(--line); border-left: 4px solid var(--line); } .stepsrun li.done { border-left-color: var(--green); } .stepsrun li.failed { border-left-color: var(--red); } .stepsrun li.waiting-approval { border-left-color: var(--amber); background: var(--amber-bg); } .stepsrun li.waiting { border-left-color: var(--blue); } .stepsrun p { margin: 4px 0 0; } .srow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+ul.plugs li { padding: 10px 0; border-bottom: 1px solid var(--line); } .card.run.waiting-approval { border-left: 4px solid var(--amber); }
+nav a { padding-left: 7px; padding-right: 7px; }
+nav a { padding-left: 6px; padding-right: 6px; font-size: 10.5px; letter-spacing: .03em; } .bar { gap: 12px; }

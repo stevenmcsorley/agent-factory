@@ -31,6 +31,12 @@ const RULES = [
 ];
 
 const STRINGS = /(["'`])(?:\\.|(?!\1).){0,200}?\1/g;
+// Plugins (and your own config) can add rules. { id, type, severity, msg, langs: ['js','py'] | (ext) => bool, re: RegExp, skipTests?, keepComments? }
+export function registerRule(def) {
+  if (!/^[a-z][a-z0-9._-]{1,60}$/.test(def?.id ?? '')) throw new Error('rule id must be lowercase letters, digits, dots and dashes'); if (RULES.some((r) => r.id === def.id)) throw new Error(`rule ${def.id} already exists`);
+  const re = def.re instanceof RegExp ? def.re : new RegExp(String(def.re)); if (!['vulnerability', 'bug', 'code_smell'].includes(def.type)) throw new Error('rule type must be vulnerability, bug or code_smell'); if (!(def.severity in SEVERITY_ORDER)) throw new Error('rule severity must be BLOCKER, CRITICAL, MAJOR, MINOR or INFO');
+  const langs = typeof def.langs === 'function' ? def.langs : Array.isArray(def.langs) ? ((e) => def.langs.includes(e)) : () => true; RULES.push({ id: def.id, type: def.type, severity: def.severity, msg: String(def.msg ?? def.id).slice(0, 200), langs, re, skipTests: !!def.skipTests, keepComments: !!def.keepComments });
+}
 const stripLine = (l) => l.replace(STRINGS, '""').replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
 
 const MASK = '••••••••';

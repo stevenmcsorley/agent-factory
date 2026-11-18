@@ -69,6 +69,7 @@ Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-rev
 | **Portfolio** | Every project from brief to shipped on one screen: brief completeness, plan progress, queue, quality, library use, and the **next step** for each, plus a "Needs you" list |
 | **Inbox** | Everything waiting on a human, with the reason. **Needs your decision**: tickets the factory bounced for detail or gave up on, showing what it said, the ticket text and the failing run; add the missing detail and **Requeue** (the clarity check re-runs first), comment, open the tracker, or close. **Ready to review**: PRs with a button straight to the PR. The *Waiting on you* tile and a badge on the nav lead here. |
 | **Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults |
+| **Scenarios** | Your workflows with approval gates, their runs (dry run first), and the plugins that add steps |
 | **Library** | The reuse library: searchable parts with API, usage, source, tests and who uses them; **repeated code** found across projects with a one-click promote (as a PR); upgrades when a part changes |
 | **Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
 | **Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
@@ -87,6 +88,10 @@ It listens on `127.0.0.1` only and every API call needs the token in `state/ui-t
 * **Agent-native**: `agent-factory portfolio | brief | source | plan | library … | op <name>` drive a running factory from any terminal or AI agent (same operations as MCP). Give your agent `docs/AGENT-GUIDE.md`.
 
 See the [illustrated guide](docs/GUIDE.md) for the walkthrough.
+
+## Make it yours
+
+Everything is meant to be adapted: **scenarios** (JSON workflows with human approval gates: prototype only, ship to production, deploy to Cloudflare, your own), **plugins** (new deploy targets, trackers, hosts, rules, part kinds, operations; hash-pinned and enabled by you), **prompts** (a Markdown file replaces the agents' rules) and configuration. The factory can also manage its own repository, with its security core protected from self-edits. See [docs/EXTENDING.md](docs/EXTENDING.md).
 
 ## Bring your own tools
 
