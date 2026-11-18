@@ -29,7 +29,7 @@ export function sandbox({ kind = 'docker', image = 'node:22-bookworm', network =
         const b = await run('git', ['checkout', '-b', branch], { cwd: dir, log });
         if (b.code !== 0) throw new Error(`branch failed: ${b.out}`);
       }
-      return { dir, destroy: () => destroyDir(dir, log) };
+      return { dir, cloneUrl, destroy: () => destroyDir(dir, log) };
     },
     exec(ws, cmd, args, { timeoutMs, input, env: callEnv = {}, image: imageOverride, mounts = [] } = {}) {
       const env = { HOME: '/tmp', ...extraEnv, ...callEnv };
