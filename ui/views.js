@@ -2,6 +2,7 @@ import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, STATES
 export { act };
 import { codeTab, openCode } from './code.js';
 import { briefTab, planTab } from './pack.js';
+import { trackerTab, ticketPage } from './tracker.js';
 import { createLine, odometer, miniBars, bars, barcode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
@@ -10,7 +11,7 @@ const empty = (title, body, action) => h('div', { class: 'empty' }, h('div', { c
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
 const head = (title, sub, ...actions) => h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, title), sub ? h('p', { class: 'sub' }, sub) : null), h('div', { class: 'row' }, actions));
 const ATTENTION = ['failed', 'needs-info', 'needs-human'];
-const HOST_LABEL = { github: 'GitHub', gitlab: 'GitLab', bitbucket: 'Bitbucket', git: 'git' }; const SRC_LABEL = { github: 'GitHub Issues', ossicone: 'Ossicone', jira: 'Jira', linear: 'Linear', file: 'file' };
+const HOST_LABEL = { github: 'GitHub', gitlab: 'GitLab', bitbucket: 'Bitbucket', git: 'git' }; const SRC_LABEL = { local: 'Built-in tracker', github: 'GitHub Issues', ossicone: 'Ossicone', jira: 'Jira', linear: 'Linear', file: 'file' };
 // The pre-check only blocks tickets too short to act on. Anything else is fine: the agent proceeds on reasonable assumptions, or asks a specific
 // question if the request is genuinely open-ended. So the live hint is encouraging, with an optional tip, never a scary refusal.
 const hintFor = (r) => (r.ok ? h('span', { class: 'ok' }, icon('check', 14), ' Good to go', r.tips?.length ? h('span', { class: 'tip' }, ` · tip: ${r.tips[0]}`) : null)
@@ -221,19 +222,21 @@ const planBanner = (p, go) => {
 };
 let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
 // ---- single project
-let projTab = 'board';
+let projTab = 'board'; let openId = null; let openRef = () => {};
 // Jump to a project and open a given tab (used by the Portfolio page).
 export const goProject = (id, tab = 'board') => { projTab = tab; location.hash = `#/project/${id}`; };
 export const project = {
   async load(id) { const [ov, runs, metrics] = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const p = ov.find((x) => x.id === id);
     const extra = {}; if (p) { if (projTab === 'brief' || projTab === 'plan') extra.pack = await api(`/projects/${id}/pack`).catch(() => null); if (projTab === 'plan') extra.planData = await api(`/projects/${id}/plan`).catch(() => null);
-    if (projTab === 'board' || projTab === 'code') extra.job = await api(`/projects/${id}/analyze`).catch(() => null); if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
+    if (projTab === 'board' || projTab === 'code') extra.job = await api(`/projects/${id}/analyze`).catch(() => null); if (p.source === 'local' && projTab === 'tracker') [extra.tracker, extra.tickets] = await Promise.all([api(`/projects/${id}/tracker`), api(`/projects/${id}/tickets`)]); if (projTab === 'ticket' && openId) extra.ticket = await api(`/projects/${id}/tickets/${openId}`).catch(() => null);
+    if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
     return { id, p, runs, metrics, tab: projTab, ...extra }; },
   draw(d, ctx) {
     const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
     if (d.job?.state === 'running') pollSoon(ctx);
-    const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['plan', 'Plan'], ['brief', 'Brief'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['code', 'Code'], ['log', 'Log']];
-    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'brief' ? (d.pack ? briefTab(d.pack, { id, rerender: ctx.rerender }) : empty('Could not load the brief', '')) : d.tab === 'plan' ? (d.pack && d.planData ? planTab(d.planData, d.pack, { id, rerender: ctx.rerender, poll: (ms) => pollSoon(ctx, ms), openBrief: () => { projTab = 'brief'; ctx.rerender(); } }) : empty('Could not load the plan', '')) : d.tab === 'code' ? codeTab(p.profile, { proj: p, job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
+    const m = d.metrics.projects[id]; openRef = (tid) => { openId = tid; projTab = 'ticket'; ctx.rerender(); };
+    const tabs = [['board', 'Board'], ...(p.source === 'local' ? [['tracker', 'Tracker']] : []), ['plan', 'Plan'], ['brief', 'Brief'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['code', 'Code'], ['log', 'Log']];
+    const body = d.tab === 'tracker' ? trackerTab(d.tracker, d.tickets, { open: openRef }) : d.tab === 'ticket' ? (d.ticket ? ticketPage(d.ticket, { id, back: () => { projTab = p.source === 'local' ? 'tracker' : 'board'; ctx.rerender(); }, rerender: ctx.rerender, open: openRef }) : empty('Could not load that ticket', '')) : d.tab === 'board' ? board(d.tickets, p.source === 'local' ? openRef : null) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'brief' ? (d.pack ? briefTab(d.pack, { id, rerender: ctx.rerender }) : empty('Could not load the brief', '')) : d.tab === 'plan' ? (d.pack && d.planData ? planTab(d.planData, d.pack, { id, rerender: ctx.rerender, poll: (ms) => pollSoon(ctx, ms), openBrief: () => { projTab = 'brief'; ctx.rerender(); } }) : empty('Could not load the plan', '')) : d.tab === 'code' ? codeTab(p.profile, { proj: p, job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
     const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
     return [h('a', { class: 'back', href: '#/projects' }, icon('arrow', 12, 'flip'), 'All cells'),
       h('div', { class: 'page-head' }, h('div', {}, h('div', { class: 'row' }, h('i', { class: `lamp ${state}` }), h('h1', {}, id)),
@@ -244,13 +247,13 @@ export const project = {
       h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? planBanner(p, (t) => { projTab = t; ctx.rerender(); }) : null, d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null, body]; },
 };
 
-function board(tickets) {
+function board(tickets, openTicket) {
   const cols = [['ready', 'Hopper', 'info'], ['working', 'On the line', 'live'], ['review', 'In review', 'ok'], ['attn', 'Faults', 'bad']];
   const bucket = (t) => { const s2 = stateOfLabels(t.labels); return ATTENTION.includes(s2) ? 'attn' : s2; };
   const open = tickets.filter((t) => t.state !== 'CLOSED'), done = tickets.filter((t) => t.state === 'CLOSED');
   const column = ([k, label, tone]) => { const items = open.filter((t) => bucket(t) === k);
     return h('div', { class: `col ${tone}` }, h('div', { class: 'col-h' }, h('span', {}, label), h('span', { class: 'count' }, items.length)),
-      h('div', { class: 'items' }, items.length ? items.map((t) => h('div', { class: 'tcard' }, h('div', { class: 'row between' }, ext(t.url, `#${t.id}`, 'tid'), k === 'attn' ? h('span', { class: `stamp ${STATES[stateOfLabels(t.labels)]?.[0] ?? ''}` }, STATES[stateOfLabels(t.labels)]?.[1] ?? '') : null), h('div', { class: 'ttitle' }, t.title), h('small', { class: 'mono' }, ago(t.updatedAt)))) : h('div', { class: 'col-empty' }, k === 'ready' ? 'Hopper empty' : 'Clear'))); };
+      h('div', { class: 'items' }, items.length ? items.map((t) => h('div', { class: 'tcard' }, h('div', { class: 'row between' }, (openTicket ? h('button', { class: 'linklike tid', onclick: () => openTicket(t.id) }, `#${t.id}`) : ext(t.url, `#${t.id}`, 'tid')), k === 'attn' ? h('span', { class: `stamp ${STATES[stateOfLabels(t.labels)]?.[0] ?? ''}` }, STATES[stateOfLabels(t.labels)]?.[1] ?? '') : null), h('div', { class: 'ttitle' }, t.title), h('small', { class: 'mono' }, ago(t.updatedAt)))) : h('div', { class: 'col-empty' }, k === 'ready' ? 'Hopper empty' : 'Clear'))); };
   return [h('div', { class: 'board' }, cols.map(column)), done.length ? h('details', { class: 'closed' }, h('summary', {}, `${done.length} closed`), h('ul', { class: 'plain' }, done.map((t) => h('li', {}, ext(t.url, `#${t.id}`, 'tid'), ' ', t.title)))) : null];
 }
 const stateOfLabels = (labels = []) => ['agent-needs-human', 'agent-failed', 'agent-needs-info', 'agent-review', 'agent-working', 'agent-ready'].find((l) => labels.includes(l))?.replace('agent-', '') ?? 'other';

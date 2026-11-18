@@ -308,3 +308,7 @@ nav a { padding-left: 6px; padding-right: 6px; font-size: 10.5px; letter-spacing
 .tile-card h2 { margin: 0 0 6px; }
 .launcher { display: grid; gap: 12px; } .launcher p { margin: 3px 0 0; } .lanes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 10px; border-top: 1px dashed var(--line); }
 details.ready { margin: 6px 0 10px; } details.ready summary { cursor: pointer; display: flex; gap: 10px; align-items: center; } .okmark { color: var(--green); font-weight: 700; } .xmark { color: var(--red); font-weight: 700; }
+
+.linklike { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+.linklike:hover { text-decoration: underline; }
+.cmt { padding: 8px 0; border-bottom: 1px solid var(--line); }

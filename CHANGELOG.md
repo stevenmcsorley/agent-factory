@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-- **Built-in tracker** (`local` ticket source): issues, epics, comments and states inside the factory, no account needed; plans, scenarios, webhooks and the factory loop work on it unchanged. New API: ticket detail and tracker overview; `reopen` ticket action.
+- **Built-in tracker** (`local` ticket source): issues, epics, comments and states inside the factory, no account needed; plans, scenarios, webhooks and the factory loop work on it unchanged. New project **Tracker** tab (epics with progress, ticket page with comments, close/reopen/requeue); board cards open the ticket. New API: ticket detail and tracker overview; `reopen` ticket action.
 - **Tests cannot be quietly weakened:** removed assertions, deleted test files and switched-off tests in a run are flagged by the quality gate (retry once, then flag; `blockTestWeakening` to block). New tests are never penalised.
 - **Fencing:** claims carry a token that is re-checked before anything is pushed or written to the tracker; a run that was replaced or expired pushes nothing and cannot release the replacement's lease.
 - **Review backlog cap:** `limits.maxOpenReviews` stops claiming new tickets while that many agent PRs wait for review.
