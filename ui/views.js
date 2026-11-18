@@ -1,6 +1,7 @@
 import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, STATES, session, keyed, persist } from './lib.js';
 export { act };
 import { codeTab, openCode } from './code.js';
+import { briefTab, planTab } from './pack.js';
 import { createLine, odometer, miniBars, bars, barcode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
@@ -194,26 +195,36 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, onInspect } = {}) => {
     onInspect ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: () => onInspect('overview') }, 'Inspect the code in detail →'), m?.hotspots?.length ? h('span', { class: 'muted small' }, `largest file: ${m.hotspots[0].file} (${num(m.hotspots[0].lines)} lines)`) : null) : null);
 };
 
+// A one-glance status of the brief and the plan, with the next step, on the project's Board.
+const planBanner = (p, go) => {
+  const b = p.brief, pl = p.plan; let title, text, cta, tab, cls = 'info';
+  if (!b?.ready && !pl) { title = 'This project has no brief yet'; text = 'Tell the factory what you are building (goal, scope, conventions) and attach the PRD, research or designs. Every agent run will use it, and it can plan the work for you.'; cta = 'Write the brief'; tab = 'brief'; cls = 'warn'; }
+  else if (!pl) { title = 'Brief ready: draft a plan'; text = 'The agent can turn the brief into epics and small tickets for you to approve.'; cta = 'Draft a plan'; tab = 'plan'; }
+  else if (pl.status === 'proposed') { title = `A plan is waiting for your approval (${pl.total} tickets)`; text = 'Review it, edit anything, then launch.'; cta = 'Review the plan'; tab = 'plan'; cls = 'warn'; }
+  else { title = pl.status === 'complete' ? 'Plan complete' : `Plan in progress: ${pl.done} of ${pl.total} tickets done`; text = `${pl.review} in review · ${pl.queued + pl.working} building · ${pl.planned} not started`; cta = 'Open the plan'; tab = 'plan'; cls = pl.status === 'complete' ? 'ok' : 'info'; }
+  return h('section', { class: `card banner ${cls}` }, h('div', {}, h('b', {}, title), h('p', { class: 'muted small' }, text)), h('button', { class: 'btn', onclick: () => go(tab) }, cta));
+};
 let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
 // ---- single project
 let projTab = 'board';
 export const project = {
   async load(id) { const [ov, runs, metrics] = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const p = ov.find((x) => x.id === id);
-    const extra = {}; if (p) { if (projTab === 'board' || projTab === 'code') extra.job = await api(`/projects/${id}/analyze`).catch(() => null); if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
+    const extra = {}; if (p) { if (projTab === 'brief' || projTab === 'plan') extra.pack = await api(`/projects/${id}/pack`).catch(() => null); if (projTab === 'plan') extra.planData = await api(`/projects/${id}/plan`).catch(() => null);
+    if (projTab === 'board' || projTab === 'code') extra.job = await api(`/projects/${id}/analyze`).catch(() => null); if (projTab === 'board' || projTab === 'prs') [extra.tickets, extra.prs] = await Promise.all([api(`/projects/${id}/tickets`).catch(() => []), api(`/projects/${id}/prs`).catch(() => [])]); if (projTab === 'log') extra.log = (await api(`/projects/${id}/log`)).lines; }
     return { id, p, runs, metrics, tab: projTab, ...extra }; },
   draw(d, ctx) {
     const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
     if (d.job?.state === 'running') pollSoon(ctx);
-    const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['new', 'New ticket'], ['code', 'Code'], ['log', 'Log']];
-    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'code' ? codeTab(p.profile, { proj: p, job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
+    const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['plan', 'Plan'], ['brief', 'Brief'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['code', 'Code'], ['log', 'Log']];
+    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'brief' ? (d.pack ? briefTab(d.pack, { id, rerender: ctx.rerender }) : empty('Could not load the brief', '')) : d.tab === 'plan' ? (d.pack && d.planData ? planTab(d.planData, d.pack, { id, rerender: ctx.rerender, poll: (ms) => pollSoon(ctx, ms), openBrief: () => { projTab = 'brief'; ctx.rerender(); } }) : empty('Could not load the plan', '')) : d.tab === 'code' ? codeTab(p.profile, { proj: p, job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
     const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
     return [h('a', { class: 'back', href: '#/projects' }, icon('arrow', 12, 'flip'), 'All cells'),
       h('div', { class: 'page-head' }, h('div', {}, h('div', { class: 'row' }, h('i', { class: `lamp ${state}` }), h('h1', {}, id)),
         h('div', { class: 'proj-meta' }, ext(p.repoUrl, [icon('git', 14), p.repo], 'repo-link'), h('span', { class: 'tag' }, HOST_LABEL[p.host] ?? p.host), h('span', { class: 'tag' }, `tickets · ${SRC_LABEL[p.source] ?? p.source}`), h('span', { class: 'tag' }, `base ${p.base}`), p.paused ? h('span', { class: 'stamp warn' }, 'paused') : null,
           m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
-        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
+        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { projTab = 'new'; ctx.rerender(); } }, icon('plus', 12), 'New ticket'), h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
           h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
-      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null, body]; },
+      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; ctx.rerender(); } }, t))), d.tab === 'board' ? planBanner(p, (t) => { projTab = t; ctx.rerender(); }) : null, d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null, body]; },
 };
 
 function board(tickets) {
@@ -321,7 +332,7 @@ export const newProject = {
   draw({ catalog, who, templates }, ctx) {
     const box = h('div', {});
     const hostDef = () => catalog.hosts.find((x) => x.kind === wiz.host.kind); const srcDef = () => catalog.sources.find((x) => x.kind === wiz.source.kind);
-    const paint = () => box.replaceChildren(npMode === 'existing' ? existing() : create());
+    const paint = () => box.replaceChildren(...[].concat(npMode === 'existing' ? existing() : create()));
 
     const fieldRow = (def, st, onChange) => {
       if (def.showIf && Object.entries(def.showIf).some(([k, v]) => (st.fields[k] ?? catalogDefault(st, k)) !== v)) return null;
@@ -377,12 +388,30 @@ export const newProject = {
     };
 
     const create = () => { const f = {}; f.name = h('input', { placeholder: 'my-new-app' }); f.desc = h('input', { placeholder: 'One-line description' }); f.tpl = h('select', {}, templates.map((t) => h('option', { value: t }, t))); f.vis = h('select', {}, h('option', { value: 'private' }, 'private'), h('option', { value: 'public' }, 'public'));
-      f.spec = h('textarea', { rows: 7, placeholder: 'Describe what to build: features, behaviour, what “done” looks like. This becomes the first ticket, and the factory starts on it straight away.' }); const hint = h('div', { class: 'hint' }); let t;
+      const bf = {}; const ta = (key, rows, ph) => { bf[key] = h('textarea', { rows, placeholder: ph }); return bf[key]; };
+      f.spec = h('textarea', { rows: 5, placeholder: 'Quick start: one description that becomes the first ticket.' }); const hint = h('div', { class: 'hint' }); let t;
       f.spec.addEventListener('input', () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: `Build ${f.name.value}`, body: f.spec.value } }).catch(() => null); if (r) hint.replaceChildren(hintFor(r)); }, 300); });
-      return card('form', h('div', { class: 'note info' }, 'Creating a brand-new repository is available for GitHub. For GitLab, Bitbucket or another host, create the empty repo there and use “Existing repo”.'),
-        h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Repository name'), f.name), h('div', {}, h('label', {}, 'Description'), f.desc)), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Starter template'), f.tpl), h('div', {}, h('label', {}, 'Visibility'), f.vis)),
-        h('label', {}, 'What should it do?'), f.spec, hint, h('p', { class: 'muted small' }, `Creates ${who.login || 'your'}/<name> on GitHub, scaffolds the template and queues your description as the first ticket.`),
-        h('button', { class: 'btn primary', onclick: act(async () => { const name = f.name.value.trim(); const r = await api('/projects/new', { method: 'POST', body: { id: slugId(name), name, description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, spec: f.spec.value.trim() || undefined } }); location.hash = `#/project/${r.project.id}`; }, 'Project created') }, icon('spark', 15), 'Create project')); };
+      const plan = h('input', { type: 'checkbox' }); plan.checked = true;
+      const step = (n, title, sub, ...kids) => card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, n), h('div', {}, h('h2', {}, title), h('p', { class: 'muted small' }, sub))), ...kids);
+      const submit = act(async () => {
+        const name = f.name.value.trim(); const brief = {}; for (const k of ['goal', 'users', 'scope', 'nonGoals', 'success', 'constraints']) if (bf[k].value.trim()) brief[k] = bf[k].value.trim();
+        const hasBrief = brief.goal && brief.scope; if (!hasBrief && !f.spec.value.trim()) throw new Error('Describe the project: fill in at least Goal and In scope, or use the quick start box');
+        const body = { id: slugId(name), name, description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, ...(hasBrief ? { brief, stack: bf.stack.value.trim() || undefined, plan: plan.checked } : { spec: f.spec.value.trim() }) };
+        const r = await api('/projects/new', { method: 'POST', body }); projTab = hasBrief ? (plan.checked ? 'plan' : 'brief') : 'board'; location.hash = `#/project/${r.project.id}`; }, 'Project created');
+      return [
+        step('1', 'The basics', 'Creates a new private repository from a starter template.', h('div', { class: 'note info' }, 'Creating a brand-new repository is available for GitHub. For GitLab, Bitbucket or another host, create the empty repo there and use “Existing repo”.'),
+          h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Repository name'), f.name), h('div', {}, h('label', {}, 'Description'), f.desc)), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Starter template'), f.tpl), h('div', {}, h('label', {}, 'Visibility'), f.vis))),
+        step('2', 'The brief', 'What are we building? The more precise this is, the better the plan and every PR. You can refine it any time in the Brief tab.',
+          h('label', {}, 'Goal *'), ta('goal', 2, 'What are we building, and why? One or two sentences a stranger would understand.'), h('label', {}, 'Users'), ta('users', 2, 'Who is it for, and what do they need to get done?'),
+          h('label', {}, 'In scope *'), ta('scope', 5, 'The features and behaviour that must exist. A bullet list works well.'), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Out of scope'), ta('nonGoals', 3, 'What we are deliberately NOT building.')), h('div', {}, h('label', {}, 'Done means'), ta('success', 3, 'How we will know it works: concrete, checkable criteria.'))),
+          h('label', {}, 'Constraints'), ta('constraints', 2, 'Performance, security, compliance, deadlines, things that must not change.')),
+        step('3', 'How to build it', 'Conventions the agent must follow.', h('label', {}, 'Stack and conventions'), ta('stack', 3, 'e.g. TypeScript strict, Fastify, Vitest, one module per feature, no default exports.'),
+          h('p', { class: 'muted small' }, 'Have a PRD, designs or research? Create the project, then attach them in the Brief tab (files, links or pasted text).')),
+        step('4', 'Plan and start', 'The agent turns the brief into epics and small tickets. Nothing is built until you approve the plan.',
+          h('label', { class: 'check' }, plan, ' Draft a delivery plan from the brief as soon as the project is created (recommended)'),
+          h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: submit }, icon('spark', 15), 'Create project'), h('span', { class: 'muted small' }, `Creates ${who.login || 'your'}/<name> on GitHub and scaffolds the template.`)),
+          h('details', { class: 'quick' }, h('summary', {}, 'Just want to start fast? Use a one-box description instead'), h('p', { class: 'muted small' }, 'Skips the brief and plan: your description becomes the first ticket and the factory starts on it straight away.'), f.spec, hint)),
+      ]; };
     paint();
     return [head('Add a project', 'Connect any code host and any ticket tracker. Mix freely, e.g. Jira tickets with a Bitbucket repo.'),
       h('div', { class: 'seg' }, [['existing', 'Existing repo'], ['create', 'Create new (GitHub)']].map(([k, t]) => h('button', { class: npMode === k ? 'on' : '', onclick: () => { npMode = k; paint(); ctx.rerender(); } }, t))), box];

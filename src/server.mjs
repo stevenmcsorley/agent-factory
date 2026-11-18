@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { doctor } from './doctor.mjs';
 import { DEFAULT_IGNORE } from './ignore.mjs';
+import { callOp, OPS } from './ops.mjs';
 import { assessTicket } from './gate.mjs';
 import { templateNames } from './github.mjs';
 import { handleRpc, directTools, codeTools } from './mcp.mjs';
@@ -18,10 +19,10 @@ const MAX_BODY = 64 * 1024;
 const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-async function readJson(req) {
+async function readJson(req, max = MAX_BODY) {
   if (!/^application\/json/i.test(req.headers['content-type'] ?? '')) throw fail(415, 'Content-Type must be application/json');
   let size = 0; const chunks = [];
-  for await (const c of req) { size += c.length; if (size > MAX_BODY) throw fail(413, 'Request body too large'); chunks.push(c); }
+  for await (const c of req) { size += c.length; if (size > max) throw fail(413, 'Request body too large'); chunks.push(c); }
   try { return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}; } catch { throw fail(400, 'Invalid JSON'); }
 }
 
@@ -43,6 +44,19 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/hosts\/analyze$/, async (_m, b) => engine.analyzeDraft(b)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.startAnalysis(m[1])],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.analysisJob(m[1])],
+    ['GET', /^\/api\/ops$/, async () => OPS.map((o) => ({ name: o.name, description: o.description, readOnly: !!o.readOnly, input: o.input }))],
+    ['POST', /^\/api\/op\/([a-z_]+)$/, async (m, b) => callOp(engine, m[1], b)],
+    ['GET', /^\/api\/portfolio$/, async () => engine.portfolio()],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/pack$/, async (m) => engine.getPack(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/pack$/, async (m, b) => engine.setPack(m[1], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/pack\/sources$/, async (m, b) => engine.addSource(m[1], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/pack\/sources\/([a-f0-9]{8})\/remove$/, async (m) => engine.removeSource(m[1], m[2])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/pack\/publish$/, async (m) => engine.publishPack(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/plan$/, async (m) => engine.startPlanning(m[1])],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/plan$/, async (m) => engine.getPlan(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/plan\/edit$/, async (m, b) => engine.editPlan(m[1], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/plan\/discard$/, async (m) => engine.discardPlan(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/plan\/launch$/, async (m) => engine.launchPlan(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analysis-ignore$/, async (m, b) => engine.setIgnore(m[1], b)],
     ['GET', /^\/api\/analysis-defaults$/, async () => ({ defaults: DEFAULT_IGNORE })],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/finding-ticket$/, async (m, b) => engine.findingTicket(m[1], String(b.key ?? ''))],
@@ -107,7 +121,7 @@ export function createServer(engine, { token, allowedHosts }) {
       }
       for (const [method, re, fn] of routes) {
         const m = re.exec(url.pathname);
-        if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {}, url) ?? {});
+        if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req, /\/pack\/sources$/.test(url.pathname) ? 12 * 1024 * 1024 : MAX_BODY) : {}, url) ?? {});
       }
       send(res, 404, { error: 'No such endpoint' });
     } catch (e) {

@@ -13,6 +13,7 @@ import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
 import { normalizeRepo } from './repoRef.mjs';
 import { analyzeRepo, profileSummary } from './analyze.mjs';
+import * as pk from './pack.mjs';
 import { checkBaseUrl } from './sources.mjs';
 import { addHistory } from './quality.mjs';
 import { cleanPatterns, DEFAULT_IGNORE } from './ignore.mjs';
@@ -47,7 +48,7 @@ export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
-    this.jobs = new Map();
+    this.jobs = new Map(); this.planJobs = new Map();
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -77,7 +78,7 @@ export class Engine {
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p), contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return pk.renderContext(pk.loadPack(d), d, t); } catch { return ''; } }, materializeContext: (wsDir) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); }, profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -86,7 +87,7 @@ export class Engine {
     this.busy = true;
     try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; }
   }
-  tickAll() { return this._exclusive('tick', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  tickAll() { return this._exclusive('tick', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
   feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
@@ -170,7 +171,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -352,15 +353,127 @@ export class Engine {
     profile.history = addHistory(prevHistory, profile);
     p.profile = profile; this._persist(); return p.profile;
   }
+  // Brief, sources and (optionally) a plan request supplied when a project is created or added.
+  async _seedPack(id, { brief, stack, decisions, sources, plan } = {}) {
+    if (!brief && !stack && !decisions && !sources?.length) return {};
+    this.setPack(id, { brief, stack, decisions }); for (const s of sources ?? []) this.addSource(id, s);
+    const out = { pack: pk.completeness(pk.loadPack(this._packDir(id))) };
+    if (plan) { try { out.planning = this.startPlanning(id); } catch (e) { out.planningError = e.message; } }
+    return out;
+  }
+  // ---------------------------------------------------------------- Project Pack: brief, sources, plan
+  _packDir(id) { this.project(id); return pk.packDir(this.cfg.stateDir, id); }
+  getPack(id) {
+    const dir = this._packDir(id); const pack = pk.loadPack(dir);
+    return { ...pack, completeness: pk.completeness(pack), fields: pk.BRIEF_FIELDS.map(([key, label, hint]) => ({ key, label, hint })), kinds: pk.SOURCE_KINDS, job: this.planJobs.get(id) ?? { state: 'idle' } };
+  }
+  setPack(id, patch = {}) { pk.patchPack(this._packDir(id), patch); return this.getPack(id); }
+  addSource(id, a = {}) {
+    const dir = this._packDir(id); const base = { title: a.title, kind: a.kind };
+    if (a.url) pk.addSourceLink(dir, { ...base, url: a.url });
+    else if (typeof a.text === 'string') pk.addSourceText(dir, { ...base, text: a.text });
+    else if (a.dataBase64 && a.filename) { if (a.dataBase64.length > 8_000_000) throw Object.assign(new Error('That file is too large'), { status: 413 }); pk.addSourceFile(dir, { ...base, filename: a.filename, data: Buffer.from(a.dataBase64, 'base64') }); }
+    else throw Object.assign(new Error('Give a url, some text, or a file'), { status: 400 });
+    return this.getPack(id);
+  }
+  removeSource(id, sid) { pk.removeSource(this._packDir(id), sid); return this.getPack(id); }
+  sourceFile(id, sid) { const dir = this._packDir(id); const s = pk.loadPack(dir).sources.find((x) => x.id === sid); if (!s?.file) throw Object.assign(new Error('No such file'), { status: 404 }); return { type: s.type, name: s.file, data: fs.readFileSync(path.join(dir, 'sources', path.basename(s.file))) }; }
+
+  // Planning is a background job: the agent reads the brief and returns epics and tickets for you to review.
+  startPlanning(id) {
+    const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (this.planJobs.get(id)?.state === 'running') return this.planJobs.get(id);
+    if (pack.plan && pack.plan.status !== 'proposed') throw bad('This plan is already launched, so its tickets exist. Add new work as tickets, or edit the brief for future runs.');
+    if (!pk.completeness(pack).ready) throw bad('Fill in at least the Goal and In scope first (Brief tab)');
+    const job = { state: 'running', phase: 'starting', startedAt: Date.now() }; this.planJobs.set(id, job);
+    this.planProject(id, { onPhase: (ph) => { job.phase = ph; } }).then(() => { job.state = 'done'; job.phase = ''; })
+      .catch((e) => { job.state = 'error'; job.error = String(e.message ?? e).slice(0, 400); }).finally(() => { job.finishedAt = Date.now(); });
+    return job;
+  }
+  async planProject(id, { onPhase } = {}) {
+    const p = this.project(id); const dir = this._packDir(id); const pack = pk.loadPack(dir); const d = this.deps(p);
+    onPhase?.('cloning the repository'); let ws;
+    try {
+      ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'plan', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 });
+      pk.materialize(pack, dir, ws.dir); onPhase?.('the agent is reading your brief and planning (a few minutes)');
+      const ask = async (prompt) => d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900000 });
+      let raw = pk.extractJson((await ask(pk.planPrompt(pack))).out);
+      if (!raw) { onPhase?.('asking again for a clean plan'); raw = pk.extractJson((await ask(`${pk.planPrompt(pack)}\nYour previous answer was not valid JSON. Reply with ONLY the JSON object.`)).out); }
+      const plan = pk.normalizePlan(raw, { sourceIds: pack.sources.map((x) => x.id) });
+      const fresh = pk.loadPack(dir); fresh.plan = plan; pk.savePack(dir, fresh); return plan;
+    } finally { try { ws?.destroy(); } catch { /* best effort */ } }
+  }
+  // You can edit the proposed plan (retitle, reword, remove tickets, change dependencies) before launching it.
+  editPlan(id, { epics, summary } = {}) {
+    const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!pack.plan) throw bad('There is no plan yet'); if (pack.plan.status !== 'proposed') throw bad('A launched plan cannot be edited');
+    const next = pk.normalizePlan({ summary: summary ?? pack.plan.summary, epics }, { sourceIds: pack.sources.map((x) => x.id) }); next.createdAt = pack.plan.createdAt; pack.plan = next; pk.savePack(dir, pack); return this.getPack(id);
+  }
+  discardPlan(id) { const dir = this._packDir(id); const pack = pk.loadPack(dir); if (pack.plan && pack.plan.status !== 'proposed') throw Object.assign(new Error('A launched plan cannot be discarded'), { status: 400 }); pack.plan = null; pk.savePack(dir, pack); return this.getPack(id); }
+  async launchPlan(id) {
+    const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!pack.plan) throw bad('There is no plan to launch'); if (pack.plan.status !== 'proposed') throw bad('This plan is already launched');
+    pack.plan.status = 'launched'; pack.plan.launchedAt = new Date().toISOString(); pk.savePack(dir, pack);
+    await this.releasePlan(id); return this.getPack(id);
+  }
+  // Keep plan ticket statuses in step with the tracker: planned -> queued/working/review -> done (closed).
+  async syncPlan(id) {
+    const dir = this._packDir(id); const pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return pack;
+    // fresh read: dependents are released the moment a ticket closes
+    this.cache.delete(`t:${id}`); const live = await this.listTickets(id).catch(() => null); if (!live) return pack; const byId = new Map(live.map((t) => [String(t.id), t])); let changed = false;
+    for (const e of pack.plan.epics) for (const t of e.tickets) {
+      if (!t.ticketId) continue; const tk = byId.get(String(t.ticketId)); if (!tk) continue;
+      const next = tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels); const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
+    }
+    if (pack.plan.epics.every((e) => e.tickets.every((t) => t.status === 'done')) && pack.plan.status !== 'complete') { pack.plan.status = 'complete'; changed = true; }
+    if (changed) pk.savePack(dir, pack); return pack;
+  }
+  // A ticket is created only when everything it depends on is done (merged and closed), so each one builds on real code.
+  async releasePlan(id) {
+    const dir = this._packDir(id); let pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return { released: 0 };
+    pack = await this.syncPlan(id); if (pack.plan?.status !== 'launched') return { released: 0 };
+    const all = pk.planTickets(pack.plan); const done = new Set(all.filter((t) => t.status === 'done').map((t) => t.id)); let released = 0;
+    for (const e of pack.plan.epics) for (const t of e.tickets) {
+      if (t.status !== 'planned' || !t.dependsOn.every((d) => done.has(d))) continue;
+      const res = await this.createTicket(id, { title: t.title, body: pk.ticketBody(t, e) });
+      t.status = 'queued'; t.url = res?.url; t.ticketId = res?.id ?? (res?.url ? /([\w-]+)$/.exec(res.url)?.[1] : undefined); t.queuedAt = new Date().toISOString(); released++;
+    }
+    if (released) pk.savePack(dir, pack); return { released };
+  }
+  planProgress(plan) { const all = pk.planTickets(plan); const n = (s) => all.filter((t) => t.status === s).length; return { total: all.length, planned: n('planned'), queued: n('queued'), working: n('working'), review: n('review'), done: n('done'), failed: n('failed') + n('needs-info') }; }
+  async getPlan(id) { const pack = await this.syncPlan(id); return { plan: pack.plan, progress: pack.plan ? this.planProgress(pack.plan) : null, job: this.planJobs.get(id) ?? { state: 'idle' } }; }
+
+  // Publish the pack into the repo as a reviewable PR under .factory/ (the factory's copy stays the working copy).
+  async publishPack(id) {
+    const p = this.project(id); const dir = this._packDir(id); const pack = pk.loadPack(dir); const d = this.deps(p); const branch = `factory/project-pack-${Date.now().toString(36)}`; let ws;
+    try {
+      ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch, base: p.base, gitEnv: d.config.gitEnv, depth: 1 });
+      for (const [rel, content] of pk.publishFiles(pack, dir)) { const full = path.join(ws.dir, rel); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, content); }
+      if (!(await d.vcs.diffStat(ws))) return { published: false, message: 'The repository already has the latest pack.' };
+      await d.vcs.commitAndPush(ws, { branch, message: 'Project pack: brief, conventions, sources and plan (.factory/)' });
+      const url = await d.vcs.openPr(ws, { branch, base: p.base, repo: p.repo, title: 'Project pack: brief, conventions, sources and plan', body: 'Published by Agent Factory. Adds `.factory/` so the brief, conventions, decisions, source material and plan are versioned with the code and readable by any agent or teammate. Review and merge, or edit.' });
+      const fresh = pk.loadPack(dir); fresh.publishedAt = new Date().toISOString(); fresh.publishedPr = url ?? branch; pk.savePack(dir, fresh); return { published: true, pr: url ?? branch };
+    } finally { try { ws?.destroy(); } catch { /* best effort */ } }
+  }
+  // One row per project: the whole picture at a glance (used by the portfolio page, the CLI and MCP).
+  async portfolio() {
+    const ov = await this.overview(); const m = this.metrics();
+    return ov.map((o) => { const dir = pk.packDir(this.cfg.stateDir, o.id); const pack = pk.loadPack(dir); const pr = o.profile;
+      return { id: o.id, repo: o.repo, paused: o.paused, queue: o.queue, openPrs: o.prs, error: o.error ?? null, runs: o.metrics ? { total: o.metrics.runs, shipped: o.metrics.ok } : null,
+        brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, publishedToRepo: !!pack.publishedAt,
+        quality: pr?.quality ? { gate: pr.quality.gate.status, findings: pr.quality.counts.total, secrets: pr.quality.counts.secrets } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
+  }
+
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }
 
   // Create a brand-new repo from a template, register it, and queue its first ticket (the spec).
-  async createProject({ id, name, description, visibility, template, spec }) {
+  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan }) {
     const owner = await this.gh.whoami();
     const repo = await this.gh.createProjectRepo({ owner, name, description, visibility, template, identity: { name: owner, email: `${owner}@users.noreply.github.com` } });
     const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch });
+    const out = { project: p, url: repo.url }; Object.assign(out, await this._seedPack(id, { brief, stack, decisions, sources, plan }));
     if (spec) await this.createTicket(id, { title: `Build ${name}`, body: spec });
-    return { project: p, url: repo.url };
+    return out;
   }
 }

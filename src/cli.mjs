@@ -10,12 +10,13 @@ import { createServer, hostsFor } from './server.mjs';
 import { doctor } from './doctor.mjs';
 import { analyzeRepo } from './analyze.mjs';
 import { textReport } from './report.mjs';
+import { clientCommand } from './cli-client.mjs';
 import { init, ensureToken, buildImage, ok, bad } from './init.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const cmd = args.find((a) => !a.startsWith('--')) ?? 'help';
-const flags = Object.fromEntries(args.filter((a) => a.startsWith('--')).map((a) => { const [k, v] = a.slice(2).split('='); return [k, v ?? true]; }));
+const flags = Object.fromEntries(args.filter((a) => a.startsWith('--')).map((a) => { const i = a.indexOf('='); return i < 0 ? [a.slice(2), true] : [a.slice(2, i), a.slice(i + 1)]; }));   // split at the FIRST '=' only
 const configPath = path.resolve(flags.config ?? process.env.AGENT_FACTORY_CONFIG ?? 'agent-factory.json');
 
 const HELP = `agent-factory <command>
@@ -27,6 +28,12 @@ const HELP = `agent-factory <command>
   tick           claim queued tickets once and exit
   feedback       process CI/review feedback on open agent PRs once and exit
   analyze [dir|url]  inspect a folder or git URL: layout, repeated code, untested files, quality (no config needed; --json, --ignore=a,b, --no-default-ignore)
+  portfolio      the whole picture: every project's brief, plan, queue, PRs, quality   (needs the factory running)
+  brief <proj>   show or set the project brief:  --goal= --scope= --users= --non-goals= --success= --constraints= --stack= --decisions=  (@file reads a file)
+  source <proj> <file|url|->   attach a PRD, research or design:  --kind=prd|research|design|reference  --title=
+  plan <proj>    draft a delivery plan from the brief:  --wait to follow it, --launch to approve, --show to just print
+  ops            list every operation (the same ones MCP exposes);  op <name> [json] --key=value  runs one
+  agents-md      print docs/AGENT-GUIDE.md: the guide to give any AI agent so it can drive the factory
   build-image    build the agent sandbox image
   token          print the UI sign-in URL
   service        print a systemd unit that keeps the factory running (Linux)
@@ -77,6 +84,7 @@ WantedBy=default.target
   const cfg = boot();
   if (cmd === 'token') return console.log(`http://${cfg.ui.host}:${cfg.ui.port}/#token=${await ensureToken(cfg.stateDir)}`);
   if (cmd === 'doctor') { const r = await doctor(cfg); r.forEach((c) => (c.ok ? ok(c.detail) : bad(c.detail, c.fix))); return process.exit(r.every((c) => c.ok || c.id === 'running') ? 0 : 1); }
+  if (['ops', 'op', 'portfolio', 'brief', 'source', 'plan', 'agents-md'].includes(cmd)) { try { await clientCommand(cmd, args, flags, cfg, root); } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); } return; }
   const problems = validateConfig(cfg); if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
   const engine = new Engine(cfg, { configPath });
   if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo }); return console.log(`Added ${p.id} (base ${p.base})`); }

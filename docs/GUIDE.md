@@ -113,6 +113,32 @@ Done. Start the factory:  npm start
 4. Open the work order: the **Quality gate on this change** card shows what was checked and the result.
 5. Merge the PR if you like it, press **Re-analyze**, and watch "files covered" go up and the trend update.
 
+### From a brief to a plan (the Project Pack)
+
+A real project starts with more than one sentence: a PRD, research, designs, conventions. Each project has a **Brief** tab and a **Plan** tab for exactly that.
+
+1. **Brief** (Brief tab, or the *Create new* form): *Goal*, *Users*, *In scope*, *Out of scope*, *Done means* and *Constraints*, plus **Stack and conventions** (what the agent must follow) and **Decisions** (what is already settled). A progress bar shows what is still missing.
+2. **Source material**: upload files (Markdown, text, JSON, CSV, HTML, PDF, images; up to 5 MB each), add links (Figma, Notion, Google Docs, Jira) or paste text. Links are stored as references; the factory never fetches them.
+3. **Plan**: press *Draft a plan from the brief*. The agent reads the brief, the sources and the existing code and proposes **epics and small tickets** with acceptance criteria, ordering and dependencies. You can retitle, reword and remove tickets before launch. Nothing touches your tracker until you launch.
+4. **Launch**: tickets are created **as their dependencies are merged and closed**, so each builds on real code. The Plan tab tracks every ticket: not started → queued → building → in review → done.
+5. **Every agent run now gets the context**: the brief, conventions and decisions, an index of the sources, and the text of the sources that match that ticket, also readable on disk under `.factory-context/` (never committed).
+6. **Keep it with the code**: *Publish to the repo* opens a PR that adds a `.factory/` folder (brief, conventions, decisions, sources, plan), so it is versioned and readable by any teammate or agent.
+
+The factory keeps the working copy (edits are instant); the repo copy is the published, reviewable mirror.
+
+### Run it from Claude, Codex or any agent (CLI)
+
+Everything above is available from the terminal against the running factory, with `--json` for machines. Give any agent `agent-factory agents-md` (the guide is in [docs/AGENT-GUIDE.md](AGENT-GUIDE.md)).
+
+```bash
+agent-factory portfolio                                   # every project: brief, plan, queue, PRs, quality
+agent-factory brief my-app --goal="..." --scope=@scope.md --stack="..."
+agent-factory source my-app ./PRD.md --kind=prd           # also a URL, or - for stdin
+agent-factory plan my-app --wait                          # draft the plan; add --launch to approve it
+agent-factory ops                                         # every operation (the same ones MCP exposes)
+agent-factory op create_project --name=gym --brief='{"goal":"...","scope":"..."}' --plan=true
+```
+
 ---
 
 ## 5. Connect your own tools

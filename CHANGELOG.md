@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Project Pack** (Brief and Plan tabs): a structured brief (goal, users, scope, out of scope, done criteria, constraints), conventions, decisions and source material (files, links, text) for every project; the agent drafts a delivery **plan** (epics, small tickets with acceptance criteria and dependencies) you edit and launch; tickets are released as their dependencies are merged. Every agent run receives the relevant context. Publish the pack to the repo as a PR under `.factory/`.
+- **Agent-native control:** `agent-factory portfolio | brief | source | plan | ops | op | agents-md` drive a running factory from the terminal (or any AI agent); `create_project`/`add_project` accept a brief and a plan request; new MCP operations for briefs, sources, plans, analysis and a portfolio view. See docs/AGENT-GUIDE.md.
+- The create-new-project form is now brief-first (the one-box description is a quick start).
 - **Code explorer redesign:** the Code tab now has Overview, Findings, Files, Repeated code, Tests and Ignored sub-tabs. Findings show the real code line (secrets masked), why it matters and how to fix it, deep links to the line on the code host, search, severity/kind filters, grouping, and per-finding Queue fix / Ignore file. Files view with sizes, test status and findings per file. The CLI honours `.gitignore` in your own working copy.
 - **Ignore files in the analysis and the PR gate:** lock files, minified/generated files, snapshots, build output and images are skipped by default; add your own patterns per project (Code tab), globally or in the repo's `.agent-factory.json`. The Code tab shows what was skipped.
 - **Security fix:** git commands on the host no longer run repository-controlled code (hooks, fsmonitor, sshCommand, credential helpers, `ext::` or redirected remotes planted by the agent in `.git`). See SECURITY.md.
