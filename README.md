@@ -68,15 +68,24 @@ Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-rev
 | **01 Control room** | **Work-order intake** (describe what you want; a live clarity check tells you if it is specific enough), and **the line**: an animated assembly line where queued tickets wait in the *hopper*, each job rides the belt through six stations (claim → sandbox → agent → verify → push → ship) and finished PRs drop into the *shipped* chute. Every station has its own monoline icon that animates only while that station is working: a check drawing itself, a crate lid lifting, a chip pulsing, a magnifier scanning, an arrow rising, a paper plane taking off. Below it a spec strip (shipped today, success rate, median time to PR, waiting on you, capacity left), your project *cells*, a 14-day output chart, the live line log and recent work orders. A ticker across the top streams events. |
 | **02 Inbox** | Everything waiting on a human, with the reason. **Needs your decision**: tickets the factory bounced for detail or gave up on, showing what it said, the ticket text and the failing run; add the missing detail and **Requeue** (the clarity check re-runs first), comment, open the tracker, or close. **Ready to review**: PRs with a button straight to the PR. The *Waiting on you* tile and a badge on the nav lead here. |
 | **03 Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults |
-| **04 Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
-| **05 Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
-| **06 Health** | The same checks as `npm run doctor`, each with a fix |
+| **04 Library** | The reuse library: searchable parts with API, usage, source, tests and who uses them; **repeated code** found across projects with a one-click promote (as a PR); upgrades when a part changes |
+| **05 Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
+| **06 Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
+| **07 Health** | The same checks as `npm run doctor`, each with a fix |
 
 Dark and light themes (toggle in the header). Self-hosted fonts (Archivo, IBM Plex Mono; SIL OFL), so it works offline.
 
 Press **Ctrl/⌘ K** anywhere for a command palette (jump to a project, pause, run now, add a project).
 
 It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
+
+## Briefs, plans and a reuse library
+
+* **Project Pack**: each project has a *Brief* (goal, users, scope, out of scope, done criteria, constraints, conventions, decisions) plus source material (PRDs, research, designs as files, links or text). The agent turns it into a **plan** of epics and small tickets you approve; tickets are released as their dependencies merge. Every run receives the relevant context.
+* **Reuse library**: a git repo of tested parts shared by all projects. The factory finds repeated code across projects, promotes it as a PR, tells each build "you already have these", records reuse (`.factory/parts.lock.json`), flags rewrites of existing parts, and opens upgrade tickets when a part changes.
+* **Agent-native**: `agent-factory portfolio | brief | source | plan | library … | op <name>` drive a running factory from any terminal or AI agent (same operations as MCP). Give your agent `docs/AGENT-GUIDE.md`.
+
+See the [illustrated guide](docs/GUIDE.md) for the walkthrough.
 
 ## Bring your own tools
 
@@ -166,6 +175,8 @@ All of this was run for real, not just unit-tested:
 - The egress proxy blocking direct access and non-allowlisted hosts (real Docker test).
 - The web UI used in a real browser: a ticket typed into the prompt bar became a PR while the live pipeline view tracked it; run detail, board, charts and Connect pages checked against real runs.
 - Creating a brand-new GitHub repo from a template, building it from a one-paragraph spec, answering a review comment on it, and bouncing a vague ticket; all against real GitHub and re-verified independently (clone, run its tests).
+- A brief + PRD turned into a 5-ticket plan by the real agent, launched, and ticket 1 built into a PR with that context.
+- The reuse library on a real private GitHub repo: a part promoted, the library CI green, and a real agent run that was told about the part, copied it with its provenance header, and shipped a PR that lists it and carries `.factory/parts.lock.json`.
 - The MCP server driven by the official MCP SDK client against the running app (handshake, tools, Code Mode execute, error handling).
 
 **Integrations, honestly:** GitHub (both roles) and **Ossicone** were run end to end against real servers. For Ossicone that means: a new project created on a live instance, connected through the wizard API, tickets queued in Ossicone, claimed and built into PRs on GitHub, with the ticket's status (`code_review`), labels and a PR-link comment written back to Ossicone; a vague ticket bounced to `agent-needs-info`, then fixed from the inbox (detail appended, requeued, built); comment, edit and close from the inbox. Account creation itself is left to the user: the wizard detects whether a server allows sign-up and links to it. Jira, Linear, GitLab and Bitbucket were built from their API documentation and tested against fakes that mirror those APIs, plus real calls confirming the endpoints are reached and bad credentials fail cleanly (GitLab and Linear 401, Jira site-unavailable; Bitbucket returned an inconclusive 503 for a made-up workspace). **I have not run a full ticket → PR cycle on a real Jira, Linear, GitLab or Bitbucket account**; please try one and open an issue if anything differs from the docs.

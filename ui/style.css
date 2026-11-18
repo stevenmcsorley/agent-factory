@@ -271,3 +271,14 @@ ul.notes { margin: 8px 0 0; } .snip-line { grid-column: 1 / -1; display: block; 
 .banner { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-left: 4px solid var(--blue); } .banner.warn { border-left-color: var(--amber); } .banner.ok { border-left-color: var(--green); } .banner p { margin: 3px 0 0; }
 details.quick { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line); } details.quick summary { cursor: pointer; color: var(--muted); font: 600 12px var(--mono); }
 @media (max-width: 760px) { .srclist li { grid-template-columns: 1fr; } .tk-row, .tk:not(.edit) { grid-template-columns: 1fr; } .banner { flex-direction: column; align-items: flex-start; } }
+
+/* ---- Library ---- */
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 10px; } .part { display: grid; gap: 8px; align-content: start; padding: 14px; border: 1px solid var(--line); border-left: 4px solid var(--line); background: var(--panel); cursor: pointer; } .part:hover { border-color: var(--muted); } .part.sel { border-left-color: var(--orange); background: var(--orange-bg); }
+.sigs { display: block; padding: 6px 8px; background: var(--bg); border: 1px solid var(--line); font: 500 12px var(--mono); overflow-x: auto; white-space: nowrap; }
+.usebox { display: grid; gap: 8px; margin: 12px 0 16px; padding: 12px 14px; border: 1px dashed var(--line); } .usebox .toolbar { margin: 0; }
+pre.code.big { max-height: 420px; overflow: auto; } pre.code.big code { white-space: pre; } .tabs2 { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.promote { display: grid; gap: 8px; margin-top: 12px; padding: 14px; border: 1px dashed var(--line); } .checks2 { display: grid; gap: 4px; }
+ol.howto { display: grid; gap: 12px; padding-left: 20px; } ol.howto p { margin: 2px 0 0; } .pill2.info { color: var(--blue); border-color: var(--blue); }
+@media (max-width: 1700px) { nav a i { display: none; } nav a { padding-left: 10px; padding-right: 10px; } }
+.codebody > *, .card.detail, .card.detail > *, .pgrid > *, .promote, .dup { min-width: 0; max-width: 100%; } .card.detail pre.code, .card.detail .usebox { max-width: 100%; overflow: auto; } .card.detail .toolbar input, .card.detail .toolbar select { min-width: 0; } pre.code.big code { display: block; }
+body { overflow-x: hidden; }

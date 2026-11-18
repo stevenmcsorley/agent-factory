@@ -139,6 +139,39 @@ agent-factory ops                                         # every operation (the
 agent-factory op create_project --name=gym --brief='{"goal":"...","scope":"..."}' --plan=true
 ```
 
+### The reuse library (build it once, reuse it everywhere)
+
+When you run many projects, the same things get built again and again: a money formatter, a form field, an API client, an auth helper. The **Library** (top nav) is a catalog of those **parts**, kept in a git repo you own, so the factory can say *"you already have these"* before anything is built, and the agent copies a tested part instead of writing it again.
+
+**Set it up** (once): *Library → Create a new library* (a private GitHub repo with the folder structure and a CI check) or connect an existing one. From the terminal: `agent-factory library create`.
+
+**How parts get in**
+
+| Way | How |
+|---|---|
+| The factory spots repeated code | *Library → Repeated code* lists the same component or logic found in several projects (renamed copies too). Press **Promote…**, name it, pick the files, and a pull request opens in the library repo (tick the box to skip the PR for your own library) |
+| You choose a file | `agent-factory library promote <project> <file…> --name="Money Format" --summary="…" --tags=currency` |
+| The agent proposes one | After building something generic, an agent can run the same command |
+
+A part is a folder: `part.json` (name, kind, summary, tags, stack, **version**, API, usage, where it came from, changelog), `src/`, `test/` (matching tests are included) and a generated README. The library repo's CI validates every part and runs the tests of JavaScript parts.
+
+**How parts get used**
+
+1. A ticket is about to be built. The factory searches the catalog against the ticket, the brief and the project's language (name, tags, exported functions, summary; each match says why).
+2. The agent is told *"Reusable parts you already have (prefer these…)"* with each part's API, and the files are placed under `.factory-context/library/<part>/`, each with a `factory-part: name@version` header.
+3. The agent copies the part in, keeps the header, adapts imports and tests.
+4. Afterwards the factory notices the reuse (header or exact copy), lists it on the PR under **Reused library parts**, and writes `.factory/parts.lock.json` into the same commit so the project records which version it has.
+5. If the agent writes a *new file that is a rewrite of a part* instead, the quality gate flags it ("looks like part X, 100% similar"), sends it back once, and flags the PR if it stays.
+
+**How parts are managed and shown**
+
+* **Browse and test**: *Library → Parts* is searchable; each part shows its API, a usage example, every file with its source, **tests / no tests**, who uses which version, its origin and its changelog.
+* **Use**: *Queue a ticket to add it* on any part (or `agent-factory library use <part> <project>`) creates a normal ticket.
+* **Version**: edit a part in the library repo and bump `version` (or promote again, which bumps the minor version). *Library → Upgrades* lists projects on an older version, and one click opens an upgrade ticket in each (the agent gets the new files and the changelog).
+* **Retire**: set `"deprecated": true` (and optionally `"replacedBy"`) in `part.json`. Deprecated parts are never suggested, and users show up under Upgrades.
+
+Honest limits for now: matching is keyword-based (explained, but not semantic), the usage record covers uses made by the factory, demos are not rendered yet (usage examples and source are), and tests are only run automatically by the library's CI for JavaScript parts.
+
 ---
 
 ## 5. Connect your own tools
@@ -388,4 +421,7 @@ node src/cli.mjs service      # follow the three commands in its header
 | **The line** | The six stations a job passes through |
 | **Route sheet** | The per-station timing of a finished work order |
 | **Inbox** | Everything that needs a human decision or review |
+| **Part** | A reusable piece of code (component, hook, utility, service, schema) kept in the library with its API, tests and version |
+| **Library** | The git repo of parts shared by all projects; the factory suggests its parts before each build |
+| **Candidate** | Code repeated across projects that should probably become a part |
 | **Needs info** | The agent (or the too-short check) wants an answer before building; answer it in the inbox |
