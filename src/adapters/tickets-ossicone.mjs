@@ -29,11 +29,17 @@ export function ossiconeTickets({ baseUrl, token, projectId, allowedReporterIds,
       return (await issues()).map(norm).filter((t) => t.labels.some((l) => l.startsWith('agent-')) && allowedReporterIds.includes(t.reporterId));
     },
     // reporterId is mandatory on Ossicone's REST create; it is the token owner.
-    async create({ title, body, repo }) {
+    async create({ title, body, repo, epic }) {
       const me = await call('GET', '/api/auth/me');
-      const i = await call('POST', '/api/issues', { title, description: body ?? '', projectId, type: 'task', reporterId: me.id,
+      const i = await call('POST', '/api/issues', { title, description: body ?? '', projectId, type: 'task', reporterId: me.id, ...(epic ? { epicId: Number(epic) } : {}),
         labels: ['agent-ready', ...(repo ? [`repo:${repo}`] : [])] });
       return { id: i.id };
+    },
+    // The plan lives in the tracker: an epic per plan epic (no agent-* label, so the factory never treats it as work), with the tickets linked to it.
+    async createEpic({ title, body }) {
+      const me = await call('GET', '/api/auth/me');
+      const i = await call('POST', '/api/issues', { title, description: body ?? '', projectId, type: 'epic', reporterId: me.id, labels: ['factory-plan'] });
+      return { id: i.id, url: `${baseUrl.replace(/\/$/, '')}/projects/${projectId}/issues/${i.id}` };
     },
     // For the setup wizard: who am I, and which projects can I pick?
     async identify() {

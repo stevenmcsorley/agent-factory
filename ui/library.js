@@ -4,7 +4,7 @@ import { h, icon, api, toast, ago, num, ext, act } from './lib.js';
 const op = (name, body = {}) => api(`/op/${name}`, { method: 'POST', body });
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
 const pill = (text, cls = '') => h('span', { class: `pill2 ${cls}` }, text);
-const KIND = { component: 'Component', hook: 'Hook', util: 'Utility', service: 'Service', schema: 'Schema', style: 'Style', config: 'Config', other: 'Other' };
+const KIND = { component: 'Component', hook: 'Hook', util: 'Utility', service: 'Service', schema: 'Schema', style: 'Style', config: 'Config', theme: 'Theme', pattern: 'UX pattern', form: 'Form', skill: 'Skill', other: 'Other' };
 const view = { sub: 'parts', q: '', kind: '', open: null, file: 0, promote: null };
 const copy = async (text, label) => { try { await navigator.clipboard.writeText(text); toast(`${label} copied`, 'ok'); } catch { toast('Copy failed', 'bad'); } };
 const ghUrl = (repo, base, file) => (/^[\w.-]+\/[\w.-]+$/.test(repo ?? '') ? `https://github.com/${repo}/blob/${encodeURIComponent(base || 'main')}/${String(file).split('/').map(encodeURIComponent).join('/')}` : null);
@@ -13,19 +13,19 @@ export const library = {
   async load() {
     const [status, projects] = await Promise.all([op('library_status'), api('/overview').catch(() => [])]);
     if (!status.configured) return { status, projects };
-    const [parts, candidates, upgrades] = await Promise.all([op('library_list').catch(() => []), op('library_candidates').catch(() => []), op('library_upgrades').catch(() => [])]);
-    return { status, projects, parts, candidates, upgrades };
+    const [parts, candidates, upgrades, profiles] = await Promise.all([op('library_list').catch(() => []), op('library_candidates').catch(() => []), op('library_upgrades').catch(() => []), op('profile_list').catch(() => [])]);
+    return { status, projects, parts, candidates, upgrades, profiles };
   },
   draw(d, ctx) {
     const head = h('div', { class: 'page-head' }, h('div', {}, h('h1', {}, 'Library'), h('p', { class: 'sub' }, 'Reusable parts shared by every project. When something is built, the factory tells the agent what already exists, so it reuses instead of rewriting.')));
     if (!d.status.configured) return [head, setup(ctx)];
-    const { status, parts, candidates, upgrades, projects } = d;
+    const { status, parts, candidates, upgrades, projects, profiles } = d;
     const open = candidates.filter((c) => !c.inLibrary);
-    const tabs = [['parts', 'Parts', parts.length], ['candidates', 'Repeated code', open.length], ['upgrades', 'Upgrades', upgrades.length], ['how', 'How it works']];
+    const tabs = [['parts', 'Parts', parts.length], ['profiles', 'House styles', profiles.length], ['candidates', 'Repeated code', open.length], ['upgrades', 'Upgrades', upgrades.length], ['how', 'How it works']];
     const body = h('div', { class: 'codebody' }); const nav = h('div', { class: 'subtabs', role: 'tablist' });
     const go = (sub) => { view.sub = sub; view.open = null; drawNav(); drawBody(); };
     const drawNav = () => nav.replaceChildren(...tabs.map(([k, l, n]) => h('button', { role: 'tab', 'aria-selected': String(view.sub === k), class: view.sub === k ? 'on' : '', onclick: () => go(k) }, l, n ? h('span', { class: 'badge' }, String(n)) : null)));
-    const drawBody = () => body.replaceChildren(...({ parts: partsTab, candidates: candidatesTab, upgrades: upgradesTab, how: howTab }[view.sub])({ parts, candidates, upgrades, projects, status, ctx, redraw: drawBody, go }));
+    const drawBody = () => body.replaceChildren(...({ parts: partsTab, profiles: profilesTab, candidates: candidatesTab, upgrades: upgradesTab, how: howTab }[view.sub])({ parts, candidates, upgrades, projects, profiles, status, ctx, redraw: drawBody, go }));
     drawNav(); drawBody();
     const refresh = act(() => op('library_refresh'), 'Library refreshed', ctx.rerender);
     return [head, card('', h('div', { class: 'card-h' }, h('h2', {}, status.repo ?? 'Library'), h('div', { class: 'row' }, status.url ? ext(status.url, 'Open the repo', 'btn small') : null, h('button', { class: 'btn small ghost', onclick: refresh }, 'Refresh'))),
@@ -92,6 +92,22 @@ function tryBox(r) {
   const run = async (e) => { let a; try { a = JSON.parse(args.value || '[]'); if (!Array.isArray(a)) throw new Error('not an array'); } catch { out.firstChild.textContent = 'Arguments must be a JSON array, e.g. ["text", 2]'; return; }
     const b = e.currentTarget; b.disabled = true; out.firstChild.textContent = 'Running…'; try { const x = await op('library_try', { part: r.slug, fn: sel.value, args: a }); out.firstChild.textContent = x.ok ? `${JSON.stringify(x.result, null, 2)}\n\n(${x.ms} ms, in a sandbox with no network or files)` : `Error: ${x.error}`; } catch (err) { out.firstChild.textContent = `Error: ${err.message}`; } finally { b.disabled = false; } };
   return h('div', { class: 'tryit' }, h('h3', {}, 'Try it'), h('p', { class: 'muted small' }, 'Runs the function in a sandbox: no network, no files, 3 seconds.'), h('div', { class: 'toolbar' }, sel), args, h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: run }, icon('arrow', 13), 'Run')), out);
+}
+
+// ------------------------------------------------------------ house styles (profiles): theme + patterns + forms + skills + conventions
+function profilesTab({ parts, projects, profiles, ctx }) {
+  const name = h('input', { placeholder: 'e.g. Acme SaaS', 'aria-label': 'Profile name' }); const desc = h('input', { placeholder: 'When to use it', 'aria-label': 'Description' }); const conv = h('textarea', { rows: 4, placeholder: 'Conventions the agent must follow, one per line. e.g. Sentence-case headings. Buttons are orange. Every form field has a label.', 'aria-label': 'Conventions' });
+  const picks = h('div', { class: 'checks2' }, parts.length ? parts.map((p) => { const cb = h('input', { type: 'checkbox', value: p.slug }); return h('label', { class: 'check' }, cb, ` ${p.name} `, pill(p.kind, 'muted')); }) : h('p', { class: 'muted small' }, 'Promote some parts first (themes, forms, patterns, skills, components), then group them here.'));
+  const direct = h('input', { type: 'checkbox' });
+  const save = act(async () => { if (!name.value.trim()) throw new Error('Give the profile a name'); const r = await op('profile_save', { name: name.value.trim(), description: desc.value.trim() || undefined, conventions: conv.value.trim() || undefined, parts: [...picks.querySelectorAll('input:checked')].map((i) => i.value), direct: direct.checked }); toast(r.changed === false ? r.message : r.direct ? 'Profile saved' : r.pr ? `Pull request opened: ${r.pr}` : `Branch pushed: ${r.branch}`, 'ok'); }, null, ctx.rerender);
+  return [card('', h('div', { class: 'card-h' }, h('h2', {}, 'House styles'), pill(`${profiles.length}`, 'muted')),
+    h('p', { class: 'muted small' }, 'A house style is a named set of themes, UX patterns, forms, skills and components plus conventions. A project that uses one gives every ticket (even unrelated ones) those conventions and skills, and its parts to copy, so new work looks and behaves like the rest of your products.'),
+    profiles.length ? h('div', { class: 'pgrid' }, profiles.map((p) => { const proj = h('select', { 'aria-label': 'Project' }, [h('option', { value: '' }, 'Use for a project…'), ...projects.map((x) => h('option', { value: x.id, selected: p.usedBy.includes(x.id) }, x.id))]);
+      return h('article', { class: 'part' }, h('div', { class: 'f-head' }, h('b', { class: 'f-title' }, p.name), p.stack.map((x) => pill(x, 'muted'))), h('p', { class: 'f-msg' }, p.description || 'No description.'), p.conventions ? h('pre', { class: 'code' }, h('code', {}, p.conventions)) : null,
+        h('div', { class: 'chips' }, p.partsInfo.map((x) => pill(x.missing ? `${x.slug} (missing)` : `${x.name} · ${x.kind}`, x.missing ? 'bad' : 'muted'))), p.usedBy.length ? h('p', { class: 'muted small' }, `Used by: ${p.usedBy.join(', ')}`) : null,
+        h('div', { class: 'toolbar' }, proj, h('button', { class: 'btn small', onclick: act(() => { if (!proj.value) throw new Error('Choose a project first'); return op('profile_set', { project: proj.value, profile: p.slug }); }, 'Project now uses this house style', ctx.rerender) }, 'Apply'))); })) : h('p', { class: 'muted' }, 'No house styles yet.')),
+    card('', h('h2', {}, 'Create a house style'), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name'), name), h('div', {}, h('label', {}, 'Description'), desc)), h('label', {}, 'Conventions'), conv, h('label', {}, 'Parts in this style'), picks,
+      h('label', { class: 'check' }, direct, ' Save straight to the library without a pull request (your own library)'), h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: save }, 'Save the house style')))];
 }
 
 // ------------------------------------------------------------ repeated code -> promote

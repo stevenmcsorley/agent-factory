@@ -101,7 +101,7 @@ export function planTab(data, pack, { id, rerender, poll, openBrief }) {
       h('button', { class: 'btn small ghost', title: 'Remove this ticket', onclick: () => { e.tickets = e.tickets.filter((x) => x !== t); for (const ep of epics) for (const x of ep.tickets) x.dependsOn = x.dependsOn.filter((d) => d !== t.id); markDirty(); draw(); } }, 'Remove')),
       h('details', {}, h('summary', {}, 'Details and acceptance criteria'), body));
   };
-  const draw = () => root.replaceChildren(...epics.map((e) => card('epic', h('div', { class: 'card-h' }, h('h3', {}, e.title), pill(`${e.tickets.length} ticket${e.tickets.length === 1 ? '' : 's'}`, 'muted')), e.goal ? h('p', { class: 'muted small' }, e.goal) : null, h('ul', { class: 'plain tks' }, e.tickets.map((t) => ticketRow(e, t))))));
+  const draw = () => root.replaceChildren(...epics.map((e) => card('epic', h('div', { class: 'card-h' }, h('h3', {}, e.title), h('div', { class: 'row' }, e.trackerUrl ? ext(e.trackerUrl, 'Epic in your tracker', 'btn small') : null, pill(`${e.tickets.length} ticket${e.tickets.length === 1 ? '' : 's'}`, 'muted'))), e.trackerError ? h('div', { class: 'note bad' }, icon('alert', 14), ` Could not create the epic in your tracker: ${e.trackerError}`) : null, e.goal ? h('p', { class: 'muted small' }, e.goal) : null, h('ul', { class: 'plain tks' }, e.tickets.map((t) => ticketRow(e, t))))));
   draw();
 
   const head = launched

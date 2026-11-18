@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const KINDS = ['component', 'hook', 'util', 'service', 'schema', 'style', 'config', 'other'];
+export const KINDS = ['component', 'hook', 'util', 'service', 'schema', 'style', 'config', 'theme', 'pattern', 'form', 'skill', 'other'];
 const LANG = { js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', py: 'Python', go: 'Go', rs: 'Rust', rb: 'Ruby', java: 'Java', kt: 'Kotlin', php: 'PHP', vue: 'Vue', svelte: 'Svelte', css: 'CSS', scss: 'CSS', html: 'HTML' };
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const clip = (v, n) => String(v ?? '').replace(/\u0000/g, '').slice(0, n);
@@ -204,4 +204,15 @@ const FP_LANGS = new Set(['JavaScript', 'TypeScript', 'Python', 'Go', 'Vue', 'Sv
 export function fingerprintOf(rel, text, lines, lang) {
   if (!FP_LANGS.has(lang) || lines < 8) return null; const sig = minhash(text); if (!sig.length) return null;
   return { file: rel, lines, exports: exportsOf(text, path.extname(rel).slice(1).toLowerCase()).map((e) => e.name).slice(0, 12), sig };
+}
+
+// ---------------------------------------------------------------- profiles: a named "house style" (theme, patterns, forms, skills + conventions) a project can start from
+export function cleanProfile(raw) {
+  const name = clip(raw?.name, 80).trim(); const slug = slugify(raw?.slug || name); if (!slug) throw bad('A profile needs a name');
+  const strs = (v, n, len) => [...new Set((Array.isArray(v) ? v : []).map((x) => slugify(clip(x, len))).filter(Boolean))].slice(0, n);
+  return { name: name || slug, slug, description: clip(raw?.description, 300).trim(), parts: strs(raw?.parts, 30, 60), conventions: clip(raw?.conventions, 4000).trim(), stack: (Array.isArray(raw?.stack) ? raw.stack : []).map((x) => clip(x, 30).trim()).filter(Boolean).slice(0, 6), updatedAt: new Date().toISOString() };
+}
+export function readProfiles(dir) {
+  const root = path.join(dir, 'profiles'); let files = []; try { files = fs.readdirSync(root).filter((f) => f.endsWith('.json')); } catch { return []; }
+  return files.sort().map((f) => { try { const p = cleanProfile({ ...JSON.parse(fs.readFileSync(path.join(root, f), 'utf8')), slug: f.replace(/\.json$/, '') }); return p; } catch { return null; } }).filter(Boolean);
 }

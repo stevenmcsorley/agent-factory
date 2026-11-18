@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Studio** replaces the Control room's intake box (which moved to the Studio as "Add work to a project"): start a project from a brief with a **target** (prototype or deploy) and an optional house style; the Control room now opens with a launcher and a live "building now" strip. "Cells" left the header (the Portfolio covers it).
+- **Targets and readiness:** `set_target`, `project_readiness`; the Portfolio shows "Ready to deploy: n of m checks" with the checklist. A human still approves any go-live.
+- **Plans in the tracker:** launching a plan creates **epics in Ossicone (verified live) and Jira (tested against a fake)** with tickets linked to them. Epics show tracker links on the Plan tab. The agent on a plan ticket is told **where it fits** (plan, done, in flight, what depends on it).
+- **House styles:** part kinds theme, pattern, form and skill; profiles (parts + conventions) saved in the library (`profiles/<slug>.json`), applied per project (`profile_list|save|set`, Library → House styles). Every ticket in such a project gets the conventions, skills and parts.
+- **Parallel lanes:** `limits.parallelProjects` (1 to 8) builds projects at the same time; `/api/status` reports lanes; Health warns when the disk is nearly full.
 - **Extension platform:** **plugins** (hash-pinned, human-enabled, offline: add scenario steps, operations, quality rules, part kinds, ticket sources and code hosts), **scenarios** (JSON workflows with checks, ticket steps, restricted HTTPS calls and human approval gates; dry run by default; persisted runs; secrets declared and redacted; `allowHosts`), and **overridable prompts** (`prompts/task-rules.md`). Bundled `prototype` and `ship` scenarios, a `cloudflare` plugin (DNS upsert and Pages deployment; dry runs show the exact change) and a `deploy-hook` plugin. Scenarios page (runs, approvals, extensions) and `agent-factory plugin|scenario` commands. Approving a gate and enabling a plugin are not available to agents or MCP.
 - **Self-modification guardrails:** the repository's `.agent-factory.json` protects the security core (git safety, sandbox, egress, server auth, plugin loader, scenario engine, CI, licence) from the factory's own edits.
 - docs/EXTENDING.md: how to change how it works and which services it uses, what is and isn't pluggable yet, and the security model.

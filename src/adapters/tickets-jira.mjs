@@ -74,8 +74,13 @@ export function jiraTickets({ baseUrl, projectKey, flavor = 'cloud', auth, email
       await transition(id, to);
     },
     async comment(id, text) { await call('POST', `/rest/api/2/issue/${key(id)}/comment`, { body: text }); },
-    async create({ title, body }) {
-      const r = await call('POST', '/rest/api/2/issue', { fields: { project: { key: projectKey.toUpperCase() }, summary: title, description: body ?? '', issuetype: { name: issueType }, labels: ['agent-ready'] } });
+    async create({ title, body, epic }) {
+      const r = await call('POST', '/rest/api/2/issue', { fields: { project: { key: projectKey.toUpperCase() }, summary: title, description: body ?? '', issuetype: { name: issueType }, labels: ['agent-ready'], ...(epic ? { parent: { key: String(epic) } } : {}) } });
+      return { id: r.key, url: `${base}/browse/${r.key}` };
+    },
+    // The plan lives in Jira: an Epic per plan epic (labelled factory-plan, not agent-*), with tickets as its children (company-managed and team-managed projects both accept `parent`).
+    async createEpic({ title, body }) {
+      const r = await call('POST', '/rest/api/2/issue', { fields: { project: { key: projectKey.toUpperCase() }, summary: title, description: body ?? '', issuetype: { name: 'Epic' }, labels: ['factory-plan'] } });
       return { id: r.key, url: `${base}/browse/${r.key}` };
     },
     // For the setup wizard: who am I, and which projects can I pick?

@@ -302,3 +302,9 @@ ol.stepsrun { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap:
 ul.plugs li { padding: 10px 0; border-bottom: 1px solid var(--line); } .card.run.waiting-approval { border-left: 4px solid var(--amber); }
 nav a { padding-left: 7px; padding-right: 7px; }
 nav a { padding-left: 6px; padding-right: 6px; font-size: 10.5px; letter-spacing: .03em; } .bar { gap: 12px; }
+
+/* ---- Studio, launcher, readiness ---- */
+.lifecycle { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 10px 0; } a.lc { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-top: 3px solid var(--orange); text-decoration: none; color: inherit; } a.lc:hover { background: var(--orange-bg); }
+.tile-card h2 { margin: 0 0 6px; }
+.launcher { display: grid; gap: 12px; } .launcher p { margin: 3px 0 0; } .lanes { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 10px; border-top: 1px dashed var(--line); }
+details.ready { margin: 6px 0 10px; } details.ready summary { cursor: pointer; display: flex; gap: 10px; align-items: center; } .okmark { color: var(--green); font-weight: 700; } .xmark { color: var(--red); font-weight: 700; }

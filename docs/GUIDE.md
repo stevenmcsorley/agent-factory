@@ -87,6 +87,7 @@ Done. Start the factory:  npm start
 
 | Page | What it is for |
 |---|---|
+| **Studio** | Where you start things: a new project (brief, sources, **target**, plan), an existing repo plus tracker, a scenario, or a quick ticket. Shows the path a project takes: idea → prototype → build → staging → production → maintain |
 | **Portfolio** | Every project from *brief → plan → build → ship* on one screen, with the next step for each and a "Needs you" list. Start here when you have several projects |
 | **Library** | The reuse library: parts, repeated code, upgrades |
 | **Scenarios** | Your own workflows with human approval gates (prototype only, ship to production, deploy to Cloudflare…). Run one as a **dry run** first; a real run stops at each approval until you press **Approve**. The Extensions tab shows plugins. See [EXTENDING.md](EXTENDING.md) |
@@ -198,6 +199,22 @@ curl -X POST 'http://127.0.0.1:7777/hook/<project>/<secret>' -H 'Content-Type: a
 Each alert is checked like any ticket, **de-duplicated by `key`** for 24 hours, **rate-limited** (30 an hour per project), and queued; the factory fixes it and you still review the PR. The secret in the URL is the only credential, so keep it private and use *Generate a new secret* if it leaks. The server listens on this machine only: to receive alerts from elsewhere, put an HTTPS tunnel or reverse proxy in front of it.
 
 ---
+
+### Prototype or deploy, and "can we deploy yet?"
+
+Every project has a **target**, chosen when you create it and changeable any time: **prototype** (build it, review it, stop) or **deploy** (aim to go live). The **Portfolio** shows *"Ready to deploy: 3 of 4 checks"* for each project with the checklist (brief ready, every planned ticket merged, nothing waiting in review, quality gate passes). Going live is the **ship** scenario: the same checks, then **a human approval**, then your deploy steps. The answer to "at what point can we say yes?" is always visible, and only a person says yes.
+
+### Planning lives in your tracker
+
+When a plan is launched, its **epics are created in your tracker too** (Ossicone and Jira today), each ticket linked to its epic, so people and the AI read the same picture; GitHub Issues gets the epic named in each ticket. Statuses are read back from the tracker before every action. The agent building a plan ticket is also told **where it fits**: the plan, what is done, what is in flight (so it doesn't duplicate it) and what depends on its work (so it keeps interfaces stable).
+
+### House styles: themes, patterns, forms and skills
+
+The library holds more than code. Part kinds now include **theme** (design tokens), **pattern** (a UX pattern), **form** and **skill** (a Markdown playbook: "how we build forms"). **Library → House styles** groups a set of them with **conventions** into a named profile ("Acme SaaS"). Apply it to a project and **every ticket**, even an unrelated one, gets the conventions and skills in its prompt and the profile's parts to copy. So a PRD that says "signup form" is built with your form pattern, your theme and your validation skill. Over time the library becomes your taste and your standards.
+
+### Several projects at once
+
+By default projects take turns. Set `"limits": { "parallelProjects": 3 }` in `agent-factory.json` and up to that many projects build **at the same time**, each in its own lane (the Control room and Portfolio show what is building now). Mind disk space (every run clones a repository and starts a container) and your agent's rate limits: **Health** warns when the disk is getting full, more strictly with parallel builds.
 
 ### Make it work your way (scenarios and plugins)
 

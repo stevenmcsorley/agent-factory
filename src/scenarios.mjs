@@ -75,6 +75,9 @@ const CHECKS = {
   'brief-ready': async ({ engine, project }) => { const c = engine.getPack(project).completeness; return { ok: c.ready, detail: c.ready ? 'brief has a goal and scope' : `missing: ${c.missing.join(', ')}` }; },
   'http-ok': async ({ scenario, args, fetch: f }) => { const r = await safeFetch(scenario, { url: args.url }, f); const want = args.expect ?? [200]; return { ok: want.includes(r.status), detail: `${args.url} answered ${r.status}` }; },
 };
+export const CHECK_NAMES = Object.keys(CHECKS);
+// Run one named check against a project (used for lifecycle readiness as well as scenario steps).
+export const runCheck = async (engine, project, name, args = {}) => { const fn = CHECKS[name]; if (!fn) throw bad(`Unknown check "${name}"`); return fn({ engine, project, args, scenario: { allowHosts: [] } }); };
 const BUILTIN = {
   note: { describe: (a) => String(a.text ?? a.title ?? ''), run: async (a) => ({ note: String(a.text ?? '') }) },
   ticket: {

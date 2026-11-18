@@ -61,7 +61,7 @@ export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
-    this.pluginReport = []; this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
+    this.pluginReport = []; this.lanes = new Map(); this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
     fs.mkdirSync(cfg.stateDir, { recursive: true });
   }
@@ -93,7 +93,7 @@ export class Engine {
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
     const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
-      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
       promptRules: () => getPrompt('task-rules', {}, this._promptDirs()),
       libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
@@ -105,7 +105,11 @@ export class Engine {
     this.busy = true;
     try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; }
   }
-  tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); await sc.advanceAll(this, this.scenarios()).catch(() => {}); for (const p of this.cfg.projects) { if (p.paused) continue; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  // Projects take turns by default; limits.parallelProjects (1 to 8) lets that many projects build at the same time, each in its own lane. Mind disk and the agent's rate limits.
+  tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); await sc.advanceAll(this, this.scenarios()).catch(() => {});
+    const queue = this.cfg.projects.filter((p) => !p.paused); const lanes = Math.max(1, Math.min(8, Number(this.cfg.limits.parallelProjects) || 1)); let next = 0;
+    const lane = async () => { while (next < queue.length) { const p = queue[next++]; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); this.lanes.set(p.id, Date.now()); try { out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } finally { this.lanes.delete(p.id); } } };
+    await Promise.all(Array.from({ length: Math.min(lanes, queue.length) }, lane)); return out; }); }
   feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
@@ -168,6 +172,7 @@ export class Engine {
     const l = this.cfg.limits;
     return { paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, nextAt: this.nextAt ? new Date(this.nextAt).toISOString() : null, pollMs: this.pollMs ?? null, agent: this.cfg.agent.kind,
       today: { runs: runsToday(this.cfg.stateDir), maxRuns: l.maxRunsPerDay ?? null, costUsd: Number(spentToday(this.cfg.stateDir).toFixed(4)), maxCostUsd: l.dailyBudgetUsd ?? null },
+      lanes: { parallel: Math.max(1, Math.min(8, Number(l.parallelProjects) || 1)), running: [...this.lanes.keys()] },
       projects: Object.values(per) };
   }
   async _cached(key, ttl, fn) { const c = this.cache.get(key); if (c && Date.now() - c.at < ttl) return c.v; const v = await fn(); this.cache.set(key, { at: Date.now(), v }); return v; }
@@ -240,11 +245,11 @@ export class Engine {
   async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
   repoUrl(p) { const k = hostKind(p); return k === 'github' ? `https://github.com/${p.repo}` : k === 'gitlab' ? `${(p.host.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '')}/${p.repo}` : k === 'bitbucket' ? `https://bitbucket.org/${p.repo}` : null; }
   async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
-  async createTicket(id, { title, body, repo }) {
+  async createTicket(id, { title, body, repo, epic }) {
     const p = this.project(id);
     if (!title || title.length > 200) throw Object.assign(new Error('title is required (max 200 chars)'), { status: 400 });
     this.cache.delete(`t:${id}`);
-    return this.deps(p).tickets.create({ title, body: body ?? '', repo });
+    return this.deps(p).tickets.create({ title, body: body ?? '', repo, epic });
   }
 
   // ---- project management (persisted to the config file)
@@ -431,7 +436,11 @@ export class Engine {
   async launchPlan(id) {
     const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
     if (!pack.plan) throw bad('There is no plan to launch'); if (pack.plan.status !== 'proposed') throw bad('This plan is already launched');
-    pack.plan.status = 'launched'; pack.plan.launchedAt = new Date().toISOString(); pk.savePack(dir, pack);
+    pack.plan.status = 'launched'; pack.plan.launchedAt = new Date().toISOString();
+    // If the tracker supports epics (Ossicone, Jira), the plan's structure goes there too, so people and the AI see the same picture.
+    const adapter = this.deps(this.project(id)).tickets;
+    if (typeof adapter.createEpic === 'function') for (const e of pack.plan.epics) { if (e.trackerId) continue; try { const r = await adapter.createEpic({ title: e.title, body: `${e.goal || ''}\n\nTickets in this epic:\n${e.tickets.map((t) => `- ${t.title}`).join('\n')}\n\n(Created by Agent Factory from the project plan.)`.trim() }); e.trackerId = String(r?.id ?? ''); e.trackerUrl = r?.url; } catch (err) { e.trackerError = String(err.message ?? err).slice(0, 200); } }
+    pk.savePack(dir, pack);
     await this.releasePlan(id); return this.getPack(id);
   }
   // Keep plan ticket statuses in step with the tracker: planned -> queued/working/review -> done (closed).
@@ -453,7 +462,7 @@ export class Engine {
     const all = pk.planTickets(pack.plan); const done = new Set(all.filter((t) => t.status === 'done').map((t) => t.id)); let released = 0;
     for (const e of pack.plan.epics) for (const t of e.tickets) {
       if (t.status !== 'planned' || !t.dependsOn.every((d) => done.has(d))) continue;
-      const res = await this.createTicket(id, { title: t.title, body: pk.ticketBody(t, e) });
+      const res = await this.createTicket(id, { title: t.title, body: pk.ticketBody(t, e), epic: e.trackerId || undefined });
       t.status = 'queued'; t.url = res?.url; t.ticketId = res?.id ?? (res?.url ? /([\w-]+)$/.exec(res.url)?.[1] : undefined); t.queuedAt = new Date().toISOString(); released++;
     }
     if (released) pk.savePack(dir, pack); return { released };
@@ -475,11 +484,11 @@ export class Engine {
   }
   // One row per project: the whole picture at a glance (used by the portfolio page, the CLI and MCP).
   async portfolio() {
-    const ov = await this.overview(); const m = this.metrics();
+    const ov = await this.overview(); const m = this.metrics(); const ready = Object.fromEntries(await Promise.all(ov.map(async (o) => [o.id, await this.readiness(o.id).catch(() => null)])));
     return ov.map((o) => { const dir = pk.packDir(this.cfg.stateDir, o.id); const pack = pk.loadPack(dir); const pr = o.profile;
       return { id: o.id, repo: o.repo, paused: o.paused, queue: o.queue, openPrs: o.prs, error: o.error ?? null, runs: o.metrics ? { total: o.metrics.runs, shipped: o.metrics.ok } : null,
-        brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, publishedToRepo: !!pack.publishedAt, partsUsed: [...new Set(this._usage().entries.filter((u) => u.project === o.id).map((u) => u.slug))], sources: pack.sources.length,
-        quality: pr?.quality ? { gate: pr.quality.gate.status, findings: pr.quality.counts.total, secrets: pr.quality.counts.secrets } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
+        brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, target: this.project(o.id).target ?? 'prototype', readiness: ready[o.id] ? { passed: ready[o.id].passed, total: ready[o.id].total, ready: ready[o.id].ready, checks: ready[o.id].checks } : null, publishedToRepo: !!pack.publishedAt, partsUsed: [...new Set(this._usage().entries.filter((u) => u.project === o.id).map((u) => u.slug))], sources: pack.sources.length,
+        quality: pr?.quality ? { gate: pr.quality.gate?.status ?? 'NONE', findings: pr.quality.counts?.total ?? 0, secrets: pr.quality.counts?.secrets ?? 0 } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
   }
 
   // ================================================================ Reuse library
@@ -573,15 +582,27 @@ export class Engine {
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   }
 
+  // ---- Profiles: a house style (theme, patterns, forms, skills, conventions) a project starts from. The agent always gets its parts and conventions.
+  async libraryProfiles() { this._lib(); if (!this._libPulledAt) await this.libraryPull().catch(() => {}); const cat = this._catalogNow(); return lb.readProfiles(this._libDir()).map((pf) => ({ ...pf, partsInfo: pf.parts.map((s) => { const x = cat.find((c) => c.slug === s); return x ? { slug: s, kind: x.kind, name: x.name } : { slug: s, missing: true }; }), usedBy: this.cfg.projects.filter((p) => p.styleProfile === pf.slug).map((p) => p.id) })); }
+  async saveProfile({ name, description, parts, conventions, stack, direct = false } = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 }); this._lib(); await this.libraryPull().catch(() => {}); const pf = lb.cleanProfile({ name, description, parts, conventions, stack });
+    const have = new Set(this._catalogNow().map((c) => c.slug)); const unknown = pf.parts.filter((s) => !have.has(s)); if (unknown.length) throw bad(`These parts are not in the library: ${unknown.join(', ')}`);
+    const out = await this._libPropose({ branch: `profile/${pf.slug}-${Date.now().toString(36)}`, files: new Map([[`profiles/${pf.slug}.json`, `${JSON.stringify(pf, null, 2)}\n`]]), message: `Profile: ${pf.name}`, title: `Profile: ${pf.name}`, body: `${pf.description || 'A house style for new projects.'}\n\nParts: ${pf.parts.join(', ') || 'none'}`, direct }); return { profile: pf, ...out };
+  }
+  setProjectProfile(id, slug) { const p = this.project(id); if (slug) { const pf = lb.readProfiles(this._libDir()).find((x) => x.slug === lb.slugify(slug)); if (!pf) throw Object.assign(new Error(`No such profile: ${slug}`), { status: 404 }); p.styleProfile = pf.slug; } else delete p.styleProfile; this._persist(); return { id, profile: p.styleProfile ?? null }; }
   // ---- using parts: what the agent is told, what it is given, what we record afterwards
   _partsContext(p, t) {
-    const cat = this._catalogNow().filter((x) => x.origin?.project !== p.id && !x.deprecated); if (!cat.length) return { text: '', parts: [] };
+    const cat = this._catalogNow().filter((x) => x.origin?.project !== p.id && !x.deprecated); const prof = p.styleProfile && this.cfg.library?.remote ? lb.readProfiles(this._libDir()).find((x) => x.slug === p.styleProfile) : null; if (!cat.length && !prof) return { text: '', parts: [] };
     const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); const q = `${t?.title ?? ''} ${t?.body ?? ''} ${pack.brief.goal ?? ''} ${pack.brief.scope ?? ''}`; const stack = p.profile?.languages ?? [];
     const found = lb.searchCatalog(cat, q, { stack, limit: 5 }).map((r) => ({ part: r.part, why: r.why }));
     const text = `${t?.title ?? ''} ${t?.body ?? ''}`.toLowerCase(); for (const part of cat) if (!found.some((f) => f.part.slug === part.slug) && text.includes(part.slug)) found.push({ part, why: ['named in the ticket'] });
-    if (!found.length) return { text: '', parts: [] };
-    const lines = found.slice(0, 6).map(({ part: x, why }) => `- ${x.slug}@${x.version} [${x.kind}${x.tested ? ', tested' : ''}] ${x.summary || x.name}${x.exports.length ? `\n  API: ${x.exports.slice(0, 6).map((e) => e.signature || e.name).join('; ')}` : ''}\n  files: .factory-context/library/${x.slug}/src/  (matched: ${why.slice(0, 3).join(', ')})`);
-    return { parts: found.map((f) => f.part), text: `### Reusable parts you already have (prefer these over writing the same thing again)\n${lines.join('\n')}\nTo use a part: copy its src files (and its tests) into the project where the conventions say, keep the \`factory-part:\` header line at the top of each copied file, and adapt imports. Do not rewrite it from scratch; if it almost fits, copy it and make the smallest change, and say what you changed.` };
+    const house = []; if (prof) for (const s of prof.parts) { const part = cat.find((c) => c.slug === s); if (part && !found.some((f) => f.part.slug === s)) { found.push({ part, why: [`in your house style “${prof.name}”`] }); house.push(part); } }
+    if (!found.length && !prof) return { text: '', parts: [] };
+    const lines = found.slice(0, 10).map(({ part: x, why }) => `- ${x.slug}@${x.version} [${x.kind}${x.tested ? ', tested' : ''}] ${x.summary || x.name}${x.exports.length ? `\n  API: ${x.exports.slice(0, 6).map((e) => e.signature || e.name).join('; ')}` : ''}\n  files: .factory-context/library/${x.slug}/src/  (matched: ${why.slice(0, 3).join(', ')})`);
+    const skills = []; if (prof) for (const s of prof.parts) { const part = cat.find((c) => c.slug === s && c.kind === 'skill'); if (part) { try { const meta = lb.readPart(this._libDir(), s); const f = meta.files.find((x) => x.role === 'source' && /\.md$/i.test(x.path)); if (f) skills.push(`#### Skill: ${meta.name}\n${f.content.trim().slice(0, 1200)}`); } catch { /* skip */ } } }
+    const profileText = prof ? `### House style: ${prof.name}\n${prof.description ? `${prof.description}\n` : ''}${prof.conventions ? `Follow these conventions:\n${prof.conventions}\n` : ''}${prof.parts.length ? `Use these parts for UI, UX and structure unless the ticket says otherwise: ${prof.parts.join(', ')}.\n` : ''}${skills.join('\n\n')}` : '';
+    const partsText = lines.length ? `### Reusable parts you already have (prefer these over writing the same thing again)\n${lines.join('\n')}\nTo use a part: copy its src files (and its tests) into the project where the conventions say, keep the \`factory-part:\` header line at the top of each copied file, and adapt imports. Do not rewrite it from scratch; if it almost fits, copy it and make the smallest change, and say what you changed.` : '';
+    return { parts: found.map((f) => f.part), text: [profileText, partsText].filter(Boolean).join('\n\n') };
   }
   _materializeParts(p, t, wsDir) {
     const { parts } = this._partsContext(p, t); if (!parts.length) return; const lib = this._libDir(); pk.excludeContext(wsDir);
@@ -666,6 +687,22 @@ export class Engine {
     const r = await this.createTicket(id, { title: `[${source}] ${title}`.slice(0, 200), body }); if (key) h.seen[key] = now; h.hourly.push(now); this._saveHook(id, h); return { created: true, ticket: r?.url ?? null };
   }
 
+  // "Where this fits": the AI is told which plan ticket it is on, what is already done, what is in flight and what comes next, so it works from the plan, not in isolation.
+  _planContext(p, t) {
+    const plan = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)).plan; if (!plan || plan.status === 'proposed' || !t) return '';
+    const all = pk.planTickets(plan); const mine = all.find((x) => x.ticketId && String(x.ticketId) === String(t.id)); if (!mine) return '';
+    const epic = plan.epics.find((e) => e.id === mine.epic); const list = (xs) => xs.map((x) => `${x.title} (${x.id})`).join('; ') || 'none';
+    const done = all.filter((x) => x.status === 'done'), going = all.filter((x) => ['queued', 'working', 'review'].includes(x.status) && x.id !== mine.id), next = all.filter((x) => x.dependsOn.includes(mine.id));
+    return `### Where this fits in the project plan\n${plan.summary ? `Plan: ${plan.summary}\n` : ''}You are on "${mine.title}" (${mine.id}), part of the epic "${epic?.title ?? mine.epic}"${epic?.trackerUrl ? ` (${epic.trackerUrl})` : ''}. ${mine.dependsOn.length ? `It builds on: ${mine.dependsOn.join(', ')}, which are already merged.` : 'Nothing has to be merged before it.'}\nAlready done: ${list(done).slice(0, 500)}\nIn progress or in review (do not duplicate): ${list(going).slice(0, 400)}\nComes next and depends on your work, so keep your interfaces stable: ${list(next).slice(0, 400)}`;
+  }
+  // The project's target: stop at a prototype, or aim to deploy. Readiness says how many of the checks before a go-live already pass; a human still approves.
+  setTarget(id, target) { const p = this.project(id); if (!['prototype', 'deploy'].includes(target)) throw Object.assign(new Error('target must be "prototype" or "deploy"'), { status: 400 }); p.target = target; this._persist(); return { id, target }; }
+  async readiness(id) {
+    const p = this.project(id); const target = p.target ?? 'prototype'; const names = target === 'deploy' ? ['brief-ready', 'plan-complete', 'queue-empty', 'gate-ok'] : ['brief-ready', 'plan-complete', 'gate-ok'];
+    const title = { 'brief-ready': 'Brief has a goal and scope', 'plan-complete': 'Every planned ticket is merged', 'queue-empty': 'Nothing waiting in review', 'gate-ok': 'Quality gate passes' };
+    const checks = []; for (const n of names) { try { const r = await sc.runCheck(this, id, n); checks.push({ id: n, title: title[n], ok: !!r.ok, detail: r.detail }); } catch (e) { checks.push({ id: n, title: title[n], ok: false, detail: String(e.message ?? e) }); } }
+    return { target, scenario: target === 'deploy' ? 'ship' : 'prototype', checks, passed: checks.filter((c) => c.ok).length, total: checks.length, ready: checks.every((c) => c.ok) };
+  }
   // ================================================================ Extensions: plugins, scenarios, prompts
   _configDir() { return this.configPath ? path.dirname(path.resolve(this.configPath)) : this.cfg.stateDir; }
   _root() { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); }
@@ -689,10 +726,12 @@ export class Engine {
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }
 
   // Create a brand-new repo from a template, register it, and queue its first ticket (the spec).
-  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan }) {
+  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan, target, profile }) {
     const owner = await this.gh.whoami();
     const repo = await this.gh.createProjectRepo({ owner, name, description, visibility, template, identity: { name: owner, email: `${owner}@users.noreply.github.com` } });
     const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch });
+    if (target) this.setTarget(id, target);
+    if (profile) { try { this.setProjectProfile(id, profile); } catch { /* an unknown profile never blocks creation */ } }
     const out = { project: p, url: repo.url }; Object.assign(out, await this._seedPack(id, { brief, stack, decisions, sources, plan }));
     if (spec) await this.createTicket(id, { title: `Build ${name}`, body: spec });
     return out;

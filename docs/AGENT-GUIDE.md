@@ -48,6 +48,12 @@ agent-factory library use money-format my-app --note="cart totals"      # queue 
 * Code too tangled into a project to promote? `agent-factory library extract my-app --name="Money Format" --files=src/cart.js` queues a ticket for a clean standalone module with its own tests; promote it after that PR merges.
 * First time: `agent-factory library create` (new private GitHub repo with a CI check) or `agent-factory library connect --repo=owner/name`.
 
+## Targets, readiness and house styles
+
+* `agent-factory op set_target --project=my-app --target=deploy` (or `prototype`), and `agent-factory op project_readiness --project=my-app` lists which go-live checks pass. Readiness is information; only a human approves a go-live.
+* `agent-factory op profile_list` shows house-style profiles (themes, patterns, forms, skills + conventions); `profile_set --project=my-app --profile=acme-saas` applies one, so every ticket in that project carries those conventions. `create_project` accepts `--target` and `--profile`.
+* Plans are mirrored into the tracker as epics (Ossicone, Jira) when you launch them; the agent on each ticket is told where it fits in the plan.
+
 ## Scenarios (deploys and other custom workflows)
 
 `agent-factory scenario list` shows the workflows defined for this factory (for example `prototype` and `ship`). Start one on a project with `agent-factory scenario run <project> <scenario> --param=value`: it is a **dry run** (nothing changes) unless you add `--apply`, and a real run stops at every approval step until a human approves it. **You cannot approve a gate, enable a plugin or create a scenario; those are human acts.** Use dry runs to show the human exactly what would happen, then ask them to approve.

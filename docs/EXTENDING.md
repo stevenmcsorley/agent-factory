@@ -16,7 +16,7 @@ Agent Factory is meant to be adapted. Your tracker, your host, your deploy targe
 | Which service does the deploy (Cloudflare, your server, a hook) | A scenario step: the built-in `http` step, a bundled plugin, or your own plugin | `plugins/<name>/` |
 | The ticket tracker or code host | A plugin calling `registerSource` / `registerHost` (same shape as the built-in Jira, Linear, GitLab…) | `plugins/` |
 | Extra checks on the agent's code | A plugin calling `registerRule`, or the existing quality-gate and ignore settings | `plugins/`, `agent-factory.json` |
-| New kinds of library part (themes, forms, skills…) | A plugin calling `registerPartKind` | `plugins/` |
+| New kinds of library part | Built in: component, hook, util, service, schema, style, config, **theme, pattern, form, skill**. A plugin can add more with `registerPartKind` | `plugins/` |
 | New operations for MCP and the CLI | A plugin calling `registerOp` | `plugins/` |
 | What the agents are told | **Prompts**: a Markdown file replaces the built-in rules | `prompts/task-rules.md` next to your config |
 | Limits, gates, ignore patterns, concurrency | Configuration | `agent-factory.json`, or a repo's `.agent-factory.json` |
@@ -141,5 +141,5 @@ Put `prompts/task-rules.md` next to your config to replace the rules every build
 
 * Plugins are trusted code. There is no sandbox for them; the hash pin is a tripwire, not a cage.
 * Scenario steps run on the factory host. Anything that must run on another machine (a runner, a server) needs a plugin or hook that triggers it there.
-* Concurrency is still one project after another; parallel lanes are planned.
+* Parallel builds are per project (`limits.parallelProjects`), not per ticket within a project, and the daily run cap can be overshot by a run or two when lanes start together.
 * Scenarios and plugins are read at start (plugins) or on use (scenarios); there is no hot reload for plugins.

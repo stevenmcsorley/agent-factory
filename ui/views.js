@@ -26,8 +26,8 @@ export function pipeline(run, { active = false } = {}) {
     return h('li', { class: `stage ${state}` }, h('span', { class: 'node' }, state === 'done' ? icon('check', 13) : i + 1), h('span', { class: 'lbl' }, label)); }));
 }
 
-// ---- intake: "tell the factory what to do"
-function intake(projects, rerender) {
+// ---- quick ticket (lives in the Studio as "Add work to a project")
+export function intake(projects, rerender) {
   const sel = h('select', { 'aria-label': 'Project' }, projects.map((p) => h('option', { value: p.id }, p.id)), h('option', { value: '__new' }, '+ new project…'));
   const title = h('input', { placeholder: 'What should the factory build or fix?', maxlength: 200, 'aria-label': 'Ticket title', autocomplete: 'off' });
   const body = h('textarea', { rows: 3, placeholder: 'Which files or functions, the expected behaviour, and how we will know it is done.', 'aria-label': 'Ticket details', hidden: true });
@@ -36,7 +36,7 @@ function intake(projects, rerender) {
     hint.replaceChildren(hintFor(r)); } catch { /* ignore */ } }, 300); };
   title.addEventListener('focus', () => { body.hidden = false; }); title.addEventListener('input', check); body.addEventListener('input', check);
   const go = act(async () => { if (sel.value === '__new') { location.hash = '#/new'; return; } await api(`/projects/${sel.value}/tickets`, { method: 'POST', body: { title: title.value, body: body.value } }); title.value = body.value = ''; hint.replaceChildren(); }, 'Work order issued. The factory picks it up on its next cycle.', rerender);
-  return h('section', { class: 'card intake reg' }, h('div', { class: 'eyebrow' }, icon('spark', 13), 'Work order intake', h('span', { class: 'kbd-hint' }, 'CTRL+K for commands')), h('span', { class: 'caret' }, '›'), title, body,
+  return h('section', { class: 'card intake reg' }, h('div', { class: 'eyebrow' }, icon('spark', 13), 'Quick ticket', h('span', { class: 'kbd-hint' }, 'for a single, specific change')), h('span', { class: 'caret' }, '›'), title, body,
     h('div', { class: 'intake-foot' }, sel, hint, h('button', { class: 'btn primary', onclick: go }, 'Issue work order', icon('arrow', 14))));
 }
 
@@ -76,7 +76,7 @@ export const overview = {
     const nextIn = st.nextAt ? Math.max(0, Math.round((new Date(st.nextAt) - Date.now()) / 1000)) : null;
     const stable = (node, key, sig) => keyed(node, key, sig);
     return [
-      stable(intake(projects, ctx.rerender), 'intake', projects.map((p) => p.id)),
+      stable(launcher(projects, st), 'launcher', [projects.length, st.lanes?.running?.length ?? 0, st.lanes?.parallel ?? 1, st.active]),
       persist('line', { queued, shipped, active: activity.active, paused: st.paused, nextIn }, lineCard),
       stable(h('section', { class: 'spec' },
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
@@ -196,6 +196,13 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, onInspect } = {}) => {
     onInspect ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: () => onInspect('overview') }, 'Inspect the code in detail →'), m?.hotspots?.length ? h('span', { class: 'muted small' }, `largest file: ${m.hotspots[0].file} (${num(m.hotspots[0].lines)} lines)`) : null) : null);
 };
 
+// The Control room's front door: start something, and see what is being built right now.
+const launcher = (projects, st) => {
+  const running = st.lanes?.running ?? []; const cap = st.lanes?.parallel ?? 1;
+  return h('section', { class: 'card launcher' }, h('div', {}, h('b', {}, 'What do you want to do?'), h('p', { class: 'muted small' }, projects.length ? 'Start a project from a brief, add work to one, or run a workflow such as shipping it.' : 'Start your first project: describe it, plan it, and let the line build it.')),
+    h('div', { class: 'row' }, h('a', { class: 'btn primary', href: '#/studio' }, icon('spark', 14), 'Open the Studio'), h('a', { class: 'btn', href: '#/new' }, icon('plus', 12), 'New project'), h('a', { class: 'btn', href: '#/portfolio' }, 'Portfolio'), h('a', { class: 'btn', href: '#/scenarios' }, 'Scenarios')),
+    h('div', { class: 'lanes' }, h('span', { class: 'tile-l' }, `Building now · ${running.length} of ${cap} lane${cap === 1 ? '' : 's'}`), running.length ? running.map((id) => pill(id, 'warn')) : h('span', { class: 'muted small' }, 'the line is idle')));
+};
 // A one-glance status of the brief and the plan, with the next step, on the project's Board.
 // On the Control room: which projects still need a brief or a plan decision (the planning features live in each project's Brief and Plan tabs).
 const planningStrip = (projects) => {
@@ -333,13 +340,14 @@ export const health = {
 
 // ---- add / create project
 // The wizard is driven by /api/catalog, so a new tracker or code host appears here automatically once it is registered on the server.
-let npMode = 'existing';
+let npMode = 'create';   // the Studio's "New project" lands on the brief-first form; "Connect an existing repo" sets sessionStorage np=existing
 const wiz = { host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '', analysis: null, verify: '' };
 const slugId = (r) => (r.split(/[?#]/)[0].replace(/\/+$/, '').replace(/\.git$/i, '').split(/[/:]/).pop() || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
 
 export const newProject = {
   async load() { const [catalog, who] = await Promise.all([api('/catalog'), api('/whoami').catch(() => ({ login: '' }))]); return { catalog, who, templates: await api('/templates') }; },
   draw({ catalog, who, templates }, ctx) {
+    try { const m = sessionStorage.getItem('np'); if (m === 'existing' || m === 'create') { npMode = m; sessionStorage.removeItem('np'); } } catch { /* storage unavailable */ }
     const box = h('div', {});
     const hostDef = () => catalog.hosts.find((x) => x.kind === wiz.host.kind); const srcDef = () => catalog.sources.find((x) => x.kind === wiz.source.kind);
     const paint = () => box.replaceChildren(...[].concat(npMode === 'existing' ? existing() : create()));
@@ -401,12 +409,12 @@ export const newProject = {
       const bf = {}; const ta = (key, rows, ph) => { bf[key] = h('textarea', { rows, placeholder: ph }); return bf[key]; };
       f.spec = h('textarea', { rows: 5, placeholder: 'Quick start: one description that becomes the first ticket.' }); const hint = h('div', { class: 'hint' }); let t;
       f.spec.addEventListener('input', () => { clearTimeout(t); t = setTimeout(async () => { const r = await api('/check-ticket', { method: 'POST', body: { title: `Build ${f.name.value}`, body: f.spec.value } }).catch(() => null); if (r) hint.replaceChildren(hintFor(r)); }, 300); });
-      const plan = h('input', { type: 'checkbox' }); plan.checked = true;
+      const plan = h('input', { type: 'checkbox' }); plan.checked = true; const target = h('select', { 'aria-label': 'Target' }, [['prototype', 'Prototype: build it and review it (no deployment)'], ['deploy', 'Deploy: aim to go live once the checks pass and I approve']].map(([v, l]) => h('option', { value: v }, l)));
       const step = (n, title, sub, ...kids) => card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, n), h('div', {}, h('h2', {}, title), h('p', { class: 'muted small' }, sub))), ...kids);
       const submit = act(async () => {
         const name = f.name.value.trim(); const brief = {}; for (const k of ['goal', 'users', 'scope', 'nonGoals', 'success', 'constraints']) if (bf[k].value.trim()) brief[k] = bf[k].value.trim();
         const hasBrief = brief.goal && brief.scope; if (!hasBrief && !f.spec.value.trim()) throw new Error('Describe the project: fill in at least Goal and In scope, or use the quick start box');
-        const body = { id: slugId(name), name, description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, ...(hasBrief ? { brief, stack: bf.stack.value.trim() || undefined, plan: plan.checked } : { spec: f.spec.value.trim() }) };
+        const body = { id: slugId(name), name, description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, target: target.value, ...(hasBrief ? { brief, stack: bf.stack.value.trim() || undefined, plan: plan.checked } : { spec: f.spec.value.trim() }) };
         const r = await api('/projects/new', { method: 'POST', body }); projTab = hasBrief ? (plan.checked ? 'plan' : 'brief') : 'board'; location.hash = `#/project/${r.project.id}`; }, 'Project created');
       return [
         step('1', 'The basics', 'Creates a new private repository from a starter template.', h('div', { class: 'note info' }, 'Creating a brand-new repository is available for GitHub. For GitLab, Bitbucket or another host, create the empty repo there and use “Existing repo”.'),
@@ -417,7 +425,8 @@ export const newProject = {
           h('label', {}, 'Constraints'), ta('constraints', 2, 'Performance, security, compliance, deadlines, things that must not change.')),
         step('3', 'How to build it', 'Conventions the agent must follow.', h('label', {}, 'Stack and conventions'), ta('stack', 3, 'e.g. TypeScript strict, Fastify, Vitest, one module per feature, no default exports.'),
           h('p', { class: 'muted small' }, 'Have a PRD, designs or research? Create the project, then attach them in the Brief tab (files, links or pasted text).')),
-        step('4', 'Plan and start', 'The agent turns the brief into epics and small tickets. Nothing is built until you approve the plan.',
+        step('4', 'Target', 'Where is this going? You can change it later, and a human always approves a go-live.', h('label', {}, 'What are we aiming for?'), target),
+        step('5', 'Plan and start', 'The agent turns the brief into epics and small tickets. Nothing is built until you approve the plan.',
           h('label', { class: 'check' }, plan, ' Draft a delivery plan from the brief as soon as the project is created (recommended)'),
           h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: submit }, icon('spark', 15), 'Create project'), h('span', { class: 'muted small' }, `Creates ${who.login || 'your'}/<name> on GitHub and scaffolds the template.`)),
           h('details', { class: 'quick' }, h('summary', {}, 'Just want to start fast? Use a one-box description instead'), h('p', { class: 'muted small' }, 'Skips the brief and plan: your description becomes the first ticket and the factory starts on it straight away.'), f.spec, hint)),
