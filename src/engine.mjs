@@ -85,7 +85,7 @@ export class Engine {
     const dir = this.projectDir(p);
     const log = path.join(dir, 'logs', `${new Date().toISOString().slice(0, 10)}.log`);
     const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
-    const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, dir: this.projectDir(p), projectId: p.id, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log });
     const a = this.cfg.agent;
     const agent = this.f.agent ?? agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log });
@@ -230,6 +230,7 @@ export class Engine {
     if (action === 'comment') { await adapter.comment(ticketId, text(payload.text)); return { commented: true }; }
     if (action === 'update') { if (payload.title === undefined && payload.body === undefined) throw bad('Nothing to update'); await adapter.update(ticketId, { ...(payload.title !== undefined ? { title: text(payload.title, 200) } : {}), ...(payload.body !== undefined ? { body: text(payload.body) } : {}) }); return { updated: true }; }
     if (action === 'close') { await adapter.close(ticketId); return { closed: true }; }
+    if (action === 'reopen') { if (typeof adapter.reopen !== 'function') throw bad('This tracker cannot reopen tickets from here; reopen it there'); await adapter.reopen(ticketId); this.cache.delete(`t:${projectId}`); return { reopened: true }; }
     if (action === 'requeue') {
       const cur = await adapter.get(ticketId); const details = payload.details === undefined || payload.details === '' ? '' : text(payload.details);
       const body = details ? `${cur.body}\n\n---\nAdditional detail:\n${details}`.trim() : cur.body;
@@ -300,8 +301,8 @@ export class Engine {
     if (source) {
       const def = SOURCES[source.kind]; if (!def || def.hidden) throw bad(`Unsupported ticket source: ${source.kind}`);
       const { token: _s, pick, ...fields } = source.fields ?? {};
-      const tokenEnv = source.kind === 'github' ? undefined : (source.tokenEnv ?? `AF_${upper}_TOKEN`);
-      ticketToken = source.kind === 'github' ? undefined : (secret ?? this.env[tokenEnv]);
+      const tokenEnv = ['github', 'local'].includes(source.kind) ? undefined : (source.tokenEnv ?? `AF_${upper}_TOKEN`);
+      ticketToken = ['github', 'local'].includes(source.kind) ? undefined : (secret ?? this.env[tokenEnv]);
       const identity = await identifySource({ kind: source.kind, fields, token: ticketToken, whoami: this.gh.whoami, fetchImpl: this.f.fetch });
       const pickVal = source.pick !== undefined && def.pick?.type === 'number' ? Number(source.pick) : source.pick;
       t = { kind: source.kind, ...fields, ...(tokenEnv ? { tokenEnv } : {}), ...(def.pick ? { [def.pick.key]: pickVal } : {}), ...def.allow(identity) };
@@ -717,6 +718,8 @@ export class Engine {
     const def = this.scenarios().find((s) => s.id === scenario); if (!def || def.error) throw Object.assign(new Error(def?.error ? `Scenario ${scenario} is invalid: ${def.error}` : `No such scenario: ${scenario}`), { status: def ? 400 : 404 });
     const run = sc.startRun(this, { scenario: def, project, params: params ?? {}, dryRun: apply !== true }); return sc.advance(this, project, run.id, { scenarios: this.scenarios() });
   }
+  async ticketDetail(id, ticketId) { const p = this.project(id); if (!/^[\w-]{1,40}$/.test(String(ticketId))) throw Object.assign(new Error('Invalid ticket id'), { status: 400 }); return this.deps(p).tickets.get(ticketId); }
+  async trackerOverview(id) { const a = this.deps(this.project(id)).tickets; if (typeof a.overview !== 'function') throw Object.assign(new Error('Only the built-in tracker keeps an overview'), { status: 400 }); return a.overview(); }
   async freshTickets(id) { this.cache.delete(`t:${id}`); return this.listTickets(id); }   // scenario waits must see a ticket close the moment it does
   async scenarioRuns(project) { return sc.listRuns(this, project); }
   async scenarioRun(project, id) { this.project(project); return sc.advance(this, project, id, { scenarios: this.scenarios() }); }
@@ -727,10 +730,10 @@ export class Engine {
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }
 
   // Create a brand-new repo from a template, register it, and queue its first ticket (the spec).
-  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan, target, profile }) {
+  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan, target, profile, tracker }) {
     const owner = await this.gh.whoami();
     const repo = await this.gh.createProjectRepo({ owner, name, description, visibility, template, identity: { name: owner, email: `${owner}@users.noreply.github.com` } });
-    const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch });
+    const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch, ...(tracker === 'local' ? { source: { kind: 'local' } } : {}) });
     if (target) this.setTarget(id, target);
     if (profile) { try { this.setProjectProfile(id, profile); } catch { /* an unknown profile never blocks creation */ } }
     const out = { project: p, url: repo.url }; Object.assign(out, await this._seedPack(id, { brief, stack, decisions, sources, plan }));

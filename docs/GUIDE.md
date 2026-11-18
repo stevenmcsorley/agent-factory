@@ -212,6 +212,10 @@ When a plan is launched, its **epics are created in your tracker too** (Ossicone
 
 The library holds more than code. Part kinds now include **theme** (design tokens), **pattern** (a UX pattern), **form** and **skill** (a Markdown playbook: "how we build forms"). **Library → House styles** groups a set of them with **conventions** into a named profile ("Acme SaaS"). Apply it to a project and **every ticket**, even an unrelated one, gets the conventions and skills in its prompt and the profile's parts to copy. So a PRD that says "signup form" is built with your form pattern, your theme and your validation skill. Over time the library becomes your taste and your standards.
 
+### The built-in tracker (new)
+
+Choose **Built-in tracker** as a project's ticket source (or `agent-factory add o/r --tracker=local`, or `tracker: "local"` in `create_project`). There is no account, token or network involved: issues, epics, comments and states live in `state/projects/<id>/tracker.json`. Plans create real epics there, an epic closes by itself when its last ticket closes, and webhooks, scenarios and the inbox work as with any other tracker. Only the factory can create tickets, so there is no "who may queue work" list. Back up that file like any other state; a corrupt file stops the tracker and keeps a copy instead of starting empty.
+
 ### Keeping the agent honest (new)
 
 * **It cannot mark its own homework.** If a run removes assertions from an existing test, deletes a test file, or switches a test off, the quality gate flags it, sends the agent back once ("restore the test and fix the code; if an expectation is wrong, say why"), and flags the PR if it persists. New tests are always welcome. Make it stricter with `"qualityGate": { "blockTestWeakening": true }`, or protect specific files outright with `protectedPaths` (for example `test/fixtures/`) in the repo's `.agent-factory.json`, which the agent cannot edit.

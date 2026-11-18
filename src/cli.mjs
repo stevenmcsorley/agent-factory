@@ -25,7 +25,7 @@ const HELP = `agent-factory <command>
   init           first-run setup: checks prerequisites, logs the agent in, adds a project
   start          run the factory and the web UI   (--no-loop = UI only)
   doctor         check that everything is ready
-  add <o/r>      add a GitHub repo as a project
+  add <o/r>      add a GitHub repo as a project  (--tracker=local to use the built-in tracker)
   tick           claim queued tickets once and exit
   feedback       process CI/review feedback on open agent PRs once and exit
   analyze [dir|url]  inspect a folder or git URL: layout, repeated code, untested files, quality (no config needed; --json, --ignore=a,b, --no-default-ignore)
@@ -105,7 +105,7 @@ WantedBy=default.target
   if (['ops', 'op', 'portfolio', 'brief', 'source', 'plan', 'library', 'scenario', 'agents-md'].includes(cmd)) { try { await clientCommand(cmd, args, flags, cfg, root); } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); } return; }
   const problems = validateConfig(cfg); if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
   const engine = new Engine(cfg, { configPath });
-  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo }); return console.log(`Added ${p.id} (base ${p.base})`); }
+  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo, ...(flags.tracker === 'local' ? { source: { kind: 'local' } } : {}) }); return console.log(`Added ${p.id} (base ${p.base})`); }
   if (cmd === 'tick' || cmd === 'feedback') { await engine.start(); const r = await (cmd === 'tick' ? engine.tickAll() : engine.feedbackAll()); console.log(JSON.stringify(r, null, 2)); return; }
   if (cmd === 'start') {
     await engine.start();

@@ -2,6 +2,7 @@ import { githubTickets } from './adapters/tickets-github.mjs';
 import { ossiconeTickets } from './adapters/tickets-ossicone.mjs';
 import { jiraTickets } from './adapters/tickets-jira.mjs';
 import { linearTickets } from './adapters/tickets-linear.mjs';
+import { localTickets } from './adapters/tickets-local.mjs';
 import { fileTickets } from './adapters/tickets-file.mjs';
 
 // Where tickets live. Each source describes itself (fields for the setup wizard), validates its config, builds an adapter, and can
@@ -36,6 +37,10 @@ export const SOURCES = {
     validate: (t) => need(t, ['allowedAuthors']).map((x) => `${x} (only these GitHub users can queue work)`),
     build: (t, c) => githubTickets({ repo: c.repo, allowedAuthors: t.allowedAuthors, exec: c.exec }),
     allow: (id) => ({ allowedAuthors: [id.user.id] }),
+  },
+  local: {
+    label: 'Built-in tracker', blurb: 'No account, no token, no lag. Issues, epics, comments and states live inside the factory. Best for getting started, working offline, or keeping a project fully local.', fields: [], pick: null,
+    validate: () => [], build: (t, c) => localTickets({ dir: c.dir, project: c.projectId }), allow: () => ({}),
   },
   ossicone: {
     label: 'Ossicone', blurb: 'Self-hosted Jira-style tracker. Use your existing account, or sign up on any Ossicone server.', signup: true,
@@ -79,6 +84,7 @@ export const validateSource = (t) => { const src = SOURCES[t?.kind]; return src 
 // The wizard's "Test connection": authenticate with the pasted token WITHOUT saving anything, and list what can be picked.
 export async function identifySource({ kind, fields = {}, token, whoami, fetchImpl }) {
   const src = SOURCES[kind]; if (!src || src.hidden) throw Object.assign(new Error(`Unsupported ticket source: ${kind}`), { status: 400 });
+  if (kind === 'local') return { user: { id: 'local', name: 'you', alsoMatches: ['local'] }, projects: [] };
   if (kind === 'github') { const login = await whoami(); return { user: { id: login, name: login, alsoMatches: [login] }, projects: [] }; }
   if (!token) throw Object.assign(new Error('Paste the API token first'), { status: 400 });
   const t = { ...fields, kind };
