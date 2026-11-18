@@ -126,9 +126,15 @@ Open **Cells → Add project**. You make two independent choices, so you can mix
 - **How changes will be verified**: the detected test command (npm, pnpm, yarn, pytest, go, cargo, make, or an app in a subfolder such as `cd engine && npm test`). It is editable, so fix it here if it guessed wrong.
 - **Warnings**, such as "no way to run tests was found: pull requests will be UNVERIFIED".
 
-The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. The built-in scan is fast and line-based, not a full static analyser. For the real thing, turn on SonarQube (next).
+The result is saved with the project, summarised for the agent on every run, and shown on the project's board with a **Re-analyze** button. **Health** warns about any project with no known test command. **The quality gate (built in, no download).** The same card shows a quality gate for the whole repository (no committed secrets, no critical findings, duplication within limits), the count of secrets, vulnerabilities, bugs and code smells from our own small rule set, and a trend over your last analyses. Each finding has a **Queue fix** button that turns it into a ticket.
 
-**Optional: real SonarQube analysis.** Open **Health → Code quality (SonarQube)** and choose one:
+The rules are deliberately few and our own: committed secrets and keys, `eval`/`new Function`, `innerHTML =`, `shell=True`, switched-off TLS checks, empty error handlers, leftover `debugger`/`console.log`, and functions that are very long or deeply nested. They are line-based heuristics, not a full analyser. Add `quality-ignore` at the end of a line to skip a deliberate one (for example a fake key in an example).
+
+**The same gate checks the agent's own pull request.** Before a PR is opened, only the lines the agent *added or changed* are checked ("clean as you code"; old problems are not blamed on the change). If the gate fails, the agent is told exactly what to fix and gets another attempt. A leftover secret stops the PR entirely (nothing is pushed); other findings are shown on the PR and on the work-order page as *flagged*. Tune it with `qualityGate` in `agent-factory.json` (`{ "maxNewVulnerabilities": 0, "maxNewBugs": 0, "maxNewSmells": null, "block": ["secrets"] }`), or `"qualityGate": false` to switch it off.
+
+**Advanced and optional: real SonarQube.** If you already run SonarQube (or SonarCloud), the next paragraph connects it. It is not needed for any of the above.
+
+Open **Health → Advanced: SonarQube** and choose one:
 
 - **Run it for me:** the factory starts the official SonarQube Community container on this machine (127.0.0.1 only), sets an admin password and creates a token for itself. The first start downloads about 1 GB and needs about 2 GB of memory.
 - **I already have one:** paste the URL of your own server or SonarCloud, plus a token (*My Account → Security*).
@@ -241,6 +247,8 @@ Vague requests are refused with advice, and the factory never merges.
 <img src="guide/img/safety.svg" alt="Seven gates between a ticket and your repo" width="100%">
 
 The most important rule is the last one: **a human is the only merge button.** The agent runs in a container with no credentials and no internet except its own AI provider's API (through an allowlisting proxy). Git credentials are only used by the factory *outside* the sandbox, after the agent has finished.
+
+The agent can also write inside the checkout's `.git`, so before the factory runs any git command on your machine it rebuilds the repository config from scratch, deletes hooks and other executable extension points, and runs git with hooks, fsmonitor and the `ext::` transport disabled. A planted hook or config setting never runs.
 
 What it does **not** protect against: a malicious ticket from someone you have allowed to queue work, and a determined escape from Docker. Review every PR, and keep the list of allowed authors short.
 

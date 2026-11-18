@@ -7,6 +7,7 @@ import { leaseStore, recover } from './leases.mjs';
 import { overBudget, recordRun } from './budget.mjs';
 import { startRun, tail, changedFiles } from './trace.mjs';
 import { parseNeedsInfo, parseAssumptions } from './triage.mjs';
+import { changeQuality, feedbackFor } from './quality.mjs';
 
 export function buildPrompt(t, extra = '', profile = '') {
   return [
@@ -19,6 +20,14 @@ export function buildPrompt(t, extra = '', profile = '') {
     profile ? `\nAbout this repository (detected by the factory):\n${profile}` : '',
     ``, `# Ticket #${t.id}: ${t.title}`, ``, t.body ?? '', extra ? `\n# Previous attempt failed verification\n${extra}` : '',
   ].join('\n');
+}
+
+// A short, honest note for the PR and the ticket about the quality gate on the change.
+function qualityNote(q, plain = false) {
+  if (!q) return '';
+  if (q.passed) return plain ? '' : `\n\n### Quality gate: passed\nChecked ${q.files} changed file(s); no new secrets, vulnerabilities or bugs.`;
+  const list = q.findings.slice(0, 6).map((f) => `- ${f.file}:${f.line} [${f.rule}] ${f.message}`).join('\n');
+  return `\n\n${plain ? 'Quality gate flagged this change' : '### Quality gate: flagged'}: ${[...q.blockers, ...q.warnings].join('; ')}.\n${list}`;
 }
 
 // One tick: claim up to (maxConcurrent) tickets and process them. Returns array of run records.
@@ -88,6 +97,18 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
         run.note('verifyTail', tail(v.out));
         if (v.code !== 0) { rec.status = 'verify-failed'; feedback = v.out.slice(-3000); continue; }
       }
+      // Quality gate on the CHANGED lines only ("clean as you code"): one chance to fix its own change, then secrets stop the PR and anything else is flagged on it.
+      if (cfg.qualityGate !== false) {
+        let q; try { q = await changeQuality(ws.dir, cfg.qualityGate); } catch (e) { q = null; run.note('qualityError', String(e.message ?? e).slice(0, 200)); }
+        if (q) {
+          rec.quality = q;
+          if (!q.passed) {
+            const last = a >= (cfg.maxAttempts ?? 2);
+            if (!last) { rec.status = 'quality-failed'; feedback = feedbackFor(q); continue; }
+            if (q.blockers.length) { rec.status = 'quality-failed'; rec.error = `quality gate: ${q.blockers.join('; ')}`; break; }
+          }
+        }
+      }
       rec.status = 'ok';
       break;
     }
@@ -96,8 +117,8 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       await vcs.commitAndPush(ws, { branch, message: `${t.title}\n\nRefs #${t.id} (agent-factory)` });
       run.phase('pr');
       const assumptions = parseAssumptions(rec.agentSummary); if (assumptions) rec.assumptions = assumptions;
-      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
-      await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).${assumptions ? `\n\nAssumptions the agent made (please check):\n${assumptions}` : ''}`);
+      rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
+      await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).${qualityNote(rec.quality, true)}${assumptions ? `\n\nAssumptions the agent made (please check):\n${assumptions}` : ''}`);
       await tickets.label(t.id, ['agent-review'], ['agent-working']);
     } else if (rec.status === 'needs-info') {
       await tickets.comment(t.id, `agent-factory needs a little more information before it can build this:\n\n${rec.question}\n\nAnswer in the Agent Factory inbox and press Requeue (or edit the ticket and re-add the \`agent-ready\` label).`);

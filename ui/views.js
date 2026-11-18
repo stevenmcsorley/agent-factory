@@ -181,6 +181,14 @@ const sonarBlock = (sq, { url, onFix } = {}) => {
       onFix ? h('button', { class: 'btn small', onclick: () => onFix(i) }, 'Queue fix') : null)))) : h('p', { class: 'muted small' }, 'No open findings.'),
     h('p', { class: 'muted small' }, `Scanned ${ago(sq.analyzedAt)}.`));
 };
+const qualityBlock = (q, history, { onFix } = {}) => {
+  if (!q) return null; const ok = q.gate.status === 'OK'; const pts = (history ?? []).map((x) => x.findings).filter((v) => Number.isFinite(v));
+  return h('div', { class: 'quality' }, h('div', { class: 'card-h' }, h('h3', {}, 'Quality gate'), h('span', { class: `stamp ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'failed')),
+    q.gate.failed?.length ? q.gate.failed.map((f) => h('div', { class: 'note bad' }, icon('x', 14), ' ', f)) : h('p', { class: 'muted small' }, 'No committed secrets, no critical findings, duplication within limits.'),
+    h('div', { class: 'facts' }, [[q.counts.secrets, 'secrets'], [q.counts.vulnerabilities, 'vulnerabilities'], [q.counts.bugs, 'bugs'], [q.counts.smells, 'code smells']].map(([x, l]) => h('div', { class: 'fact' }, h('b', {}, num(x)), h('span', {}, l)))),
+    pts.length > 1 ? h('div', { class: 'trend' }, miniBars(pts.slice(-20), { w: 240, h: 30 }), h('span', { class: 'muted small' }, `findings over the last ${Math.min(pts.length, 20)} analyses`)) : h('p', { class: 'muted small' }, 'A trend appears after the next analysis.'),
+    q.findings?.length ? h('details', {}, h('summary', {}, `Top findings (${q.findings.length} of ${num(q.counts.total)})`), h('ul', { class: 'plain issues' }, q.findings.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}:${i.line}`), onFix ? h('button', { class: 'btn small', onclick: () => onFix(i) }, 'Queue fix') : null)))) : null);
+};
 const healthCard = (pr, { onReanalyze, verifyInput, job, sonarUrl, onFix } = {}) => {
   const running = job?.state === 'running';
   const reBtn = onReanalyze ? h('button', { class: 'btn', disabled: running, onclick: onReanalyze }, running ? `Analyzing… ${job.phase ?? ''}` : pr ? 'Re-analyze' : 'Analyze now') : null;
@@ -193,6 +201,7 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, sonarUrl, onFix } = {})
     m ? h('div', { class: 'ratings' }, Object.entries(m.ratings).map(([k, v]) => h('div', { class: 'rating', title: RATING_HELP[k] }, h('b', { class: `grade r-${v}` }, v), h('span', {}, RATING_LABEL[k])))) : null,
     m ? h('div', { class: 'facts' }, [[num(m.codeLines), 'lines of code'], [num(m.sourceFiles), 'source files'], [`${m.testFiles} (${m.testRatioPct}%)`, 'test files'], [`${m.duplicatedPct}%`, 'duplicated'], [num(m.todoCount), 'TODO / FIXME']].map(([v, l]) => h('div', { class: 'fact' }, h('b', {}, v), h('span', {}, l)))) : null,
     h('div', { class: 'verify-row' }, h('label', {}, 'How changes are verified'), verifyInput ?? h('code', {}, pr.verify || 'nothing: pull requests will be unverified'), pr.verifyReason && !verifyInput ? h('span', { class: 'muted small' }, ` (${pr.verifyReason})`) : null),
+    qualityBlock(pr.quality, pr.history, { onFix }),
     sonarBlock(pr.sonar, { url: sonarUrl, onFix }),
     m?.hotspots?.length ? h('details', {}, h('summary', {}, 'Largest files and details'), h('ul', { class: 'plain' }, m.hotspots.map((x) => h('li', { class: 'mono small' }, `${x.file} · ${x.lines} lines`)), (pr.notes ?? []).map((n) => h('li', { class: 'muted small' }, n)), pr.ci ? h('li', { class: 'muted small' }, `CI: ${pr.ci}`) : null, h('li', { class: 'muted small' }, 'Heuristic line-based scan, not a full static analyser like SonarQube.'))) : null);
 };
@@ -262,6 +271,10 @@ export const runPage = {
       h('div', { class: 'cols-2' },
         run.agentSummary ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Operator notes')), h('pre', { class: 'log-pre wrap' }, run.agentSummary)) : null,
         run.changed?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, `Parts changed · ${run.changed.length}`)), h('div', { class: 'files' }, run.changed.map((f) => h('code', {}, f)))) : null),
+      run.quality ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Quality gate on this change'), h('span', { class: `stamp ${run.quality.status === 'OK' ? 'ok' : run.quality.status === 'WARN' ? 'warn' : 'bad'}` }, run.quality.status === 'OK' ? 'passed' : run.quality.status === 'WARN' ? 'flagged' : 'blocked')),
+        h('p', { class: 'muted small' }, `Only the lines this run added or changed were checked (${run.quality.files} file${run.quality.files === 1 ? '' : 's'}).`),
+        [...(run.quality.blockers ?? []), ...(run.quality.warnings ?? [])].map((m) => h('div', { class: 'note bad' }, icon('x', 14), ' ', m)),
+        run.quality.findings?.length ? h('ul', { class: 'plain issues' }, run.quality.findings.map((i) => h('li', {}, h('span', { class: `stamp ${SEV[i.severity] ?? ''}` }, i.severity.toLowerCase()), h('span', { class: 'small' }, i.message), h('span', { class: 'mono muted small' }, `${i.file}:${i.line}`)))) : h('p', { class: 'muted small' }, 'No new secrets, vulnerabilities or bugs.')) : null,
       run.verifyTail ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Quality check'), h('span', { class: `stamp ${ok ? 'ok' : 'bad'}` }, ok ? 'passed' : 'see output')), h('pre', { class: `log-pre ${ok ? 'good' : 'fail'}` }, run.verifyTail)) : null]; },
 };
 const OUT = { 'verify-failed': 'Tests failed', timeout: 'Timed out', error: 'Error', 'no-change': 'No change', 'protected-path': 'Protected path', 'needs-info': 'Needs info', 'repo-not-allowed': 'Repo not allowed', stopped: 'Paused', 'budget-exhausted': 'Budget reached' };
@@ -318,13 +331,13 @@ const sonarCard = (sq, ctx) => {
           h('div', {}, h('h3', {}, 'Run it for me'), h('p', { class: 'muted small' }, 'The factory starts the official SonarQube Community container on this machine (127.0.0.1 only) and secures it. First start downloads about 1 GB.'), h('button', { class: 'btn primary', onclick: enable('managed') }, 'Set up SonarQube')),
           h('div', {}, h('h3', {}, 'I already have one'), h('p', { class: 'muted small' }, 'Your own server or SonarCloud, with a token from My Account → Security.'), field('url', 'https://sonar.example.com'), field('token', 'token', 'password'), h('button', { class: 'btn', onclick: enable('external') }, 'Connect')))];
   if (busy) pollSoon(ctx);
-  return card('', h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Code quality (SonarQube)'), st === 'ready' ? h('span', { class: 'stamp ok' }, 'on') : st === 'down' ? h('span', { class: 'stamp bad' }, 'down') : h('span', { class: 'stamp' }, busy ? 'starting' : 'off')), body);
+  return card('', h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Advanced: SonarQube (optional)'), st === 'ready' ? h('span', { class: 'stamp ok' }, 'on') : st === 'down' ? h('span', { class: 'stamp bad' }, 'down') : h('span', { class: 'stamp' }, busy ? 'starting' : 'off')), body);
 };
 export const health = {
   async load() { const [checks, sonar] = await Promise.all([api('/health'), api('/sonar').catch(() => null)]); return { checks, sonar }; },
   draw({ checks, sonar }, ctx) { const bad = checks.filter((c) => !c.ok).length;
     return [head('Health', bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix before the factory can run safely.` : 'Every system the factory needs is in place.'),
-      sonarCard(sonar, ctx), h('div', { class: 'checks' }, checks.map((c) => h('div', { class: 'card check' }, h('i', { class: `lamp ${c.ok ? 'ok' : 'bad'}` }), h('b', {}, c.id), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', { class: 'eyebrow' }, 'Fix'), h('code', {}, c.fix)) : null)))]; },
+      h('div', { class: 'checks' }, checks.map((c) => h('div', { class: 'card check' }, h('i', { class: `lamp ${c.ok ? 'ok' : 'bad'}` }), h('b', {}, c.id), h('p', { class: 'small' }, c.detail), c.fix ? h('div', { class: 'fix' }, h('small', { class: 'eyebrow' }, 'Fix'), h('code', {}, c.fix)) : null))), sonarCard(sonar, ctx)]; },
 };
 
 // ---- add / create project

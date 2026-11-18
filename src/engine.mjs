@@ -15,6 +15,7 @@ import { normalizeRepo } from './repoRef.mjs';
 import { analyzeRepo, profileSummary } from './analyze.mjs';
 import { sonarApi, scanProject, ensureManaged, stopManaged, waitUp, MANAGED, SONAR_TOKEN_ENV, projectKey } from './sonar.mjs';
 import { checkBaseUrl } from './sources.mjs';
+import { addHistory } from './quality.mjs';
 import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
@@ -27,9 +28,12 @@ const sanitizeMetrics = (m) => { if (!m || typeof m !== 'object') return null; c
   return { files: n(m.files), codeLines: n(m.codeLines), commentLines: n(m.commentLines), blankLines: n(m.blankLines), sourceFiles: n(m.sourceFiles), testFiles: n(m.testFiles), testRatioPct: n(m.testRatioPct), duplicatedPct: n(m.duplicatedPct), todoCount: n(m.todoCount), largeFiles: n(m.largeFiles), heuristic: true, capped: !!m.capped,
     languages: (Array.isArray(m.languages) ? m.languages : []).slice(0, 6).map((l) => ({ name: String(l?.name ?? '').slice(0, 20), lines: n(l?.lines) })), hotspots: (Array.isArray(m.hotspots) ? m.hotspots : []).slice(0, 5).map((h) => ({ file: String(h?.file ?? '').replace(/[^\w./@+-]/g, '').slice(0, 120), lines: n(h?.lines) })),
     secrets: (Array.isArray(m.secrets) ? m.secrets : []).slice(0, 10).map((x) => ({ file: String(x?.file ?? '').replace(/[^\w./@+-]/g, '').slice(0, 120), kind: String(x?.kind ?? '').slice(0, 30) })), ratings: Object.fromEntries(['size', 'tests', 'duplication', 'maintainability', 'security'].map((k) => [k, r(m.ratings?.[k])])) }; };
+const sanitizeQuality = (q) => { if (!q || typeof q !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e6, Math.round(v))) : 0); const t = (v, m) => String(v ?? '').replace(/[^\w./@+ :,%()'-]/g, '').slice(0, m);
+  return { counts: Object.fromEntries(['secrets', 'vulnerabilities', 'bugs', 'smells', 'total'].map((k) => [k, n(q.counts?.[k])])), gate: { status: q.gate?.status === 'ERROR' ? 'ERROR' : 'OK', failed: (Array.isArray(q.gate?.failed) ? q.gate.failed : []).slice(0, 6).map((x) => t(x, 120)) },
+    findings: (Array.isArray(q.findings) ? q.findings : []).slice(0, 15).map((f) => ({ key: t(f?.key, 200), rule: t(f?.rule, 40), type: t(f?.type, 20), severity: ['BLOCKER', 'CRITICAL', 'MAJOR', 'MINOR', 'INFO'].includes(f?.severity) ? f.severity : 'INFO', file: t(f?.file, 120), line: n(f?.line), message: t(f?.message, 160) })) }; };
 const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null); const arr = (v, n, m) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, m)).slice(0, n) : []);
   return { languages: arr(p.languages, 6, 30), packageManager: str(p.packageManager, 20), framework: str(p.framework, 30), verify: str(p.verify, 500), image: str(p.image, 80), verifyReason: str(p.verifyReason), tests: !!p.verify, hasRepoConfig: !!p.hasRepoConfig, hasReadme: !!p.hasReadme, ci: str(p.ci, 30),
-    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
+    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
@@ -271,7 +275,7 @@ export class Engine {
     }
     t ??= hk === 'github' ? { kind: 'github', allowedAuthors: hostInfo.user ? [hostInfo.user] : [] } : null;
     if (!t) throw bad(`Choose where tickets live (GitHub Issues only works with a GitHub repo): Jira, Linear or Ossicone`);
-    const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...((config || verify) ? { config: { ...(config ?? {}), ...(verify ? { verify: String(verify).slice(0, 500) } : {}) } } : {}), ...(profile && typeof profile === 'object' ? { profile: sanitizeProfile(profile) } : {}), ...(allowedRepos ? { allowedRepos } : {}),
+    const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...((config || verify) ? { config: { ...(config ?? {}), ...(verify ? { verify: String(verify).slice(0, 500) } : {}) } } : {}), ...(profile && typeof profile === 'object' ? (() => { const sp = sanitizeProfile(profile); sp.history = addHistory([], sp); return { profile: sp }; })() : {}), ...(allowedRepos ? { allowedRepos } : {}),
       ...((feedbackAuthors ?? (t.kind !== 'github' && hostInfo.user ? [hostInfo.user] : null)) ? { feedbackAuthors: feedbackAuthors ?? [hostInfo.user] } : {}) };
     const problems = validateConfig({ ...this.cfg, projects: [...this.cfg.projects, p] });
     if (problems.length) throw bad(problems.join('; '));
@@ -284,13 +288,13 @@ export class Engine {
     return p;
   }
   // Shallow, read-only clone -> profile. Nothing is executed from the repo and nothing is persisted here.
-  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, sonarFor } = {}) {
+  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, sonarFor, gate } = {}) {
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, log: path.join(this.cfg.stateDir, 'analyze.log') });
     let ws;
     onPhase?.('cloning the repository');
     try {
       ws = await sb.create({ cloneUrl: hostAdapter.cloneUrl(repo), branch: 'analyze', base, newBranch: false, gitEnv: hostAdapter.gitEnv(), depth: 1 });
-      onPhase?.('reading the code'); const profile = analyzeRepo(ws.dir); onProfile?.(profile);
+      onPhase?.('reading the code'); const profile = analyzeRepo(ws.dir, { gate }); onProfile?.(profile);
       if (sonarFor) profile.sonar = await this._sonarScan(ws.dir, sonarFor, onPhase).catch((e) => ({ error: String(e.message ?? e).slice(0, 400), analyzedAt: new Date().toISOString() }));
       return profile;
     } catch (e) { const m = String(e.message ?? e); if (/clone failed/.test(m) && /(Remote branch .* not found|empty|did not match)/i.test(m)) return { ...analyzeRepo(os.tmpdir() + '/__nonexistent__'), warnings: ['the base branch was not found or the repository is empty'], languages: [], topLevel: [] }; throw Object.assign(new Error(m.slice(0, 300)), { status: 400 }); }
@@ -339,11 +343,11 @@ export class Engine {
   }
   // "Queue a fix": turn one SonarQube finding from the last scan into a normal ticket (it still goes through the usual pipeline and review).
   async sonarIssueTicket(id, issueKey) {
-    const p = this.project(id); const i = p.profile?.sonar?.issues?.find((x) => x.key === issueKey);
-    if (!i) throw Object.assign(new Error('That finding is not in the last scan; re-analyze first'), { status: 404 });
-    const where = `${i.file}${i.line ? `:${i.line}` : ''}`;
-    return this.createTicket(id, { title: `Fix SonarQube ${i.type.toLowerCase().replace('_', ' ')}: ${i.message}`.slice(0, 120),
-      body: `SonarQube rule ${i.rule} (${i.severity}) reports at ${where}: ${i.message}\n\nFix this finding with the smallest correct change and keep the existing tests passing. Do not touch unrelated code.` });
+    const p = this.project(id); const sq = p.profile?.sonar?.issues?.find((x) => x.key === issueKey); const own = p.profile?.quality?.findings?.find((x) => x.key === issueKey); const i = sq ?? own;
+    if (!i) throw Object.assign(new Error('That finding is not in the last analysis; re-analyze first'), { status: 404 });
+    const where = `${i.file}${i.line ? `:${i.line}` : ''}`; const src = sq ? 'SonarQube' : 'the code quality scan';
+    return this.createTicket(id, { title: `Fix ${i.type.toLowerCase().replace('_', ' ')}: ${i.message}`.slice(0, 120),
+      body: `${src} rule ${i.rule} (${i.severity}) reports at ${where}: ${i.message}\n\nFix this finding with the smallest correct change and keep the existing tests passing. Do not touch unrelated code.` });
   }
 
   async analyzeDraft({ kind = 'github', fields = {}, token, repo: input, base }) {
@@ -364,10 +368,11 @@ export class Engine {
   analysisJob(id) { this.project(id); return this.jobs.get(id) ?? { state: 'idle' }; }
   async analyzeProject(id, { onPhase } = {}) {
     const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
-    const prev = p.profile?.sonar; const wantSonar = !!this.cfg.sonar;
-    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { onPhase, sonarFor: wantSonar ? { id: p.id } : null,
-      onProfile: (pr) => { p.profile = { ...pr, ...(prev ? { sonar: prev } : {}) }; this._persist(); } }); // the fast scan shows up at once; the SonarQube result follows
+    const prev = p.profile?.sonar; const prevHistory = p.profile?.history; const wantSonar = !!this.cfg.sonar;
+    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, onPhase, sonarFor: wantSonar ? { id: p.id } : null,
+      onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [], ...(prev ? { sonar: prev } : {}) }; this._persist(); } }); // the fast scan shows up at once; the SonarQube result follows
     if (!profile.sonar && prev) profile.sonar = prev;
+    profile.history = addHistory(prevHistory, profile);
     p.profile = profile; this._persist(); return p.profile;
   }
   removeProject(id) { this.project(id); this.cfg.projects = this.cfg.projects.filter((p) => p.id !== id); this._persist(); }

@@ -114,7 +114,7 @@ test('engine: re-analysis is a job; fast profile is saved first, SonarQube resul
 test('engine: "Queue fix" turns a stored finding into a ticket (and only stored findings)', async () => {
   const e = eng(); await e.addProject({ repo: 'o/app' }); const made = []; e.createTicket = async (id, t) => { made.push([id, t]); return { url: 'u' }; };
   e.cfg.projects[0].profile = { sonar: { issues: [{ key: 'K1', severity: 'MAJOR', type: 'CODE_SMELL', rule: 'js:S1', message: 'Unused variable x', file: 'src/a.js', line: 3 }] } };
-  await e.sonarIssueTicket('app', 'K1'); assert.match(made[0][1].title, /^Fix SonarQube code smell: Unused variable x/); assert.match(made[0][1].body, /js:S1 \(MAJOR\) reports at src\/a\.js:3/);
+  await e.sonarIssueTicket('app', 'K1'); assert.match(made[0][1].title, /^Fix code smell: Unused variable x/); assert.match(made[0][1].body, /SonarQube rule js:S1 \(MAJOR\) reports at src\/a\.js:3/);
   await assert.rejects(e.sonarIssueTicket('app', 'nope'), /re-analyze first/);
 });
 

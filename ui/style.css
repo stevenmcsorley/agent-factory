@@ -214,3 +214,5 @@ h2 .icon { display: none; } .stage-wrap { padding: 8px 4px 4px; }
 
 .sonar { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); } .sonar h3 { margin: 0; font-size: 14px; }
 ul.issues li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+
+.quality { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); } .quality h3 { margin: 0; font-size: 14px; } .trend { display: flex; align-items: center; gap: 12px; margin: 6px 0 10px; } .trend svg { width: 240px; height: 30px; }
