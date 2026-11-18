@@ -85,6 +85,7 @@ export const overview = {
         h('a', { class: 'spec-link', href: '#/inbox', title: 'Open your inbox' }, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck', ' ', h('b', { class: 'go' }, inReview + attention ? 'Open inbox →' : ''))),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Capacity today'), h('div', { class: 'num' }, left == null ? '∞' : odometer(left, 1), left == null ? null : h('small', {}, `of ${cap}`)), cap ? h('div', { class: 'cap' }, Array.from({ length: ticks }, (_, i) => h('i', { class: i < usedTicks ? 'on' : '' }))) : null, h('div', { class: 'foot' }, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
         'spec', [shipped, t, left, inReview, attention, st.today.costUsd]),
+      stable(planningStrip(projects), 'planning', projects.map((p) => [p.id, p.brief?.ready, p.plan?.status, p.plan?.done]),),
       stable(h('div', { class: 'page-head slim' }, h('h2', {}, 'Cells'), h('a', { class: 'btn small', href: '#/new' }, icon('plus', 12), 'Add project')), 'cellshead', 'x'),
       stable(projects.length ? h('div', { class: 'cells' }, projects.map(cell)) : card('', empty('No projects yet', 'Connect a repository and a ticket tracker to start the line.', h('a', { class: 'btn primary', href: '#/new' }, 'Add a project'))), 'cells', projects),
       persist('cols', { days: metrics.days, events: activity.events }, outputSection),
@@ -196,6 +197,13 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, onInspect } = {}) => {
 };
 
 // A one-glance status of the brief and the plan, with the next step, on the project's Board.
+// On the Control room: which projects still need a brief or a plan decision (the planning features live in each project's Brief and Plan tabs).
+const planningStrip = (projects) => {
+  const needs = projects.filter((p) => !p.brief?.ready && !p.plan), waiting = projects.filter((p) => p.plan?.status === 'proposed'), ready = projects.filter((p) => p.brief?.ready && !p.plan);
+  if (!projects.length || (!needs.length && !waiting.length && !ready.length)) return h('span', { class: 'hidden' });
+  const bits = [waiting.length ? `${waiting.length} plan${waiting.length > 1 ? 's' : ''} waiting for your approval` : null, ready.length ? `${ready.length} project${ready.length > 1 ? 's' : ''} ready to plan` : null, needs.length ? `${needs.length} without a brief` : null].filter(Boolean);
+  return h('section', { class: 'card banner info' }, h('div', {}, h('b', {}, 'Planning'), h('p', { class: 'muted small' }, `${bits.join(' · ')}. Briefs, plans and the reuse library are the new way to start and steer projects.`)), h('a', { class: 'btn', href: '#/portfolio' }, 'Open the portfolio'));
+};
 const planBanner = (p, go) => {
   const b = p.brief, pl = p.plan; let title, text, cta, tab, cls = 'info';
   if (!b?.ready && !pl) { title = 'This project has no brief yet'; text = 'Tell the factory what you are building (goal, scope, conventions) and attach the PRD, research or designs. Every agent run will use it, and it can plan the work for you.'; cta = 'Write the brief'; tab = 'brief'; cls = 'warn'; }
@@ -207,6 +215,8 @@ const planBanner = (p, go) => {
 let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
 // ---- single project
 let projTab = 'board';
+// Jump to a project and open a given tab (used by the Portfolio page).
+export const goProject = (id, tab = 'board') => { projTab = tab; location.hash = `#/project/${id}`; };
 export const project = {
   async load(id) { const [ov, runs, metrics] = await Promise.all([api('/overview'), api('/runs?limit=30&project=' + id), api('/metrics?days=14')]); const p = ov.find((x) => x.id === id);
     const extra = {}; if (p) { if (projTab === 'brief' || projTab === 'plan') extra.pack = await api(`/projects/${id}/pack`).catch(() => null); if (projTab === 'plan') extra.planData = await api(`/projects/${id}/plan`).catch(() => null);

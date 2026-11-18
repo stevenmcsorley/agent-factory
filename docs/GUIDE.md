@@ -83,6 +83,16 @@ Done. Start the factory:  npm start
 
 ---
 
+**Other pages in the header**
+
+| Page | What it is for |
+|---|---|
+| **Portfolio** | Every project from *brief → plan → build → ship* on one screen, with the next step for each and a "Needs you" list. Start here when you have several projects |
+| **Library** | The reuse library: parts, repeated code, upgrades |
+| **Cells** → a project | Tabs: *Board, Plan, Brief, Pull requests, Work orders, Code, Log* |
+
+> **Seeing the old interface after an upgrade?** An open browser tab keeps the old code in memory. The factory now notices an update and shows an orange bar, *"The factory was updated. Reload to get the new interface."* Press **Reload now** (or Ctrl/⌘+Shift+R).
+
 ## 4. Your first work order
 
 1. **Describe it** in the intake box. Name the file or function and say how you will know it is done:

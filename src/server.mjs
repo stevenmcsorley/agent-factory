@@ -1,5 +1,6 @@
 import http from 'node:http';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -31,9 +32,11 @@ async function readJson(req, max = MAX_BODY) {
 export function createServer(engine, { token, allowedHosts }) {
   if (!token || token.length < 24) throw new Error('A UI token of at least 24 characters is required');
   const doc = { at: 0, v: null };
+  // A fingerprint of the UI files served right now: an open browser tab compares it with what it loaded and offers a reload when it changes.
+  const BUILD = (() => { try { const h = crypto.createHash('sha1'); for (const f of fs.readdirSync(UI).filter((x) => /\.(js|css|html)$/.test(x)).sort()) h.update(f).update(fs.readFileSync(path.join(UI, f))); return h.digest('hex').slice(0, 10); } catch { return 'dev'; } })();
 
   const routes = [
-    ['GET', /^\/api\/status$/, async () => engine.status()],
+    ['GET', /^\/api\/status$/, async () => ({ ...engine.status(), build: BUILD })],
     ['GET', /^\/api\/health$/, async () => { if (Date.now() - doc.at > 10000) { doc.v = await doctor(engine.cfg, { env: engine.env }); doc.at = Date.now(); } return doc.v; }],
     ['GET', /^\/api\/templates$/, async () => templateNames()],
     ['GET', /^\/api\/whoami$/, async () => ({ login: await engine.gh.whoami() })],

@@ -470,7 +470,7 @@ export class Engine {
     const ov = await this.overview(); const m = this.metrics();
     return ov.map((o) => { const dir = pk.packDir(this.cfg.stateDir, o.id); const pack = pk.loadPack(dir); const pr = o.profile;
       return { id: o.id, repo: o.repo, paused: o.paused, queue: o.queue, openPrs: o.prs, error: o.error ?? null, runs: o.metrics ? { total: o.metrics.runs, shipped: o.metrics.ok } : null,
-        brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, publishedToRepo: !!pack.publishedAt,
+        brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, publishedToRepo: !!pack.publishedAt, partsUsed: [...new Set(this._usage().entries.filter((u) => u.project === o.id).map((u) => u.slug))], sources: pack.sources.length,
         quality: pr?.quality ? { gate: pr.quality.gate.status, findings: pr.quality.counts.total, secrets: pr.quality.counts.secrets } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
   }
 

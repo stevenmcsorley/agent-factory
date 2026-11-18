@@ -1,10 +1,11 @@
 import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim } from './lib.js';
 import { overview, inboxPage, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 import { library } from './library.js';
+import { portfolio } from './portfolio.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
-const NAV = [['overview', '#/', 'Control room'], ['inbox', '#/inbox', 'Inbox'], ['projects', '#/projects', 'Cells'], ['library', '#/library', 'Library'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'projects']];
+const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['inbox', '#/inbox', 'Inbox'], ['projects', '#/projects', 'Cells'], ['library', '#/library', 'Library'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
 let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';
 let theme = null; try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
@@ -62,11 +63,18 @@ function mount(nodes, navigated) {
 }
 
 let lastRoute = null, enterTimer = null;
+let buildId = null;
+// The factory was upgraded while this tab was open: the old interface is still in memory, so say so and offer a reload.
+function showUpdate() {
+  if (document.querySelector('.updatebar')) return;
+  document.body.prepend(h('div', { class: 'updatebar', role: 'status' }, h('span', {}, 'The factory was updated. Reload to get the new interface.'), h('button', { class: 'btn small primary', onclick: () => location.reload() }, 'Reload now')));
+}
 async function refresh(force = false) {
   if (!session.token) return login();
   const r = match(); view = r.v;
   try {
     const [data, st, act2, ic] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] })), api('/inbox/count').catch(() => ({ count: 0 }))]);
+    if (st.build) { if (!buildId) buildId = st.build; else if (st.build !== buildId) showUpdate(); }
     status = st; inboxCount = ic.count; if (!header) { shell(); lastRoute = null; } drawHeader(r.nav); drawTicker(act2.events, st);
     const key = JSON.stringify([location.hash, data]);
     if (!force && key === lastKey) return;
@@ -96,7 +104,7 @@ async function openPalette() {
   if (palette || !session.token) return;
   let projects = []; try { projects = await api('/projects'); } catch { /* ignore */ }
   const items = [
-    ...NAV.map(([k, href, label]) => ({ label: `Go to ${label}`, ic: { overview: 'pulse', inbox: 'alert', projects: 'folder', library: 'plug', runs: 'git', connect: 'plug', health: 'shield' }[k], run: () => { location.hash = href; } })),
+    ...NAV.map(([k, href, label]) => ({ label: `Go to ${label}`, ic: { overview: 'pulse', inbox: 'alert', projects: 'folder', library: 'plug', portfolio: 'folder', runs: 'git', connect: 'plug', health: 'shield' }[k], run: () => { location.hash = href; } })),
     ...projects.map((p) => ({ label: `Open project ${p.id}`, ic: 'folder', hint: p.repo, run: () => { location.hash = `#/project/${p.id}`; } })),
     { label: 'Add or create a project', ic: 'plus', run: () => { location.hash = '#/new'; } },
     { label: status?.paused ? 'Resume the factory' : 'Pause the factory', ic: status?.paused ? 'play' : 'pause', run: () => api(`/control/${status?.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }).then(() => refresh(true)).catch((e) => toast(e.message, 'bad')) },
