@@ -195,7 +195,19 @@ const healthCard = (pr, { onReanalyze, verifyInput, job, onFix } = {}) => {
 let pollT = null; const pollSoon = (ctx, ms = 3000) => { clearTimeout(pollT); pollT = setTimeout(() => { if (/^#\/(project|health)/.test(location.hash)) ctx.rerender(); }, ms); };
 // ---- the Code tab: layout, repeated code, untested files (plain English, with a one-click ticket for each)
 const meter = (frac) => { const e = h('i', { class: 'mfill' }); e.style.width = `${Math.max(1, Math.round(frac * 100))}%`; return h('span', { class: 'mtrack' }, e); };
-const codeTab = (pr, { onFix, onReanalyze, job }) => {
+const ignoreCard = (pr, onIgnore) => {
+  const ig = pr.ignored ?? { defaults: 0, yours: 0, folders: 0, examples: [], patterns: [], useDefaults: true };
+  const box = h('textarea', { rows: 4, placeholder: 'one pattern per line, e.g.\n*.sql\ndocs/api/*.md\ngenerated/', spellcheck: 'false' }, (ig.patterns ?? []).join('\n'));
+  const dflt = h('input', { type: 'checkbox' }); dflt.checked = ig.useDefaults !== false;
+  return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Ignored from analysis'), h('span', { class: 'muted small mono' }, `${ig.defaults} by built-in rules · ${ig.yours} by yours · ${ig.folders} folders`)),
+    h('p', { class: 'muted small' }, 'Skipped completely: not counted, not scanned, not checked on the agent’s changes. Built-in rules cover lock files (package-lock.json, yarn.lock, …), minified, generated and snapshot files, build output (dist/, build/, coverage/) and images or fonts.'),
+    ig.examples?.length ? h('p', { class: 'small mono muted' }, 'e.g. ', ig.examples.map((x) => `${x.path}${x.why === 'yours' ? ' (yours)' : ''}`).join(' · ')) : null,
+    h('label', {}, 'Your own patterns'), box,
+    h('label', { class: 'check' }, dflt, ' Also skip the built-in list (recommended)'),
+    h('p', { class: 'muted small' }, 'name.ext matches anywhere · dir/ matches a folder anywhere · a/b/c or /a is from the repository root · * ? ** wildcards. The repo can also add its own under "analysis": { "ignore": [...] } in .agent-factory.json.'),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => onIgnore({ patterns: box.value.split('\n').map((x) => x.trim()).filter(Boolean), useDefaults: dflt.checked }) }, 'Save and re-analyze')));
+};
+const codeTab = (pr, { onFix, onReanalyze, onIgnore, job }) => {
   const running = job?.state === 'running'; const re = h('button', { class: 'btn', disabled: running, onclick: onReanalyze }, running ? `Analyzing… ${job.phase ?? ''}` : pr ? 'Re-analyze' : 'Analyze now');
   if (!pr?.metrics) return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Inspect the code'), re), h('p', { class: 'muted' }, pr ? 'Nothing to inspect: the repository has no code yet.' : 'This project has not been inspected yet. Press Analyze to see how the code is laid out, where code is repeated, and which files have no test.'));
   const st = pr.structure, du = pr.duplicates, max = st?.dirs?.[0]?.lines ?? 1;
@@ -204,6 +216,7 @@ const codeTab = (pr, { onFix, onReanalyze, job }) => {
     card('', h('div', { class: 'card-h' }, h('h2', {}, 'Inspect the code'), h('span', { class: 'muted small mono' }, `${num(pr.metrics.codeLines)} lines · ${pr.metrics.sourceFiles} files · analyzed ${ago(pr.analyzedAt)}`), re),
       h('p', { class: 'muted small' }, 'A quick, line-based look at the files. It is good for orientation, not a full static analyser. Each problem has a button that turns it into a ticket for the agent.')),
     st?.dirs?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Where the code lives')), h('div', { class: 'rows' }, st.dirs.map((d) => h('div', { class: 'row-bar' }, h('code', {}, d.path), meter(d.lines / max), h('span', { class: 'mono small' }, `${num(d.lines)} lines · ${d.files} files`, d.testLines ? ` · ${d.testLines === d.lines ? 'all tests' : `${num(d.testLines)} test`}` : ''))))) : null,
+    ignoreCard(pr, onIgnore),
     card('', h('div', { class: 'card-h' }, h('h2', {}, 'Repeated code'), h('span', { class: `stamp ${du?.blocks?.length ? 'warn' : 'ok'}` }, `${du?.pct ?? 0}% copied`)),
       du?.blocks?.length ? h('ul', { class: 'plain issues dup' }, du.blocks.map((b) => h('li', {}, h('span', { class: 'stamp' }, `${b.lines} lines`), h('span', { class: 'mono small' }, `${b.a.file}:${b.a.start}-${b.a.end}`), h('span', { class: 'muted small' }, 'is the same as'), h('span', { class: 'mono small' }, `${b.b.file}:${b.b.start}-${b.b.end}`), fixBtn(b.key, 'Queue cleanup'))))
         : h('p', { class: 'muted' }, 'No repeated blocks found (6 or more identical lines in two places).')),
@@ -224,7 +237,7 @@ export const project = {
     const { id, p } = d; if (!p) return [card('', empty('No such project', `“${id}” is not registered.`, h('a', { class: 'btn', href: '#/projects' }, 'Back to cells')))];
     if (d.job?.state === 'running') pollSoon(ctx);
     const m = d.metrics.projects[id]; const tabs = [['board', 'Board'], ['prs', 'Pull requests'], ['runs', 'Work orders'], ['new', 'New ticket'], ['code', 'Code'], ['log', 'Log']];
-    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'code' ? codeTab(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
+    const body = d.tab === 'board' ? board(d.tickets) : d.tab === 'prs' ? prsList(d.prs) : d.tab === 'runs' ? card('', workOrders(d.runs)) : d.tab === 'new' ? ticketForm(id, ctx) : d.tab === 'code' ? codeTab(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onIgnore: (body) => act(() => api(`/projects/${id}/analysis-ignore`, { method: 'POST', body }), 'Saved. Re-analyzing…', ctx.rerender)(), onFix: (i) => act(() => api(`/projects/${id}/finding-ticket`, { method: 'POST', body: { key: i.key } }), 'Queued as a new ticket', ctx.rerender)() }) : h('pre', { class: 'log-pre' }, d.log.join('\n') || 'No log yet.');
     const attn = ATTENTION.reduce((a, k) => a + (p.queue[k] ?? 0), 0); const state = p.paused ? 'off' : attn || p.error ? 'bad' : (p.queue.working ?? 0) ? 'busy' : 'ok';
     return [h('a', { class: 'back', href: '#/projects' }, icon('arrow', 12, 'flip'), 'All cells'),
       h('div', { class: 'page-head' }, h('div', {}, h('div', { class: 'row' }, h('i', { class: `lamp ${state}` }), h('h1', {}, id)),

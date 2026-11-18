@@ -109,10 +109,10 @@ async function changedLines(dir, log) {
   for (const f of (await g(['ls-files', '--others', '--exclude-standard'])).out.split('\n').filter(Boolean)) added.set(f, 'all');   // brand-new file: every line is new
   return added;
 }
-export async function changeQuality(dir, gateCfg, { log } = {}) {
+export async function changeQuality(dir, gateCfg, { log, ignore } = {}) {
   const added = await changedLines(dir, log); const found = []; let files = 0;
   for (const [rel, lines] of added) {
-    if (files >= 300 || /(^|\/)(node_modules|\.git|dist|build|vendor)\//.test(rel)) continue;
+    if (files >= 300 || /(^|\/)(node_modules|\.git|dist|build|vendor)\//.test(rel) || ignore?.test(rel)) continue;
     const full = path.join(dir, rel); let st; try { st = fs.lstatSync(full); } catch { continue; } if (!st.isFile() || st.size > MAX_FILE || st.size === 0) continue;
     let text; try { text = fs.readFileSync(full, 'utf8'); } catch { continue; } if (text.includes('\u0000')) continue; files++;
     for (const f of scanText(rel, text, { isTest: isTestPath(rel) })) { const touched = lines === 'all' || lines.has(f.line) || (f.endLine && [...lines].some((n) => n >= f.line && n <= f.endLine)); if (touched) found.push(f); }

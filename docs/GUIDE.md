@@ -154,6 +154,20 @@ npm run analyze -- https://github.com/owner/repo.git   # shallow, read-only clon
 npm run analyze -- . --json                # the raw data
 ```
 
+### Files the analysis ignores
+
+Lock files and generated files are always long and never interesting, so they are **skipped completely**: not counted, not scanned for secrets, and not checked on the agent's changes. Built in (you do nothing): `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `go.sum` and other `*.lock`, minified and bundled files (`*.min.js`), source maps, generated code and snapshots, build output (`dist/`, `build/`, `coverage/`, `.next/`, `vendor/`) and images or fonts. The Code tab's **Ignored from analysis** card shows how many were skipped and examples.
+
+Add your own in any of three places (they combine):
+
+| Where | How |
+|---|---|
+| The project's Code tab | Type patterns (one per line) and press **Save and re-analyze** |
+| `agent-factory.json` | `"limits": { "analysis": { "ignore": ["*.sql", "docs/api/"] } }` for every project, or `"config": { "analysis": { "ignore": [...] } }` on one project |
+| The repo itself | `.agent-factory.json`: `{ "analysis": { "ignore": ["generated/"] } }` (the agent cannot edit this file, so it cannot loosen its own gate) |
+
+Pattern rules: `name.ext` matches anywhere (`*.sql`, `fixtures`), `dir/` matches a folder anywhere (`generated/`), `a/b/c` or `/a` is from the repository root (`docs/api/*.md`, `/legacy`), `*` and `?` stay inside one folder level, `**` crosses folders. No `..`, no `!`. Set `"ignoreDefaults": false` (in the same `analysis` block) to switch the built-in list off. From the terminal: `npm run analyze -- . --ignore=src/gen/,*.sql` and `--no-default-ignore`.
+
 ### The same gate checks the agent's own pull request
 
 Before a PR is opened, only the lines the agent *added or changed* are checked ("clean as you code"; old problems are not blamed on the change). If the gate fails, the agent is told exactly what to fix and gets another attempt. A leftover secret stops the PR entirely (nothing is pushed); other findings are shown on the PR and on the work-order page as *flagged*. Tune it in `agent-factory.json`:

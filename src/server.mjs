@@ -4,6 +4,7 @@ import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { doctor } from './doctor.mjs';
+import { DEFAULT_IGNORE } from './ignore.mjs';
 import { assessTicket } from './gate.mjs';
 import { templateNames } from './github.mjs';
 import { handleRpc, directTools, codeTools } from './mcp.mjs';
@@ -42,6 +43,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/hosts\/analyze$/, async (_m, b) => engine.analyzeDraft(b)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.startAnalysis(m[1])],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/analyze$/, async (m) => engine.analysisJob(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/analysis-ignore$/, async (m, b) => engine.setIgnore(m[1], b)],
+    ['GET', /^\/api\/analysis-defaults$/, async () => ({ defaults: DEFAULT_IGNORE })],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/finding-ticket$/, async (m, b) => engine.findingTicket(m[1], String(b.key ?? ''))],
     ['POST', /^\/api\/sources\/signup-info$/, async (_m, b) => engine.signupInfo(b.baseUrl).catch((e) => { throw fail(400, e.message); })],
     ['GET', /^\/api\/inbox$/, async () => engine.inbox()],

@@ -122,3 +122,12 @@ test('engine: repo findings can be queued as a fix ticket; the profile quality f
   const p = await e.addProject({ repo: 'o/app', profile: evil }); assert.equal(p.profile.quality.findings.length, 15); assert.equal(p.profile.quality.findings[0].severity, 'INFO'); assert.ok(p.profile.quality.counts.secrets <= 1e6); assert.doesNotMatch(JSON.stringify(p.profile.quality), /<script>|`|\n/); assert.equal(p.profile.history.length, 1);
   const made = []; e.createTicket = async (id, t) => { made.push(t); return {}; }; await e.findingTicket('app', 'eval:a.js:3'); assert.match(made[0].title, /^Fix vulnerability:/); assert.match(made[0].body, /code quality scan reports eval/);
 });
+
+test('loop: ignored files are not gated, and the agent cannot loosen the gate by editing the repo config', async () => {
+  const mkKey = (dir, rel) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), 'export const key = "AKIAABCDEFGHIJKLMNOP";\n'); };
+  const A = loop((dir) => mkKey(dir, 'fixtures/key.js'), { analysis: { ignore: ['fixtures/'] } }); const [a] = await tick(await A.deps()); assert.equal(a.status, 'ok'); assert.equal(a.attempts, 1); assert.equal(a.quality.passed, true);       // project says fixtures/ is ignored
+  const B = loop((dir) => mkKey(dir, 'fixtures/key.js')); const [b] = await tick(await B.deps()); assert.equal(b.status, 'quality-failed');                                                                         // not ignored: blocked
+  const C = loop((dir) => { mkKey(dir, 'src/key.js'); fs.writeFileSync(path.join(dir, '.agent-factory.json'), JSON.stringify({ analysis: { ignore: ['src/'] } })); }); const [c] = await tick(await C.deps());
+  assert.equal(c.status, 'protected-path'); assert.equal(C.prs.length, 0);                                                                                                                                         // editing the rules is itself refused
+  const D = loop((dir) => mkKey(dir, 'package-lock.json')); const [d] = await tick(await D.deps()); assert.equal(d.status, 'ok'); assert.equal(d.attempts, 1);                                                    // default ignore: lock files
+});

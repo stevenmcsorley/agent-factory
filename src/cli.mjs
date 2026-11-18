@@ -26,7 +26,7 @@ const HELP = `agent-factory <command>
   add <o/r>      add a GitHub repo as a project
   tick           claim queued tickets once and exit
   feedback       process CI/review feedback on open agent PRs once and exit
-  analyze [dir|url]  inspect a folder or git URL: layout, repeated code, untested files, quality (no config needed; --json)
+  analyze [dir|url]  inspect a folder or git URL: layout, repeated code, untested files, quality (no config needed; --json, --ignore=a,b, --no-default-ignore)
   build-image    build the agent sandbox image
   token          print the UI sign-in URL
   service        print a systemd unit that keeps the factory running (Linux)
@@ -69,7 +69,7 @@ WantedBy=default.target
       const r = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--quiet', target, tmp], { env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
       if (r.code !== 0) { fs.rmSync(tmp, { recursive: true, force: true }); console.error(`Could not clone: ${r.out.trim().slice(0, 300)}`); process.exit(1); }
     } else if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) { console.error(`Not a folder: ${dir}`); process.exit(1); }
-    try { const prof = analyzeRepo(dir); console.log(flags.json ? JSON.stringify(prof, null, 2) : textReport(prof, tmp ? target : path.basename(dir))); } finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); }
+    try { const prof = analyzeRepo(dir, { ignore: String(flags.ignore ?? '').split(',').filter(Boolean), ignoreDefaults: !flags['no-default-ignore'] }); console.log(flags.json ? JSON.stringify(prof, null, 2) : textReport(prof, tmp ? target : path.basename(dir))); } finally { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); }
     return;
   }
   if (cmd === 'build-image') process.exit((await buildImage(root)) ? 0 : 1);

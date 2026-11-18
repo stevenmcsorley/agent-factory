@@ -221,3 +221,5 @@ ul.issues li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 10
 ul.dup li { grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; } ul.dup li .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) { .row-bar { grid-template-columns: 1fr; } ul.dup li { grid-template-columns: 1fr; } }
 .issues li .btn { justify-self: end; white-space: nowrap; }
+
+textarea { width: 100%; font: 500 13px/1.5 var(--mono); } label.check { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-weight: 500; }

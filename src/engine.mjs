@@ -15,6 +15,7 @@ import { normalizeRepo } from './repoRef.mjs';
 import { analyzeRepo, profileSummary } from './analyze.mjs';
 import { checkBaseUrl } from './sources.mjs';
 import { addHistory } from './quality.mjs';
+import { cleanPatterns, DEFAULT_IGNORE } from './ignore.mjs';
 import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
@@ -35,9 +36,11 @@ const sanitizeStructure = (st) => { if (!st || typeof st !== 'object') return nu
     untested: (Array.isArray(st.untested) ? st.untested : []).slice(0, 12).map((u) => ({ file: pth(u?.file), lines: n(u?.lines), key: `untested:${pth(u?.file)}:1` })) }; };
 const sanitizeDuplicates = (d) => { if (!d || typeof d !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e7, Math.round(v))) : 0); const pth = (v) => String(v ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120); const loc = (x) => ({ file: pth(x?.file), start: n(x?.start), end: n(x?.end) });
   return { pct: Math.min(100, n(d.pct)), blocks: (Array.isArray(d.blocks) ? d.blocks : []).slice(0, 12).map((b) => ({ lines: n(b?.lines), a: loc(b?.a), b: loc(b?.b), key: `dup:${pth(b?.b?.file)}:${n(b?.b?.start)}` })) }; };
+const sanitizeIgnored = (g) => { if (!g || typeof g !== 'object') return null; const n = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1e7, Math.round(v))) : 0); const pth = (v) => String(v ?? '').replace(/[^\w./@+()-]/g, '').slice(0, 120);
+  return { defaults: n(g.defaults), yours: n(g.yours), folders: n(g.folders), useDefaults: g.useDefaults !== false, patterns: cleanPatterns(g.patterns).patterns, examples: (Array.isArray(g.examples) ? g.examples : []).slice(0, 8).map((x) => ({ path: pth(x?.path), why: x?.why === 'yours' ? 'yours' : 'default' })) }; };
 const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : null); const arr = (v, n, m) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').map((x) => x.slice(0, m)).slice(0, n) : []);
   return { languages: arr(p.languages, 6, 30), packageManager: str(p.packageManager, 20), framework: str(p.framework, 30), verify: str(p.verify, 500), image: str(p.image, 80), verifyReason: str(p.verifyReason), tests: !!p.verify, hasRepoConfig: !!p.hasRepoConfig, hasReadme: !!p.hasReadme, ci: str(p.ci, 30),
-    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), structure: sanitizeStructure(p.structure), duplicates: sanitizeDuplicates(p.duplicates), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
+    topLevel: arr(p.topLevel, 30, 41).map((x) => x.replace(/[^\w./@+-]/g, '')), metrics: sanitizeMetrics(p.metrics), quality: sanitizeQuality(p.quality), ignored: sanitizeIgnored(p.ignored), structure: sanitizeStructure(p.structure), duplicates: sanitizeDuplicates(p.duplicates), notes: arr(p.notes, 8, 200), warnings: arr(p.warnings, 8, 200), analyzedAt: str(p.analyzedAt, 40) }; };
 
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
@@ -73,7 +76,7 @@ export class Engine {
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
-    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
+    const config = { ...this.cfg.limits, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
     return { tickets, host, sandbox: sb, agent, vcs, config, stateDir: dir };
   }
 
@@ -291,13 +294,13 @@ export class Engine {
     return p;
   }
   // Shallow, read-only clone -> profile. Nothing is executed from the repo and nothing is persisted here.
-  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, gate } = {}) {
+  async _analyzeWith(hostAdapter, repo, base, { onPhase, onProfile, gate, ignore } = {}) {
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, log: path.join(this.cfg.stateDir, 'analyze.log') });
     let ws;
     onPhase?.('cloning the repository');
     try {
       ws = await sb.create({ cloneUrl: hostAdapter.cloneUrl(repo), branch: 'analyze', base, newBranch: false, gitEnv: hostAdapter.gitEnv(), depth: 1 });
-      onPhase?.('reading the code'); const profile = analyzeRepo(ws.dir, { gate }); onProfile?.(profile);
+      onPhase?.('reading the code'); const profile = analyzeRepo(ws.dir, { gate, ignore: ignore?.ignore, ignoreDefaults: ignore?.ignoreDefaults }); onProfile?.(profile);
       return profile;
     } catch (e) { const m = String(e.message ?? e); if (/clone failed/.test(m) && /(Remote branch .* not found|empty|did not match)/i.test(m)) return { ...analyzeRepo(os.tmpdir() + '/__nonexistent__'), warnings: ['the base branch was not found or the repository is empty'], languages: [], topLevel: [] }; throw Object.assign(new Error(m.slice(0, 300)), { status: 400 }); }
     finally { try { ws?.destroy(); } catch { /* best effort */ } }
@@ -321,7 +324,15 @@ export class Engine {
     if (token) env.AF_DRAFT_GIT_TOKEN = token; else if (fields.tokenEnv) env.AF_DRAFT_GIT_TOKEN = this.env[fields.tokenEnv];
     const hostAdapter = buildHost(draft, { env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const baseBranch = base || (kind === 'github' ? (await this.gh.inspectRepo(repo)).defaultBranch : (await this._testHost({ kind, fields, token, repo })).defaultBranch);
-    return { repo, base: baseBranch, profile: await this._analyzeWith(hostAdapter, repo, baseBranch) };
+    return { repo, base: baseBranch, profile: await this._analyzeWith(hostAdapter, repo, baseBranch, { ignore: this._analysisCfg(null) }) };
+  }
+  // Ignore rules = built-in defaults + global (limits.analysis) + this project's own (config.analysis); the repo's .agent-factory.json is added when the repo is read.
+  _analysisCfg(p) { const g = this.cfg.limits.analysis ?? {}, q = p?.config?.analysis ?? {}; return { ignore: cleanPatterns([...(g.ignore ?? []), ...(q.ignore ?? [])]).patterns, ignoreDefaults: g.ignoreDefaults !== false && q.ignoreDefaults !== false }; }
+  async setIgnore(id, { patterns, useDefaults } = {}) {
+    const p = this.project(id); const { patterns: clean, dropped } = cleanPatterns(patterns);
+    if (dropped.length) throw Object.assign(new Error(`These patterns are not allowed: ${dropped.join(', ')}. Use plain names and globs like *.sql, docs/*.md, generated/ (no .., no !, no ;).`), { status: 400 });
+    p.config = { ...(p.config ?? {}), analysis: { ...(p.config?.analysis ?? {}), ignore: clean, ...(useDefaults === false ? { ignoreDefaults: false } : { ignoreDefaults: undefined }) } }; if (p.config.analysis.ignoreDefaults === undefined) delete p.config.analysis.ignoreDefaults;
+    this._persist(); return this.startAnalysis(id);
   }
   // Re-analysis is a background job (a big repository takes a few seconds): start it, then poll analysisJob().
   startAnalysis(id) {
@@ -335,7 +346,7 @@ export class Engine {
   async analyzeProject(id, { onPhase } = {}) {
     const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const prevHistory = p.profile?.history;
-    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, onPhase, onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [] }; this._persist(); } });
+    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, ignore: this._analysisCfg(p), onPhase, onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [] }; this._persist(); } });
     profile.history = addHistory(prevHistory, profile);
     p.profile = profile; this._persist(); return p.profile;
   }

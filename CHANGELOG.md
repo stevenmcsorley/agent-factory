@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Ignore files in the analysis and the PR gate:** lock files, minified/generated files, snapshots, build output and images are skipped by default; add your own patterns per project (Code tab), globally or in the repo's `.agent-factory.json`. The Code tab shows what was skipped.
 - **Security fix:** git commands on the host no longer run repository-controlled code (hooks, fsmonitor, sshCommand, credential helpers, `ext::` or redirected remotes planted by the agent in `.git`). See SECURITY.md.
 - **Built-in code inspection** (no server, no download): a Code tab per project with folder layout, repeated code (exact files and lines), untested files, and our own quality rules with a trend; each finding can be queued as a ticket. `agent-factory analyze <folder|url>` prints the same report in the terminal.
 - **Quality gate on the agent's own change**: only the lines it added or changed are checked (one retry; a leftover secret stops the PR, other findings are flagged on it). Tested with a real agent.

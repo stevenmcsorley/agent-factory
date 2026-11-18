@@ -8,6 +8,7 @@ import { overBudget, recordRun } from './budget.mjs';
 import { startRun, tail, changedFiles } from './trace.mjs';
 import { parseNeedsInfo, parseAssumptions } from './triage.mjs';
 import { changeQuality, feedbackFor } from './quality.mjs';
+import { makeIgnore } from './ignore.mjs';
 
 export function buildPrompt(t, extra = '', profile = '') {
   return [
@@ -77,6 +78,8 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     run.phase('sandbox', 'cloning the repository');
     ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base, gitEnv: config.gitEnv });
     const cfg = effectiveConfig({ ...config, ...target.overrides }, ws.dir);
+    const repoAnalysis = loadRepoConfig(ws.dir).analysis ?? {};            // read once, before the agent runs: it cannot loosen its own gate
+    const ignore = makeIgnore({ patterns: [...(config.analysis?.ignore ?? []), ...(Array.isArray(repoAnalysis.ignore) ? repoAnalysis.ignore : [])], useDefaults: config.analysis?.ignoreDefaults !== false && repoAnalysis.ignoreDefaults !== false });
     let feedback = '';
     for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {
       rec.attempts = a;
@@ -99,7 +102,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       }
       // Quality gate on the CHANGED lines only ("clean as you code"): one chance to fix its own change, then secrets stop the PR and anything else is flagged on it.
       if (cfg.qualityGate !== false) {
-        let q; try { q = await changeQuality(ws.dir, cfg.qualityGate); } catch (e) { q = null; run.note('qualityError', String(e.message ?? e).slice(0, 200)); }
+        let q; try { q = await changeQuality(ws.dir, cfg.qualityGate, { ignore }); } catch (e) { q = null; run.note('qualityError', String(e.message ?? e).slice(0, 200)); }
         if (q) {
           rec.quality = q;
           if (!q.passed) {
