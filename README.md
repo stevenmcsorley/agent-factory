@@ -235,6 +235,8 @@ All of this was run for real, not just unit-tested:
 
 - **Library parts adopted by the real agent in three real projects** (`relay`, `reverb`, `channel-watch`): draft PRs that replace hand-copied code with tested library parts. Checked independently by running them: `channel-watch`'s 124 tests pass on the PR branch, `relay`'s tests pass and its `security.py` is identical to the part, and both MCP servers (`relay`, `reverb`) were started and exercised (health, 401, 405, a real tool listing). This also exposed (and fixed) a bug where tests in a sub-folder were never run by the factory, which is why those three runs were not machine-checked by the factory itself.
 
+- **The full loop on a clean machine** (fresh clone, fresh `HOME` with no git config, no `gh` login and no agent login, a real device-code Codex login, a first project on this machine with a test command): the agent built a small library, the factory ran `npm test`, opened a PR on the local forge, merged it, and the merged code passed the ticket's acceptance criteria when checked independently in a container. Running it found and fixed two bugs: the commit failed on a machine with no git identity, and `init` printed "Done" after a failed login.
+
 **Not verified:** publishing to a real GitHub/GitLab account (tested against a local bare remote only); the Jira epics and the Cloudflare plugin against real services; parallel lanes with several real agents at once; non-Linux systems; a long unattended soak (days).
 
 **Not built yet:** inline review comments and multi-person approvals on the local forge; a tracker file lock for multiple processes; SQLite state (it is JSON files); multi-user auth for the UI; metrics for time from ready to merged.
