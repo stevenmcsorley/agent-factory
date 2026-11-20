@@ -5,7 +5,7 @@ import path from 'node:path';
 import { detectVerify, loadRepoConfig } from './repoconfig.mjs';
 import { inspectCode, importedNames } from './inspect.mjs';
 import { makeIgnore, cleanPatterns } from './ignore.mjs';
-import { fingerprintOf } from './library.mjs';
+import { fingerprintOf, boilerplateOf, isBoilerplate } from './library.mjs';
 import { scanText, isTestPath, countFindings, topFindings, summarizeFindings, evaluateRepoGate } from './quality.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', 'vendor']);
@@ -22,13 +22,14 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore }
   const ignored = { yours: 0, default: 0, gitignore: 0, folders: 0, examples: [] }; const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 8) return; let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of es) { if (SKIP.has(e.name) || e.isSymbolicLink()) continue; const full = path.join(d, e.name); const why = ignore?.test(path.relative(dir, full)); if (why) { if (e.isDirectory()) ignored.folders++; else ignored[why] = (ignored[why] ?? 0) + 1; if (ignored.examples.length < 8) ignored.examples.push({ path: safePath(path.relative(dir, full)) + (e.isDirectory() ? '/' : ''), why }); continue; } if (e.isDirectory()) walk(full, depth + 1); else if (e.isFile()) files.push(full); if (files.length >= maxFiles) return; } };
   walk(dir, 0);
-  const findings = []; const recs = []; const prints = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
+  const findings = []; const recs = []; const prints = []; const tprints = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
   for (const f of files) {
     const ext = path.extname(f).slice(1).toLowerCase(); const lang = LANG[ext]; const rel = path.relative(dir, f);
     let st; try { st = fs.statSync(f); } catch { continue; } if (st.size > maxBytes || st.size === 0) continue;
     let txt; try { txt = fs.readFileSync(f, 'utf8'); } catch { continue; } if (txt.includes('\u0000')) continue; scanned++;
     const isTest = isTestPath(rel);
     for (const f of scanText(rel, txt, { isTest })) { if (findings.length < 600) findings.push({ ...f, file: safePath(f.file) }); if (f.rule === 'secret' && secrets.length < 10 && !secrets.some((x) => x.file === safePath(rel))) secrets.push({ file: safePath(rel), kind: f.message.replace('Possible hard-coded ', '') }); }
+    if (!lang || isBoilerplate(rel)) { const tp = tprints.length < 80 ? boilerplateOf(safePath(rel), txt, txt.split('\n').filter((l) => l.trim()).length) : null; if (tp) tprints.push(tp); }
     if (!lang) continue;
     const lines = txt.split('\n'); let c = 0; const norm = [];
     lines.forEach((l, idx) => { const t = l.trim(); if (!t) blank++; else if (LINE_COMMENT.test(l)) { comment++; if (/\b(TODO|FIXME|HACK|XXX)\b/.test(l)) todos.n++; } else { c++; code++; if (t.length > 12 && t.length < 300 && !TRIVIAL.test(t)) norm.push({ t, n: idx + 1 }); } });
@@ -48,7 +49,7 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore }
     maintainability: rate(longFiles + todos.n / 10, [1, 3, 6, 12]),
     security: secrets.length ? 'E' : 'A',
   };
-  return { _findings: findings, _inspect: insp, _ignored: ignored, _prints: prints.sort((a, b) => b.lines - a.lines).slice(0, 250), files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
+  return { _findings: findings, _inspect: insp, _ignored: ignored, _prints: [...prints.sort((a, b) => b.lines - a.lines).slice(0, 250), ...tprints], files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
 }
 
 export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreList, ignoreDefaults = true, exclude } = {}) {

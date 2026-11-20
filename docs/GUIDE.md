@@ -161,7 +161,7 @@ When you run many projects, the same things get built again and again: a money f
 
 | Way | How |
 |---|---|
-| The factory spots repeated code | *Library → Repeated code* lists the same component or logic found in several projects (renamed copies too). Press **Promote…**, name it, pick the files, and a pull request opens in the library repo (tick the box to skip the PR for your own library) |
+| The factory spots repeated code | *Library → Repeated code* lists the same component or logic found in several projects (renamed copies too). It also lists **templates**: the same installer, packaging, CI, Docker or build-config file rewritten per project (matched by file name and similarity). Those are marked *template* and cannot be promoted as a part; they are candidates for a recipe or a project starter. Press **Promote…**, name it, pick the files, and a pull request opens in the library repo (tick the box to skip the PR for your own library) |
 | You choose a file | `agent-factory library promote <project> <file…> --name="Money Format" --summary="…" --tags=currency` |
 | The agent proposes one | After building something generic, an agent can run the same command |
 

@@ -28,10 +28,10 @@ const TOKEN = /"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`|[A-Za-z
 // Tokens with names, strings and numbers normalised away, so a copy with renamed variables still matches.
 const normTokens = (text) => { const out = []; for (const line of codeLines(text).slice(0, 4000)) for (const t of line.match(TOKEN) ?? []) { out.push(KEYWORDS.has(t) ? t : /^[A-Za-z_$]/.test(t) ? 'I' : /^["'`]/.test(t) ? 'S' : /^\d/.test(t) ? 'N' : t); if (out.length >= 60_000) return out; } return out; };
 // A sketch of the file: min-hash over 8-token windows of its normalised code. Too short to say anything -> [].
-export function minhash(text) {
-  const toks = normTokens(text); if (toks.length < 60) return [];
+export function minhash(text, { minTokens = 60, shingle = 8 } = {}) {
+  const toks = normTokens(text); if (toks.length < minTokens) return [];
   const sig = new Array(K).fill(0xffffffff);
-  for (let i = 0; i + 8 <= toks.length; i++) { const h = fnv(toks.slice(i, i + 8).join(' ')); for (let k = 0; k < K; k++) { const v = Math.imul(h ^ SEEDS[k], 0x85ebca6b) >>> 0; if (v < sig[k]) sig[k] = v; } }
+  for (let i = 0; i + shingle <= toks.length; i++) { const h = fnv(toks.slice(i, i + shingle).join(' ')); for (let k = 0; k < K; k++) { const v = Math.imul(h ^ SEEDS[k], 0x85ebca6b) >>> 0; if (v < sig[k]) sig[k] = v; } }
   return sig;
 }
 export const similarity = (a, b) => { if (!a?.length || a.length !== b?.length) return 0; let n = 0; for (let i = 0; i < a.length; i++) if (a[i] === b[i]) n++; return n / a.length; };
@@ -186,8 +186,9 @@ export function candidates(fingerprints, { threshold = 0.5, nameThreshold = 0.3 
   const parent = items.map((_, i) => i); const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i]))); const sims = new Map();
   for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
     const a = items[i], b = items[j]; if (a.project === b.project && a.file === b.file) continue;
-    const s = similarity(a.sig, b.sig); const shared = a.exports?.some((n) => b.exports?.includes(n));
-    if (s >= threshold || (shared && s >= nameThreshold)) { parent[find(i)] = find(j); sims.set(`${i}:${j}`, s); }
+    const ab = a.kind === 'boilerplate', bb = b.kind === 'boilerplate'; if (ab !== bb) continue;          // templates are only compared with templates
+    const s = similarity(a.sig, b.sig); const shared = a.exports?.some((n) => b.exports?.includes(n)); const sameName = ab && a.project !== b.project && path.basename(a.file) === path.basename(b.file);
+    if (ab ? (sameName && s >= nameThreshold) : (s >= threshold || (shared && s >= nameThreshold))) { parent[find(i)] = find(j); sims.set(`${i}:${j}`, s); }
   }
   const groups = new Map(); items.forEach((it, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
   const out = [];
@@ -195,12 +196,19 @@ export function candidates(fingerprints, { threshold = 0.5, nameThreshold = 0.3 
     if (idx.length < 2) continue; const members = idx.map((i) => items[i]); const best = Math.max(...[...sims.entries()].filter(([k]) => { const [x, y] = k.split(':').map(Number); return idx.includes(x) && idx.includes(y); }).map(([, s]) => s), 0);
     const names = {}; for (const m of members) for (const n of m.exports ?? []) names[n] = (names[n] ?? 0) + 1; const top = Object.entries(names).sort((a, b) => b[1] - a[1])[0]?.[0];
     const projects = [...new Set(members.map((m) => m.project))];
-    out.push({ name: top ?? path.basename(members[0].file).replace(/\.[^.]+$/, ''), similarity: Math.round(best * 100), projects, locations: members.map((m) => ({ project: m.project, file: m.file, lines: m.lines })), reason: projects.length > 1 ? `The same code appears in ${projects.length} projects` : 'Near-identical files in one project' });
+    out.push({ name: top ?? path.basename(members[0].file).replace(/\.[^.]+$/, ''), similarity: Math.round(best * 100), projects, locations: members.map((m) => ({ project: m.project, file: m.file, lines: m.lines })), template: members.every((m) => m.kind === 'boilerplate'), reason: members.every((m) => m.kind === 'boilerplate') ? `The same template file in ${projects.length} project${projects.length > 1 ? 's' : ''}: a recipe, not an importable part` : projects.length > 1 ? `The same code appears in ${projects.length} projects` : 'Near-identical files in one project' });
   }
   return out.sort((a, b) => b.projects.length - a.projects.length || b.similarity - a.similarity || b.locations.length - a.locations.length).slice(0, 40);
 }
 // The compact index stored with each project's analysis so candidates can be found across projects without re-reading their code.
 const FP_LANGS = new Set(['JavaScript', 'TypeScript', 'Python', 'Go', 'Vue', 'Svelte', 'CSS', 'Ruby', 'PHP', 'Java', 'Kotlin']);
+// Template files: scripts, packaging, CI, container and build configs. Not code to import, but the same file rewritten per project is exactly what a recipe should hold.
+const BOILERPLATE = /(^|\/)(Dockerfile[\w.-]*|docker-compose[\w.-]*\.ya?ml|compose[\w.-]*\.ya?ml|[\w.-]+\.(?:sh|desktop|service|conf|toml)|control|Makefile|tsconfig[\w.-]*\.json|vite\.config\.\w+|eslint\.config\.\w+|\.eslintrc[\w.-]*|\.prettierrc[\w.-]*|\.github\/workflows\/[\w.-]+\.ya?ml|\.gitlab-ci\.yml|nginx[\w.-]*\.conf)$/;
+export const isBoilerplate = (rel) => BOILERPLATE.test(rel);
+export function boilerplateOf(rel, text, lines) {
+  if (!isBoilerplate(rel) || lines < 5 || lines > 400) return null; const sig = minhash(text, { minTokens: 20, shingle: 4 }); if (!sig.length) return null;
+  return { file: rel, lines, exports: [], sig, kind: 'boilerplate' };
+}
 export function fingerprintOf(rel, text, lines, lang) {
   if (!FP_LANGS.has(lang) || lines < 8) return null; const sig = minhash(text); if (!sig.length) return null;
   return { file: rel, lines, exports: exportsOf(text, path.extname(rel).slice(1).toLowerCase()).map((e) => e.name).slice(0, 12), sig };

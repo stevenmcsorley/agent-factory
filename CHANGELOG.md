@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Template detection:** analysis also fingerprints scripts, packaging, CI, Docker/compose and build-config files, and the Library's *Repeated code* tab groups the same template file across projects (marked "template", no promote button). Found for real: three Python desktop apps sharing the same installer and `.deb` packaging.
 - **Local forge** (`host.kind: "local"`): a bare git repository and pull-request records per project, no account or token. Review the diff, comment, merge (fast-forward or clean merge commit; conflicts refused; blocked if the branch changed since verification or touches protected files) and close in the UI, REST or CLI. Merge and publish are human-only.
 - **Publish:** set a publish target (GitHub, GitLab, Bitbucket, any git remote) and push the base branch (never forced; refuses a diverged remote), optionally switching the project to the real repository. Also a `publish` scenario step that must follow an approval.
 - `create_project` / the new-project form can create a local project (`host: "local"`) and take a test command (`verify`). CLI: `add --host=local [--import=…]`, `merge`, `publish`.
