@@ -216,6 +216,10 @@ The library holds more than code. Part kinds now include **theme** (design token
 
 Choose **Built-in tracker** as a project's ticket source (or `agent-factory add o/r --tracker=local`, or `tracker: "local"` in `create_project`). There is no account, token or network involved: issues, epics, comments and states live in `state/projects/<id>/tracker.json`. Plans create real epics there, an epic closes by itself when its last ticket closes, and webhooks, scenarios and the inbox work as with any other tracker. Only the factory can create tickets, so there is no "who may queue work" list. Back up that file like any other state; a corrupt file stops the tracker and keeps a copy instead of starting empty.
 
+### Telling the factory how to test a project (new)
+
+If the Code tab says *No way to run tests was found*, PRs for that project are opened **unverified**. Open *Code → Overview → How the agent's work is checked* and enter one command that installs what it needs and runs the tests (for example `npm ci && npm test`, or `pip install -q psutil && PYTHONPATH=src python -m unittest discover -s tests`), plus a container image if the default (`node:22-bookworm`) is wrong for the language. Try the command in a container as a normal user first: it runs unprivileged in the sandbox, and tests that behave differently as root will fail there. A repository's own `.agent-factory.json` still takes precedence. Projects with nothing runnable (no tests, no build) stay unverified; a type-check (`npm run typecheck`) is better than nothing but is not a test, and the factory cannot tell the difference.
+
 ### The local forge (new): code without an account
 
 Choose **On this machine** as the place the code lives (Studio → New project, or `agent-factory add my-app --host=local`). The factory keeps a bare git repository for the project in `state/forge/<id>/repo.git` and the agent builds into it exactly as it would on GitHub.

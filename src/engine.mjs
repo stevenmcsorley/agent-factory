@@ -196,7 +196,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), verify: p.config?.verify ?? null, image: p.config?.image ?? null, profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -246,6 +246,14 @@ export class Engine {
   }
 
   async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
+  // The command that checks the agent's work (and the container image it runs in) for one project. Empty clears it, so detection applies again.
+  // The repo's own .agent-factory.json still wins over this, as everywhere else.
+  setVerify(id, { verify, image } = {}) {
+    const p = this.project(id); const bad = (m) => Object.assign(new Error(m), { status: 400 }); const cfg = { ...(p.config ?? {}) };
+    if (verify !== undefined) { const v = String(verify ?? '').trim(); if (/[\r\n\0]/.test(v)) throw bad('The test command must be one line (join steps with &&)'); if (v.length > 500) throw bad('The test command is too long (500 characters at most)'); if (v) cfg.verify = v; else delete cfg.verify; }
+    if (image !== undefined) { const i = String(image ?? '').trim(); if (i && !/^[a-z0-9][a-z0-9._\/:@-]{0,199}$/i.test(i)) throw bad('That does not look like a container image name (for example python:3.12-bookworm)'); if (i) cfg.image = i; else delete cfg.image; }
+    if (Object.keys(cfg).length) p.config = cfg; else delete p.config; this._persist(); return { verify: p.config?.verify ?? null, image: p.config?.image ?? null };
+  }
   // ---- the local forge: review, merge and publish. Human actions only (UI, REST, CLI): none of these is an agent operation.
   _forge(p) { const a = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); if (!a.forge) throw Object.assign(new Error('This project does not use the local forge'), { status: 400 }); return a; }
   prDetail(id, n) { return this._forge(this.project(id)).diff(n); }

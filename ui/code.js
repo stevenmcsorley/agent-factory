@@ -63,7 +63,7 @@ export function codeTab(pr, ctx) {
   const nav = h('div', { class: 'subtabs', role: 'tablist' });
   const go = (sub, patch) => { view.sub = sub; if (patch) Object.assign(view, patch); drawNav(); drawBody(); };
   const drawNav = () => nav.replaceChildren(...tabs.map(([k, label, n]) => h('button', { role: 'tab', 'aria-selected': String(view.sub === k), class: view.sub === k ? 'on' : '', onclick: () => go(k) }, label, n != null && n !== 0 ? h('span', { class: 'badge' }, String(n)) : null)));
-  const api2 = { pr, proj, q, st, du, ig, go, onFix, onIgnore };
+  const api2 = { pr, proj, q, st, du, ig, go, onFix, onIgnore, onVerify: ctx.onVerify };
   const drawBody = () => { body.replaceChildren(...({ overview, findings, files, repeats, tests, ignored }[view.sub] ?? overview)(api2)); };
   drawNav(); drawBody();
   return [card('head', h('div', { class: 'card-h' }, h('h2', {}, 'Inspect the code'), h('span', { class: 'muted small mono' }, `${num(pr.metrics.codeLines)} lines · ${pr.metrics.sourceFiles} files · analyzed ${ago(pr.analyzedAt)}`), reBtn),
@@ -72,7 +72,7 @@ export function codeTab(pr, ctx) {
 }
 
 // ---------------------------------------------------------------- overview
-function overview({ pr, proj, q, st, du, go, onFix }) {
+function overview({ pr, proj, q, st, du, go, onFix, onVerify }) {
   const m = pr.metrics; const counts = q?.counts ?? { total: 0, secrets: 0, vulnerabilities: 0, bugs: 0 }; const gateOk = q?.gate?.status === 'OK'; const serious = SEV.filter((s) => SERIOUS.has(s)).reduce((a, s) => a + (q?.bySeverity?.[s] ?? 0), 0);
   const tile = (label, value, sub, cls = '') => h('div', { class: `tile ${cls}` }, h('span', { class: 'tile-l' }, label), h('b', {}, value), sub ? h('span', { class: 'tile-s' }, sub) : null);
   const steps = [];
@@ -80,7 +80,7 @@ function overview({ pr, proj, q, st, du, go, onFix }) {
   const big = st?.files?.find((f) => f.lines >= 400); if (big) steps.push({ cls: 'warn', title: `${big.file} is ${num(big.lines)} lines`, text: 'Very large files are hard to change safely.', act: ['Queue a split', () => onFix({ key: `big:${big.file}` })] });
   const un = st?.untested?.[0]; if (un) steps.push({ cls: 'warn', title: `${un.file} has no test`, text: `The biggest untested file (${un.lines} lines). Tests make the agent’s changes safer.`, act: ['Queue tests', () => onFix({ key: un.key })] });
   const dup = du?.blocks?.[0]; if (dup) steps.push({ cls: 'warn', title: `${dup.lines} repeated lines`, text: `${dup.a.file} and ${dup.b.file} contain the same code.`, act: ['Queue cleanup', () => onFix({ key: dup.key })] });
-  if (!pr.verify) steps.push({ cls: 'bad', title: 'No way to run tests was found', text: 'Pull requests will be opened unverified. Set a verify command, or add tests.', act: null });
+  if (!pr.verify && !proj?.verify) steps.push({ cls: 'bad', title: 'No way to run tests was found', text: 'Pull requests will be opened unverified. Set a test command below, or add tests.', act: null });
   const trend = (pr.history ?? []).map((x) => x.findings).filter(Number.isFinite);
   return [
     card('', h('div', { class: 'tiles' },
@@ -92,6 +92,10 @@ function overview({ pr, proj, q, st, du, go, onFix }) {
     card('', h('div', { class: 'card-h' }, h('h2', {}, 'What to look at first')),
       steps.length ? h('ul', { class: 'steps' }, steps.map((s) => h('li', { class: s.cls }, h('i', { class: 'dot' }), h('div', {}, h('b', {}, s.title), h('p', { class: 'muted small' }, s.text)), s.act ? h('button', { class: 'btn small', onclick: s.act[1] }, s.act[0]) : null)))
         : h('p', { class: 'ok-note' }, icon('check', 16), ' Nothing urgent. No serious findings, no huge files, tests and repeats look fine.')),
+    card('', h('div', { class: 'card-h' }, h('h2', {}, 'How the agent\u2019s work is checked'), proj?.verify || pr.verify ? h('span', { class: 'stamp ok' }, 'set') : h('span', { class: 'stamp warn' }, 'not set')),
+      h('p', { class: 'muted small' }, proj?.verify ? 'Using the command you set. The repository\u2019s own .agent-factory.json still wins over it.' : pr.verify ? `Detected: ${pr.verify}. Set your own to override it.` : 'Nothing was found. One command that installs what it needs and runs the tests, for example: npm ci && npm test'),
+      (() => { const v = h('input', { value: proj?.verify ?? '', placeholder: pr.verify || 'npm ci && npm test', 'aria-label': 'Test command' }); const i = h('input', { value: proj?.image ?? '', placeholder: pr.image || 'container image, e.g. python:3.12-bookworm (optional)', 'aria-label': 'Container image' });
+        return h('div', {}, h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Test command'), v), h('div', {}, h('label', {}, 'Image'), i)), h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => onVerify({ verify: v.value, image: i.value }) }, 'Save'), h('span', { class: 'small muted' }, 'Empty clears it and detection applies again.'))); })()),
     st?.dirs?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Where the code lives')), h('div', { class: 'rows' }, st.dirs.map((d) => h('div', { class: 'row-bar' }, h('code', {}, d.path), meter(d.lines / st.dirs[0].lines), h('span', { class: 'mono small' }, `${num(d.lines)} lines · ${d.files} files`, d.testLines ? ` · ${d.testLines === d.lines ? 'all tests' : `${num(d.testLines)} test`}` : ''))))) : null,
     trend.length > 1 ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Trend'), h('span', { class: 'muted small' }, `findings over the last ${Math.min(trend.length, 30)} analyses`)), h('div', { class: 'spark' }, trend.slice(-30).map((v) => { const e = h('i', {}); e.style.height = `${Math.max(4, (v / Math.max(1, ...trend)) * 100)}%`; return e; }))) : null,
   ];
