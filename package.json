@@ -10,7 +10,8 @@
     "analyze": "node src/cli.mjs analyze",
     "build-image": "node src/cli.mjs build-image",
     "test": "node --test --test-force-exit test/*.test.mjs",
-    "drill": "node src/cli.mjs drill"
+    "drill": "node src/cli.mjs drill",
+    "drill:real": "node scripts/real-drill.mjs"
   },
   "description": "Self-hosted autonomous software delivery: tickets in, reviewed pull requests out. Any CLI coding agent, sandboxed in Docker.",
   "license": "Apache-2.0",

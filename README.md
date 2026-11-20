@@ -6,7 +6,7 @@
 
 🤖 **Driving it with Claude or Codex?** Hand your agent [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) (or run `agent-factory agents-md`).
 
-🛡️ **Evaluating the AI workflow?** Read [docs/WORKFLOW.md](docs/WORKFLOW.md) (stages, trust boundaries, guardrails, failure modes, open risks) and run `npm run drill` to watch each guardrail hold against a misbehaving agent.
+🛡️ **Evaluating the AI workflow?** Read [docs/WORKFLOW.md](docs/WORKFLOW.md) (stages, trust boundaries, guardrails, failure modes, open risks) run `npm run drill` to watch each guardrail hold against a scripted misbehaving agent, and `npm run drill:real` to see a real model on adversarial tickets.
 
 📖 **New here? Read the [illustrated guide](docs/GUIDE.md)**: install in five minutes, a tour of every screen, connecting your tools, safety, and an honest production-readiness checklist.
 
