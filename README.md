@@ -6,6 +6,8 @@
 
 🤖 **Driving it with Claude or Codex?** Hand your agent [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) (or run `agent-factory agents-md`).
 
+🛡️ **Evaluating the AI workflow?** Read [docs/WORKFLOW.md](docs/WORKFLOW.md) (stages, trust boundaries, guardrails, failure modes, open risks) and run `npm run drill` to watch each guardrail hold against a misbehaving agent.
+
 📖 **New here? Read the [illustrated guide](docs/GUIDE.md)**: install in five minutes, a tour of every screen, connecting your tools, safety, and an honest production-readiness checklist.
 
 Label a GitHub issue `agent-ready` (or queue one from the web UI). Agent Factory claims it, runs a coding agent in a locked-down Docker sandbox, runs your tests, and opens a **draft pull request**. If CI fails or you leave review comments, it goes back and pushes fixes. **It never merges: you do.**

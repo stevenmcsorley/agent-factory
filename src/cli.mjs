@@ -26,6 +26,7 @@ const HELP = `agent-factory <command>
   start          run the factory and the web UI   (--no-loop = UI only)
   doctor         check that everything is ready
   add <o/r>      add a GitHub repo as a project  (--tracker=local to use the built-in tracker; --host=local to keep the code on this machine)
+  drill          prove the guardrails hold: real loop and git, a misbehaving scripted agent, pass/fail per guardrail (--json, --only=id,id)
   merge <project> <pr>   merge a local-forge pull request (human action)
   publish <project>      push a local-forge project's base branch to its publish target
   tick           claim queued tickets once and exit
@@ -56,6 +57,14 @@ function boot() {
 async function main() {
   if (cmd === 'help' || flags.help) return console.log(HELP);
   if (cmd === 'init') process.exit(await init({ configPath, root, flags }));
+  if (cmd === 'drill') {
+    const { runDrill, formatDrill, drillList } = await import('./drill.mjs');
+    if (flags.list) { for (const d of drillList()) console.log(`${d.id.padEnd(18)} ${d.title}`); process.exit(0); }
+    const only = typeof flags.only === 'string' ? flags.only.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
+    const results = await runDrill({ only });
+    console.log(flags.json ? JSON.stringify(results, null, 2) : formatDrill(results, { color: process.stdout.isTTY }));
+    process.exit(results.length && results.every((r) => r.ok) ? 0 : 1);
+  }
   if (cmd === 'service') {
     const unit = `[Unit]
 Description=Agent Factory
