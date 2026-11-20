@@ -1,4 +1,5 @@
 import test from 'node:test';
+for (const [k, v] of Object.entries({ GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' })) process.env[k] ??= v;   // the real loop commits: CI has no git identity
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
