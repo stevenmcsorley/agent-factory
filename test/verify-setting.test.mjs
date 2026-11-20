@@ -28,3 +28,12 @@ test('precedence at run time: the repository file beats the project setting, whi
   fs.writeFileSync(path.join(d, '.agent-factory.json'), '{"verify":"pytest"}'); assert.equal(effectiveConfig({ verify: 'make check' }, d).verify, 'pytest', 'repository file wins');
   const noDetect = fs.mkdtempSync(path.join(os.tmpdir(), 'ef-')); assert.equal(effectiveConfig({ verify: 'ctest', image: 'gcc:13' }, noDetect).image, 'gcc:13');
 });
+
+test('a command detected by analysis (e.g. in backend/) is what a run executes; the project setting and the repo file still take precedence', async () => {
+  const { e } = await world(); const p = e.cfg.projects[0];
+  assert.equal(e.deps(p).config.verify, undefined, 'nothing detected, nothing set');
+  p.profile = { verify: 'cd api && npm ci --no-audit --no-fund && npm test', image: 'node:22-bookworm' }; let c = e.deps(p).config; assert.deepEqual([c.verify, c.image], ['cd api && npm ci --no-audit --no-fund && npm test', 'node:22-bookworm']);
+  e.setVerify('app', { verify: 'make check' }); c = e.deps(p).config; assert.deepEqual([c.verify, c.image], ['make check', undefined], 'the project setting wins and does not borrow the detected image');
+  e.setVerify('app', { verify: 'make check', image: 'gcc:13' }); assert.equal(e.deps(p).config.image, 'gcc:13'); e.setVerify('app', { verify: '', image: '' });
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rv-')); fs.writeFileSync(path.join(d, '.agent-factory.json'), '{"verify":"pytest -x"}'); assert.equal(effectiveConfig(e.deps(p).config, d).verify, 'pytest -x', 'the repository file beats detection');
+});

@@ -33,7 +33,7 @@ test('detectVerify picks the right command per ecosystem; explicit npm test abse
   assert.equal(detectVerify(mk({ 'package.json': '{"scripts":{"test":"jest"}}' })).verify, 'npm test');
   assert.match(detectVerify(mk({ 'package.json': '{"scripts":{"test":"jest"}}', 'package-lock.json': '{}' })).verify, /npm ci/);
   assert.equal(detectVerify(mk({ 'package.json': '{"scripts":{"test":"echo \\"Error: no test specified\\" && exit 1"}}' })), null);
-  assert.match(detectVerify(mk({ 'pyproject.toml': '' })).verify, /pytest/);
+  assert.match(detectVerify(mk({ 'pyproject.toml': '', 'test_a.py': '' })).verify, /pytest/); assert.equal(detectVerify(mk({ 'pyproject.toml': '' })), null, 'a Python project with no tests has nothing to run');
   assert.equal(detectVerify(mk({ 'go.mod': 'module x' })).verify, 'go test ./...');
   assert.equal(detectVerify(mk({ Makefile: 'test:\n\techo ok\n' })).verify, 'make test');
   assert.equal(detectVerify(mk({ 'README.md': '' })), null);
