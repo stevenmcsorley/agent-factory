@@ -10,9 +10,13 @@ export function gitVcs({ log, openPr = false, gitEnv = {} }) {
     async diffStat(ws) { lockGit(ws.dir, ws.cloneUrl); return (await run('git', [...SAFE_GIT, 'status', '--porcelain'], { cwd: ws.dir, log })).out.trim(); },
     async commitAndPush(ws, { branch, message, remote = 'origin' }) {
       lockGit(ws.dir, ws.cloneUrl); // the agent could write .git/hooks or .git/config; never run them on the host
-      for (const a of [['add', '-A'], ['commit', '--no-verify', '-m', message], ['push', remote, branch]]) {
+      // A fresh machine often has no git identity, and `git commit` refuses without one (found by a clean-machine install test). Fill in only what is missing, and never override yours.
+      const get = async (k) => (await run('git', [...SAFE_GIT, 'config', '--get', k], { cwd: ws.dir, env: env() })).out.trim();
+      const set = (k, envKeys) => process.env[envKeys[0]] && process.env[envKeys[1]];
+      const who = [...((await get('user.name')) || set('name', ['GIT_AUTHOR_NAME', 'GIT_COMMITTER_NAME']) ? [] : ['-c', 'user.name=Agent Factory']), ...((await get('user.email')) || set('email', ['GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_EMAIL']) ? [] : ['-c', 'user.email=agent-factory@localhost'])];
+      for (const a of [['add', '-A'], [...who, 'commit', '--no-verify', '-m', message], ['push', remote, branch]]) {
         const r = await run('git', [...SAFE_GIT, ...a], { cwd: ws.dir, log, env: env() });
-        if (r.code !== 0) throw new Error(`git ${a[0]} failed: ${r.out.replace(/Authorization: [^\s]+/g, 'Authorization: ***').slice(0, 400)}`);
+        if (r.code !== 0) throw new Error(`git ${a.find((x) => !x.startsWith('-') && !x.includes('=')) ?? a[0]} failed: ${r.out.replace(/Authorization: [^\s]+/g, 'Authorization: ***').slice(0, 400)}`);
       }
     },
     async head(ws) { return (await run('git', [...SAFE_GIT, 'rev-parse', 'HEAD'], { cwd: ws.dir, log })).out.trim(); },

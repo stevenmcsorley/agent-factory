@@ -53,6 +53,7 @@ export async function init({ configPath, root, flags }) {
   if (!['codex', 'claude'].includes(kind)) { rl?.close(); console.log('Choose codex or claude.'); return 1; }
   const agent = kind === 'codex' ? { kind: 'codexContainer', codexHome: existing.agent?.codexHome ?? path.join(os.homedir(), '.agent-factory', 'codex') } : { kind: 'claudeContainer' };
   const secrets = path.join(stateDir, 'secrets.env');
+  let agentReady = true;           // the closing message must not claim success when the agent has no login
   if (kind === 'codex') {
     fs.mkdirSync(agent.codexHome, { recursive: true, mode: 0o700 });
     if (fs.existsSync(path.join(agent.codexHome, 'auth.json'))) ok('dedicated Codex login found');
@@ -60,7 +61,7 @@ export async function init({ configPath, root, flags }) {
       console.log(`  The factory uses its OWN Codex login (${agent.codexHome}), never your personal one.\n  A code and a link will appear; open the link, sign in, enter the code.`);
       if (!process.stdin.isTTY) { bad('login needs an interactive terminal', `run: npm run init   (or: docker run --rm -it --user $(id -u):$(id -g) -e HOME=/home/node -v ${agent.codexHome}:/home/node/.codex agent-factory-agent:latest codex login --device-auth)`); }
       else await containerRun('agent-factory-agent:latest', ['codex', 'login', '--device-auth'], { mounts: [`${agent.codexHome}:/home/node/.codex`] });
-      fs.existsSync(path.join(agent.codexHome, 'auth.json')) ? ok('logged in') : bad('login did not complete', `run: CODEX_HOME=${agent.codexHome} codex login --device-auth`);
+      fs.existsSync(path.join(agent.codexHome, 'auth.json')) ? ok('logged in') : (agentReady = false, bad('login did not complete', `run: CODEX_HOME=${agent.codexHome} codex login --device-auth`));
     }
   } else if (!/CLAUDE_CODE_OAUTH_TOKEN=|ANTHROPIC_API_KEY=/.test(fs.existsSync(secrets) ? fs.readFileSync(secrets, 'utf8') : '')) {
     if (interactive && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY && (await ask('Create a long-lived Claude token now? It needs a Claude subscription and opens a login link (n = paste an API key instead)', 'y')).toLowerCase().startsWith('y'))
@@ -89,6 +90,7 @@ export async function init({ configPath, root, flags }) {
   // `npm start` only works inside a clone; from npx (or anywhere else) print the command that always works.
   const inClone = fs.existsSync(path.join(process.cwd(), 'package.json')) && JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).name === 'agent-factory';
   const startCmd = inClone ? 'npm start' : `node ${path.join(root, 'src', 'cli.mjs')} start --config=${configPath}`;
-  console.log(`\nDone. Config: ${configPath}\n\nStart the factory:\n  ${startCmd}\n\nThen open  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n\nKeep it running in the background (Linux):  node ${path.join(root, 'src', 'cli.mjs')} service --config=${configPath}\n`);
-  return 0;
+  if (!agentReady) console.log(`\nSetup is NOT complete: the agent is not logged in, so runs would fail. Log in with the command shown above, then run setup again (it is safe to re-run). Your config was saved: ${configPath}`);
+  else console.log(`\nDone. Config: ${configPath}\n\nStart the factory:\n  ${startCmd}\n\nThen open  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n\nKeep it running in the background (Linux):  node ${path.join(root, 'src', 'cli.mjs')} service --config=${configPath}\n`);
+  return agentReady ? 0 : 1;
 }
