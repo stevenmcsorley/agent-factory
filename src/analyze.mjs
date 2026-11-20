@@ -6,6 +6,7 @@ import { detectVerify, loadRepoConfig } from './repoconfig.mjs';
 import { inspectCode, importedNames } from './inspect.mjs';
 import { makeIgnore, cleanPatterns } from './ignore.mjs';
 import { fingerprintOf, boilerplateOf, isBoilerplate } from './library.mjs';
+import { chunkPrints } from './chunks.mjs';
 import { scanText, isTestPath, countFindings, topFindings, summarizeFindings, evaluateRepoGate } from './quality.mjs';
 
 const SKIP = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', 'dist', 'build', 'target', '.next', 'vendor']);
@@ -18,24 +19,24 @@ const LINE_COMMENT = /^\s*(\/\/|#|--|\*|\/\*)/;
 const rate = (v, [a, b, c, d]) => (v <= a ? 'A' : v <= b ? 'B' : v <= c ? 'C' : v <= d ? 'D' : 'E');
 
 // Code-health measures without a server: a bounded, dependency-free scan. It is a HEURISTIC (line-based, no parsing), good for "is this repo in shape to automate", not a substitute for a real analyser.
-export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore } = {}) {
+export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore, templates = false } = {}) {
   const ignored = { yours: 0, default: 0, gitignore: 0, folders: 0, examples: [] }; const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 8) return; let es; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of es) { if (SKIP.has(e.name) || e.isSymbolicLink()) continue; const full = path.join(d, e.name); const why = ignore?.test(path.relative(dir, full)); if (why) { if (e.isDirectory()) ignored.folders++; else ignored[why] = (ignored[why] ?? 0) + 1; if (ignored.examples.length < 8) ignored.examples.push({ path: safePath(path.relative(dir, full)) + (e.isDirectory() ? '/' : ''), why }); continue; } if (e.isDirectory()) walk(full, depth + 1); else if (e.isFile()) files.push(full); if (files.length >= maxFiles) return; } };
   walk(dir, 0);
-  const findings = []; const recs = []; const prints = []; const tprints = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
+  const findings = []; const recs = []; const prints = []; const tprints = []; const chunks = []; const byLang = {}, big = [], todos = { n: 0 }, secrets = []; let code = 0, comment = 0, blank = 0, srcFiles = 0, testFiles = 0, testLines = 0, dupLines = 0, scanned = 0, longFiles = 0;
   for (const f of files) {
     const ext = path.extname(f).slice(1).toLowerCase(); const lang = LANG[ext]; const rel = path.relative(dir, f);
     let st; try { st = fs.statSync(f); } catch { continue; } if (st.size > maxBytes || st.size === 0) continue;
     let txt; try { txt = fs.readFileSync(f, 'utf8'); } catch { continue; } if (txt.includes('\u0000')) continue; scanned++;
     const isTest = isTestPath(rel);
     for (const f of scanText(rel, txt, { isTest })) { if (findings.length < 600) findings.push({ ...f, file: safePath(f.file) }); if (f.rule === 'secret' && secrets.length < 10 && !secrets.some((x) => x.file === safePath(rel))) secrets.push({ file: safePath(rel), kind: f.message.replace('Possible hard-coded ', '') }); }
-    if (!lang || isBoilerplate(rel)) { const tp = tprints.length < 80 ? boilerplateOf(safePath(rel), txt, txt.split('\n').filter((l) => l.trim()).length) : null; if (tp) tprints.push(tp); }
+    if (!lang || isBoilerplate(rel)) { const tp = templates && tprints.length < 80 ? boilerplateOf(safePath(rel), txt, txt.split('\n').filter((l) => l.trim()).length) : null; if (tp) tprints.push(tp); }
     if (!lang) continue;
     const lines = txt.split('\n'); let c = 0; const norm = [];
     lines.forEach((l, idx) => { const t = l.trim(); if (!t) blank++; else if (LINE_COMMENT.test(l)) { comment++; if (/\b(TODO|FIXME|HACK|XXX)\b/.test(l)) todos.n++; } else { c++; code++; if (t.length > 12 && t.length < 300 && !TRIVIAL.test(t)) norm.push({ t, n: idx + 1 }); } });
     byLang[lang] = (byLang[lang] ?? 0) + c; srcFiles++;
     recs.push({ rel: safePath(rel), lang, isTest, lines: c, norm: /\.(json|lock)$/.test(rel) ? [] : norm, refs: isTest ? importedNames(txt) : null });
-    if (isTest) { testFiles++; testLines += c; } else { const fp = fingerprintOf(safePath(rel), txt, c, lang); if (fp && prints.length < 600) prints.push(fp); if (c > 500) longFiles++; if (big.length < 200) big.push({ file: safePath(rel), lines: c }); }
+    if (isTest) { testFiles++; testLines += c; } else { if (chunks.length < 4000) chunks.push(...chunkPrints(safePath(rel), txt, ext)); const fp = fingerprintOf(safePath(rel), txt, c, lang); if (fp && prints.length < 600) prints.push(fp); if (c > 500) longFiles++; if (big.length < 200) big.push({ file: safePath(rel), lines: c }); }
   }
   const insp = inspectCode(recs); dupLines = insp.duplicates.dupLines;
   const prod = Math.max(0, code - testLines); const dupPct = prod ? Math.min(100, Math.round((dupLines / prod) * 100)) : 0;
@@ -49,7 +50,7 @@ export function codeMetrics(dir, { maxFiles = 4000, maxBytes = 400_000, ignore }
     maintainability: rate(longFiles + todos.n / 10, [1, 3, 6, 12]),
     security: secrets.length ? 'E' : 'A',
   };
-  return { _findings: findings, _inspect: insp, _ignored: ignored, _prints: [...prints.sort((a, b) => b.lines - a.lines).slice(0, 250), ...tprints], files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
+  return { _findings: findings, _inspect: insp, _ignored: ignored, _prints: [...prints.sort((a, b) => b.lines - a.lines).slice(0, 250), ...tprints], _chunks: chunks.sort((a, b) => (b.tags.length - a.tags.length) || (b.lines - a.lines)).slice(0, 500), files: scanned, codeLines: code, commentLines: comment, blankLines: blank, sourceFiles: srcFiles, testFiles, testRatioPct: testRatio, duplicatedPct: dupPct, todoCount: todos.n, largeFiles: longFiles, languages, hotspots, secrets, ratings, heuristic: true, capped: files.length >= maxFiles };
 }
 
 export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreList, ignoreDefaults = true, exclude } = {}) {
@@ -104,7 +105,7 @@ export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreLis
   if (!ci) notes.push('no CI configuration found: the factory can only rely on its own verify step');
   const dedupe = [...new Set(languages)];
   const matcher = makeIgnore({ patterns: [...(Array.isArray(ignoreList) ? ignoreList : []), ...(Array.isArray(repoCfg.analysis?.ignore) ? repoCfg.analysis.ignore : [])], useDefaults: ignoreDefaults !== false && repoCfg.analysis?.ignoreDefaults !== false, exclude });
-  const metrics = empty || sub ? null : codeMetrics(dir, { ignore: matcher }); const found = metrics?._findings ?? []; const insp = metrics?._inspect ?? null; const ign = metrics?._ignored ?? null; const fingerprints = metrics?._prints ?? []; if (metrics) { delete metrics._findings; delete metrics._inspect; delete metrics._ignored; delete metrics._prints; }
+  const metrics = empty || sub ? null : codeMetrics(dir, { ignore: matcher }); const found = metrics?._findings ?? []; const insp = metrics?._inspect ?? null; const ign = metrics?._ignored ?? null; const fingerprints = metrics?._prints ?? []; const chunks = metrics?._chunks ?? []; if (metrics) { delete metrics._chunks; delete metrics._findings; delete metrics._inspect; delete metrics._ignored; delete metrics._prints; }
   if (metrics && !dedupe.length) dedupe.push(...metrics.languages.filter((l) => !['CSS', 'HTML'].includes(l.name)).slice(0, 3).map((l) => l.name));
   if (metrics?.secrets.length) warnings.push(`possible secrets committed in ${metrics.secrets.map((x) => x.file).slice(0, 3).join(', ')}: rotate them and remove them from history`);
   if (metrics && metrics.sourceFiles && metrics.testFiles === 0) notes.push('no test files found: the agent cannot prove its changes work here');
@@ -113,7 +114,7 @@ export function analyzeRepo(dir, { sub = false, gate: gateCfg, ignore: ignoreLis
   const ignored = ign ? { defaults: ign.default, gitignored: ign.gitignore, yours: ign.yours, folders: ign.folders, examples: ign.examples, patterns: matcher.yours, useDefaults: matcher.useDefaults } : null;
   const perFile = {}; for (const f of found) perFile[f.file] = (perFile[f.file] ?? 0) + 1;
   if (insp?.structure?.files) insp.structure.files = insp.structure.files.map((f) => ({ ...f, findings: perFile[f.file] ?? 0 }));
-  const profile = { fingerprints, ignored, metrics, quality, structure: insp?.structure ?? null, duplicates: insp ? { pct: metrics.duplicatedPct, blocks: insp.duplicates.blocks } : null, languages: dedupe, packageManager, framework, verify, image, verifyReason, tests, hasRepoConfig, hasReadme, ci, topLevel, notes, warnings, analyzedAt: new Date().toISOString() };
+  const profile = { fingerprints, chunks, ignored, metrics, quality, structure: insp?.structure ?? null, duplicates: insp ? { pct: metrics.duplicatedPct, blocks: insp.duplicates.blocks } : null, languages: dedupe, packageManager, framework, verify, image, verifyReason, tests, hasRepoConfig, hasReadme, ci, topLevel, notes, warnings, analyzedAt: new Date().toISOString() };
   return profile;
 }
 

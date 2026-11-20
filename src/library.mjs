@@ -180,25 +180,50 @@ export function reinvented(files, catalog, { threshold = 0.6 } = {}) {
 }
 
 // ---------------------------------------------------------------- cross-project candidates
-// fingerprints: { projectId: [{ file, lines, exports:[names], sig:[...] }] }. Clusters of similar files across (or within) projects.
-export function candidates(fingerprints, { threshold = 0.5, nameThreshold = 0.3 } = {}) {
-  const items = []; for (const [project, list] of Object.entries(fingerprints)) for (const f of list ?? []) if (f.sig?.length) items.push({ project, ...f });
+// fingerprints: { projectId: [{ file, lines, exports:[names], sig:[...] }, { kind:'chunk', name, type, start, tags, methods, ... }] }.
+// Groups of similar code across (or within) projects, ranked by how worth reusing they are. Chunks (functions, classes, components, routes) are compared
+// with chunks and whole files with whole files; template files only with template files. A "pattern" group is the same INTERFACE written differently.
+const TAG_WEIGHT = { 'api-client': 4, adapter: 4, llm: 4, streaming: 3, retry: 3, cache: 3, auth: 3, hook: 3, component: 3, database: 2, validation: 2, scheduling: 2, subclass: 1 };
+const kindOf = (f) => (f.kind === 'boilerplate' ? 'template' : f.kind === 'chunk' ? 'chunk' : 'file');
+const SKIP_METHODS = new Set(['constructor', '__init__', 'get', 'set', 'tostring', 'render', 'init', 'close', 'dispose', 'toJSON'.toLowerCase()]);
+export function candidates(fingerprints, { threshold = 0.5, nameThreshold = 0.3, chunkThreshold = 0.6, templates = false, limit = 60 } = {}) {
+  const items = []; for (const [project, list] of Object.entries(fingerprints)) for (const f of list ?? []) if (f.sig?.length && (templates || f.kind !== 'boilerplate')) items.push({ project, ...f });
   const parent = items.map((_, i) => i); const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i]))); const sims = new Map();
   for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
-    const a = items[i], b = items[j]; if (a.project === b.project && a.file === b.file) continue;
-    const ab = a.kind === 'boilerplate', bb = b.kind === 'boilerplate'; if (ab !== bb) continue;          // templates are only compared with templates
-    const s = similarity(a.sig, b.sig); const shared = a.exports?.some((n) => b.exports?.includes(n)); const sameName = ab && a.project !== b.project && path.basename(a.file) === path.basename(b.file);
-    if (ab ? (sameName && s >= nameThreshold) : (s >= threshold || (shared && s >= nameThreshold))) { parent[find(i)] = find(j); sims.set(`${i}:${j}`, s); }
+    const a = items[i], b = items[j]; const ka = kindOf(a); if (ka !== kindOf(b)) continue; if (a.project === b.project && a.file === b.file) continue;
+    const s = similarity(a.sig, b.sig); let hit;
+    if (ka === 'template') hit = a.project !== b.project && path.basename(a.file) === path.basename(b.file) && s >= nameThreshold;
+    else if (ka === 'chunk') hit = s >= chunkThreshold || (s >= 0.4 && a.name?.split('.').pop() === b.name?.split('.').pop());
+    else hit = s >= threshold || (a.exports?.some((n) => b.exports?.includes(n)) && s >= nameThreshold);
+    if (hit) { parent[find(i)] = find(j); sims.set(`${i}:${j}`, s); }
   }
   const groups = new Map(); items.forEach((it, i) => { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); });
-  const out = [];
+  const out = []; const chunkFiles = new Set();
   for (const idx of groups.values()) {
-    if (idx.length < 2) continue; const members = idx.map((i) => items[i]); const best = Math.max(...[...sims.entries()].filter(([k]) => { const [x, y] = k.split(':').map(Number); return idx.includes(x) && idx.includes(y); }).map(([, s]) => s), 0);
-    const names = {}; for (const m of members) for (const n of m.exports ?? []) names[n] = (names[n] ?? 0) + 1; const top = Object.entries(names).sort((a, b) => b[1] - a[1])[0]?.[0];
-    const projects = [...new Set(members.map((m) => m.project))];
-    out.push({ name: top ?? path.basename(members[0].file).replace(/\.[^.]+$/, ''), similarity: Math.round(best * 100), projects, locations: members.map((m) => ({ project: m.project, file: m.file, lines: m.lines })), template: members.every((m) => m.kind === 'boilerplate'), reason: members.every((m) => m.kind === 'boilerplate') ? `The same template file in ${projects.length} project${projects.length > 1 ? 's' : ''}: a recipe, not an importable part` : projects.length > 1 ? `The same code appears in ${projects.length} projects` : 'Near-identical files in one project' });
+    if (idx.length < 2) continue; const members = idx.map((i) => items[i]); const kind = kindOf(members[0]);
+    const best = Math.max(...[...sims.entries()].filter(([k]) => { const [x, y] = k.split(':').map(Number); return idx.includes(x) && idx.includes(y); }).map(([, v]) => v));
+    const names = {}; for (const m of members) for (const n of (m.kind === 'chunk' ? [m.name] : m.exports ?? [])) names[n] = (names[n] ?? 0) + 1; const top = Object.entries(names).sort((a, b) => b[1] - a[1])[0]?.[0];
+    const projects = [...new Set(members.map((m) => m.project))]; const tags = [...new Set(members.flatMap((m) => m.tags ?? []))]; const avg = members.reduce((n, m) => n + m.lines, 0) / members.length;
+    if (kind === 'chunk' && avg < 12 && !tags.length) continue;                                 // a small function that does nothing special is not worth a part
+    const weight = tags.reduce((n, t) => n + (TAG_WEIGHT[t] ?? 0), 0); const value = Math.round((Math.log2(avg + 1) * 2 + weight) * (1 + 0.5 * (projects.length - 1)) * 10) / 10;
+    if (kind === 'chunk') for (const m of members) chunkFiles.add(`${m.project}:${m.file}`);
+    out.push({ name: top ?? path.basename(members[0].file).replace(/\.[^.]+$/, ''), kind, similarity: Math.round(best * 100), projects, tags, value, template: kind === 'template',
+      locations: members.map((m) => ({ project: m.project, file: m.file, lines: m.lines, ...(m.name ? { name: m.name, type: m.type, start: m.start } : {}) })),
+      reason: kind === 'template' ? `The same template file in ${projects.length} project${projects.length > 1 ? 's' : ''}` : projects.length > 1 ? `Found in ${projects.length} projects${tags.length ? ` · ${tags.join(', ')}` : ''}` : 'Near-identical code in one project', inLibrary: null });
   }
-  return out.sort((a, b) => b.projects.length - a.projects.length || b.similarity - a.similarity || b.locations.length - a.locations.length).slice(0, 40);
+  // Same interface, different code: classes whose method names mostly agree, in different projects, that the code comparison did not already join.
+  const classes = items.filter((m) => m.kind === 'chunk' && m.type === 'class' && (m.methods ?? []).filter((x) => !SKIP_METHODS.has(String(x).toLowerCase())).length >= 4);
+  const meth = (m) => new Set(m.methods.map((x) => String(x).toLowerCase()).filter((x) => !SKIP_METHODS.has(x))); const pp = classes.map((_, i) => i); const pf = (i) => (pp[i] === i ? i : (pp[i] = pf(pp[i]))); const pairs = [];
+  for (let i = 0; i < classes.length; i++) for (let j = i + 1; j < classes.length; j++) { const a = classes[i], b = classes[j]; if (a.project === b.project) continue; if (similarity(a.sig, b.sig) >= chunkThreshold) continue;
+    const x = meth(a), y = meth(b); const inter = [...x].filter((n) => y.has(n)).length; const jac = inter / (x.size + y.size - inter); if (inter >= 4 && jac >= 0.6) { pp[pf(i)] = pf(j); pairs.push(jac); } }
+  const pg = new Map(); classes.forEach((c, i) => { const r = pf(i); if (!pg.has(r)) pg.set(r, []); pg.get(r).push(c); });
+  for (const members of pg.values()) { const projects = [...new Set(members.map((m) => m.project))]; if (members.length < 2 || projects.length < 2) continue;
+    const common = [...meth(members[0])].filter((n) => members.every((m) => meth(m).has(n))); const avg = members.reduce((n, m) => n + m.lines, 0) / members.length;
+    out.push({ name: members[0].name, kind: 'pattern', similarity: Math.round((pairs.reduce((n, v) => n + v, 0) / Math.max(1, pairs.length)) * 100), projects, tags: ['adapter'], value: Math.round((6 + common.length + Math.log2(avg + 1)) * (1 + 0.5 * (projects.length - 1)) * 10) / 10, template: false,
+      locations: members.map((m) => ({ project: m.project, file: m.file, lines: m.lines, name: m.name, type: m.type, start: m.start })), reason: `Same interface, different code: ${common.slice(0, 6).join(', ')}${common.length > 6 ? '…' : ''}`, inLibrary: null }); }
+  // a whole-file group is redundant when its files are already covered by a more precise chunk group
+  const result = out.filter((g) => g.kind !== 'file' || !g.locations.every((l) => chunkFiles.has(`${l.project}:${l.file}`)));
+  return result.sort((a, b) => (b.projects.length > 1) - (a.projects.length > 1) || b.value - a.value || b.locations.length - a.locations.length).slice(0, limit);
 }
 // The compact index stored with each project's analysis so candidates can be found across projects without re-reading their code.
 const FP_LANGS = new Set(['JavaScript', 'TypeScript', 'Python', 'Go', 'Vue', 'Svelte', 'CSS', 'Ruby', 'PHP', 'Java', 'Kotlin']);

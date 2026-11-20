@@ -46,19 +46,20 @@ test('which files count as templates: scripts, packaging, CI and container files
 test('the same installer written per app is found across projects; an unrelated script with the same name is not; templates are never mixed with code', () => {
   const items = { rampilot: [sigs('rampilot', 'install.sh', installer('rampilot', 'RAMPilot'))], envlens: [sigs('envlens', 'install.sh', installer('envlens', 'EnvLens'))], netatlas: [sigs('netatlas', 'install.sh', installer('netatlas', 'NetAtlas'))], backups: [sigs('backups', 'install.sh', unrelated)] };
   for (const l of Object.values(items)) delete l[0].project;
-  const found = candidates(items).filter((c) => c.projects.length > 1);
+  assert.equal(candidates(items).length, 0, 'templates are off by default: they are low value');
+  const found = candidates(items, { templates: true }).filter((c) => c.projects.length > 1);
   assert.equal(found.length, 1); assert.deepEqual(found[0].projects.sort(), ['envlens', 'netatlas', 'rampilot']); assert.equal(found[0].template, true); assert.match(found[0].reason, /same template file in 3 projects/); assert.ok(!found[0].projects.includes('backups'));
   // a code file with similar words must not join a template group
   const code = { file: 'src/install.py', lines: 20, exports: ['install'], sig: items.rampilot[0].sig };
-  assert.equal(candidates({ a: items.rampilot, b: [code] }).filter((c) => c.projects.length > 1).length, 0);
+  assert.equal(candidates({ a: items.rampilot, b: [code] }, { templates: true }).filter((c) => c.projects.length > 1).length, 0);
   // same file in the same project is not a cross-project template
-  assert.equal(candidates({ a: [items.rampilot[0], { ...items.envlens[0], file: 'tools/install.sh' }] }).length, 0);
+  assert.equal(candidates({ a: [items.rampilot[0], { ...items.envlens[0], file: 'tools/install.sh' }] }, { templates: true }).length, 0);
 });
 
 test('analysis records template fingerprints next to code fingerprints (capped), without reading outside the repo', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'tp-')); fs.mkdirSync(path.join(d, 'packaging'), { recursive: true }); fs.mkdirSync(path.join(d, 'src'), { recursive: true });
   fs.writeFileSync(path.join(d, 'install.sh'), installer('thing', 'Thing')); fs.writeFileSync(path.join(d, 'packaging/build-deb.sh'), installer('thing', 'Thing').replace('install ', 'build ')); fs.writeFileSync(path.join(d, 'LICENSE'), 'MIT\n'.repeat(30));
   fs.writeFileSync(path.join(d, 'src/app.js'), Array.from({ length: 30 }, (_, i) => `export function f${i}(a, b) { return a * ${i} + b; }`).join('\n'));
-  const m = codeMetrics(d); const prints = m._prints; assert.deepEqual(prints.filter((p) => p.kind === 'boilerplate').map((p) => p.file).sort(), ['install.sh', 'packaging/build-deb.sh']); assert.ok(prints.some((p) => p.file === 'src/app.js' && !p.kind), 'code fingerprints are unchanged');
-  for (let i = 0; i < 120; i++) fs.writeFileSync(path.join(d, `s${i}.sh`), installer(`app${i}`, `App${i}`)); assert.ok(codeMetrics(d)._prints.filter((p) => p.kind === 'boilerplate').length <= 80, 'templates are capped per project');
+  assert.equal(codeMetrics(d)._prints.filter((p) => p.kind === 'boilerplate').length, 0, 'not collected unless asked for'); const m = codeMetrics(d, { templates: true }); const prints = m._prints; assert.deepEqual(prints.filter((p) => p.kind === 'boilerplate').map((p) => p.file).sort(), ['install.sh', 'packaging/build-deb.sh']); assert.ok(prints.some((p) => p.file === 'src/app.js' && !p.kind), 'code fingerprints are unchanged');
+  for (let i = 0; i < 120; i++) fs.writeFileSync(path.join(d, `s${i}.sh`), installer(`app${i}`, `App${i}`)); assert.ok(codeMetrics(d, { templates: true })._prints.filter((p) => p.kind === 'boilerplate').length <= 80, 'templates are capped per project');
 });

@@ -405,7 +405,7 @@ export class Engine {
   async analyzeProject(id, { onPhase } = {}) {
     const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const prevHistory = p.profile?.history;
-    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, ignore: this._analysisCfg(p), onPhase, onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [] }; this._persist(); } });
+    const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, ignore: this._analysisCfg(p), onPhase, onProfile: (pr) => { const { chunks, ...rest } = pr; this._saveChunks(p.id, chunks); p.profile = { ...rest, history: prevHistory ?? [] }; this._persist(); } });
     profile.history = addHistory(prevHistory, profile);
     p.profile = profile; this._persist(); return p.profile;
   }
@@ -573,9 +573,12 @@ export class Engine {
   libraryPart(slug) { this._lib(); return { ...lb.readPart(this._libDir(), slug), usedBy: this._usage().entries.filter((u) => u.slug === lb.slugify(slug)) }; }
 
   // Repeated code across (and within) your projects, from the fingerprints stored with each analysis; marks what the library already has.
+  // Function-level fingerprints live next to the project's state, not in the config file (hundreds per project).
+  _saveChunks(id, chunks) { try { const f = path.join(this.projectDir(this.project(id)), 'chunks.json'); fs.writeFileSync(`${f}.tmp`, JSON.stringify({ at: new Date().toISOString(), chunks: Array.isArray(chunks) ? chunks.slice(0, 500) : [] })); fs.renameSync(`${f}.tmp`, f); } catch { /* optional data: never blocks an analysis */ } }
+  _loadChunks(id) { try { const j = JSON.parse(fs.readFileSync(path.join(this.cfg.stateDir, 'projects', id, 'chunks.json'), 'utf8')); return (Array.isArray(j.chunks) ? j.chunks : []).filter((c) => c && c.kind === 'chunk' && Array.isArray(c.sig) && c.sig.length === 24); } catch { return []; } }
   libraryCandidates() {
-    const prints = {}; for (const p of this.cfg.projects) if (p.profile?.fingerprints?.length) prints[p.id] = p.profile.fingerprints; const cat = this._catalogNow();
-    return lb.candidates(prints).map((c) => { const hit = c.locations.map((l) => { const fp = prints[l.project]?.find((f) => f.file === l.file); let best = null; for (const part of cat) for (const pr of part.prints) { const s = fp ? lb.similarity(fp.sig, pr.sig) : 0; if (s >= 0.6 && (!best || s > best.s)) best = { s, slug: part.slug }; } return best; }).find(Boolean);
+    const prints = {}; for (const p of this.cfg.projects) { const all = [...(p.profile?.fingerprints ?? []), ...this._loadChunks(p.id)]; if (all.length) prints[p.id] = all; } const cat = this._catalogNow();
+    return lb.candidates(prints).map((c) => { const hit = c.locations.map((l) => { const fp = prints[l.project]?.find((f) => f.file === l.file && (l.name ? f.name === l.name : !f.name)); let best = null; for (const part of cat) for (const pr of part.prints) { const s = fp ? lb.similarity(fp.sig, pr.sig) : 0; if (s >= 0.6 && (!best || s > best.s)) best = { s, slug: part.slug }; } return best; }).find(Boolean);
       return { ...c, inLibrary: hit?.slug ?? null }; });
   }
   async _projectFiles(p, paths, { withTests = true } = {}) {

@@ -113,7 +113,7 @@ function profilesTab({ parts, projects, profiles, ctx }) {
 // ------------------------------------------------------------ repeated code -> promote
 function candidatesTab({ candidates, projects, ctx }) {
   if (!candidates.length) return [card('', h('p', { class: 'ok-note big' }, icon('check', 20), ' No repeated code found across your projects yet.'), h('p', { class: 'muted small' }, 'Candidates appear after each project is analyzed (Code tab → Re-analyze). The factory compares fingerprints of every source file, so renamed copies are found too.'))];
-  return [card('', h('div', { class: 'card-h' }, h('h2', {}, 'Repeated code worth promoting'), pill(`${candidates.length} found`, 'warn')), h('p', { class: 'muted small' }, 'The same code appears more than once. Promote the best copy to the library, then the factory points every future build at it.'),
+  return [card('', h('div', { class: 'card-h' }, h('h2', {}, 'Repeated code worth promoting (best first)'), pill(`${candidates.length} found`, 'warn')), h('p', { class: 'muted small' }, 'The same code appears more than once. Promote the best copy to the library, then the factory points every future build at it.'),
     h('div', { class: 'dups' }, candidates.map((c) => candidate(c, ctx))))];
 }
 function candidate(c, ctx) {
@@ -130,8 +130,8 @@ function candidate(c, ctx) {
     box.replaceChildren(h('div', { class: 'promote' }, h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Part name'), name), h('div', {}, h('label', {}, 'Take the code from'), from)), h('label', {}, 'Summary'), summary, h('label', {}, 'Tags'), tags, h('label', {}, 'Files (matching tests are added automatically)'), files,
       h('label', { class: 'check' }, direct, ' Add straight to the library without a pull request (your own library)'), h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: go }, 'Promote to the library'), h('button', { class: 'btn ghost', onclick: () => box.replaceChildren() }, 'Cancel'))));
   };
-  return h('article', { class: 'dup' }, h('div', { class: 'dup-h' }, h('div', { class: 'row' }, h('b', { class: 'f-title' }, c.name), pill(`${c.similarity}% similar`, 'warn'), pill(c.reason, 'muted'), c.inLibrary ? pill(`already in the library: ${c.inLibrary}`, 'ok') : null, c.template ? pill('template', 'info') : null), c.inLibrary || c.template ? null : h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: form }, icon('plus', 12), 'Promote…'), h('button', { class: 'btn small ghost', title: 'The code is tangled into the project: have the agent extract a clean module first', onclick: extract }, 'Extract cleanly first'))),
-    h('ul', { class: 'plain' }, c.locations.map((l) => h('li', { class: 'small mono' }, h('b', {}, l.project), ` · ${l.file} · ${l.lines} lines`))), box);
+  return h('article', { class: 'dup' }, h('div', { class: 'dup-h' }, h('div', { class: 'row' }, h('b', { class: 'f-title' }, c.name), pill(`${c.similarity}% similar`, 'warn'), c.kind === 'pattern' ? pill('same interface', 'info') : null, ...(c.tags ?? []).map((t) => pill(t, 'info')), pill(c.reason, 'muted'), c.inLibrary ? pill(`already in the library: ${c.inLibrary}`, 'ok') : null, c.template ? pill('template', 'info') : null), c.inLibrary || c.template ? null : h('div', { class: 'row' }, h('button', { class: 'btn small', onclick: form }, icon('plus', 12), 'Promote…'), h('button', { class: 'btn small ghost', title: 'The code is tangled into the project: have the agent extract a clean module first', onclick: extract }, 'Extract cleanly first'))),
+    h('ul', { class: 'plain' }, c.locations.map((l) => h('li', { class: 'small mono' }, h('b', {}, l.project), ` · ${l.file}${l.name ? ` · ${l.name} (line ${l.start})` : ''} · ${l.lines} lines`))), box);
 }
 
 // ------------------------------------------------------------ upgrades and how it works
