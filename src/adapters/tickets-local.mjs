@@ -39,7 +39,7 @@ export function localTickets({ dir, project = 'project' }) {
       const i = { id: d.next++, type: 'epic', title: t, body: clip(body, 20_000), labels: ['factory-plan'], state: 'open', epic: null, comments: [], createdAt: now(), updatedAt: now() }; d.issues.push(i); save(d); return { id: i.id, url: `local:${project}/${i.id}` };
     },
     async get(id) {
-      const d = load(); const i = find(d, id); const out = { ...view(i), comments: (i.comments ?? []).map((c) => ({ author: c.author, body: c.body, at: c.at, factory: /^agent-factory|^Opened https?:/.test(c.body) })) };
+      const d = load(); const i = find(d, id); const out = { ...view(i), comments: (i.comments ?? []).map((c) => ({ author: c.author, body: c.body, at: c.at, factory: /^agent-factory|^Opened (?:https?:|local-pr:)/.test(c.body) })) };
       if (i.type === 'epic') out.children = d.issues.filter((x) => String(x.epic) === String(i.id)).map(view);
       if (i.epic) { const e = d.issues.find((x) => String(x.id) === String(i.epic)); if (e) out.epicInfo = { id: e.id, title: e.title, url: `local:${project}/${e.id}` }; }
       return out;
@@ -48,7 +48,7 @@ export function localTickets({ dir, project = 'project' }) {
     async close(id) { mutate(id, (i, d) => { i.state = 'closed'; settleEpic(d, i.epic); }); },
     async reopen(id) { mutate(id, (i, d) => { i.state = 'open'; settleEpic(d, i.epic); }); },
     async label(id, add = [], remove = []) { mutate(id, (i) => { i.labels = [...new Set([...i.labels.filter((l) => !remove.includes(l)), ...add.map((l) => clip(l, 60))])]; }); },
-    async comment(id, text) { const body = clip(text, 20_000); if (!body.trim()) return; mutate(id, (i) => { (i.comments ??= []).push({ author: /^agent-factory|^Opened https?:/.test(body) ? 'agent-factory' : 'you', body, at: now() }); }); },
+    async comment(id, text) { const body = clip(text, 20_000); if (!body.trim()) return; mutate(id, (i) => { (i.comments ??= []).push({ author: /^agent-factory|^Opened (?:https?:|local-pr:)/.test(body) ? 'agent-factory' : 'you', body, at: now() }); }); },
     // Everything, for the tracker views: epics with their children and progress.
     async overview() { const d = load(); return { epics: d.issues.filter((i) => i.type === 'epic').map((e) => { const kids = d.issues.filter((x) => String(x.epic) === String(e.id)); return { ...view(e), total: kids.length, done: kids.filter((k) => k.state === 'closed').length }; }), tickets: tasks(d).length }; },
   };

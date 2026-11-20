@@ -25,7 +25,9 @@ const HELP = `agent-factory <command>
   init           first-run setup: checks prerequisites, logs the agent in, adds a project
   start          run the factory and the web UI   (--no-loop = UI only)
   doctor         check that everything is ready
-  add <o/r>      add a GitHub repo as a project  (--tracker=local to use the built-in tracker)
+  add <o/r>      add a GitHub repo as a project  (--tracker=local to use the built-in tracker; --host=local to keep the code on this machine)
+  merge <project> <pr>   merge a local-forge pull request (human action)
+  publish <project>      push a local-forge project's base branch to its publish target
   tick           claim queued tickets once and exit
   feedback       process CI/review feedback on open agent PRs once and exit
   analyze [dir|url]  inspect a folder or git URL: layout, repeated code, untested files, quality (no config needed; --json, --ignore=a,b, --no-default-ignore)
@@ -105,7 +107,9 @@ WantedBy=default.target
   if (['ops', 'op', 'portfolio', 'brief', 'source', 'plan', 'library', 'scenario', 'agents-md'].includes(cmd)) { try { await clientCommand(cmd, args, flags, cfg, root); } catch (e) { console.error(`Error: ${e.message}`); process.exit(1); } return; }
   const problems = validateConfig(cfg); if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
   const engine = new Engine(cfg, { configPath });
-  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo, ...(flags.tracker === 'local' ? { source: { kind: 'local' } } : {}) }); return console.log(`Added ${p.id} (base ${p.base})`); }
+  if (cmd === 'add') { const repo = args.find((a, i) => i > 0 && !a.startsWith('--')); const p = await engine.addProject({ repo, ...(flags.tracker === 'local' ? { source: { kind: 'local' } } : {}), ...(flags.host === 'local' ? { host: { kind: 'local', ...(flags.import ? { importFrom: flags.import } : {}) } } : {}) }); return console.log(`Added ${p.id} (base ${p.base})`); }
+  if (cmd === 'merge') { const [, proj, n] = args; console.log(JSON.stringify(await engine.prAction(proj, n, 'merge'), null, 2)); return process.exit(0); }
+  if (cmd === 'publish') { console.log(JSON.stringify(await engine.publish(args[1], { switchHost: false }), null, 2)); return process.exit(0); }
   if (cmd === 'tick' || cmd === 'feedback') { await engine.start(); const r = await (cmd === 'tick' ? engine.tickAll() : engine.feedbackAll()); console.log(JSON.stringify(r, null, 2)); return; }
   if (cmd === 'start') {
     await engine.start();

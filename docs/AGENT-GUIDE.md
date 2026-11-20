@@ -70,6 +70,8 @@ Every project has a private webhook: `agent-factory op webhook_info --project=my
 
 ## Rules
 
+* `create_project` takes `host: "local"` (code kept on this machine, no GitHub) and `tracker: "local"` (built-in tracker), plus `verify` (the test command; new repositories have nothing to auto-detect).
+* Merging and publishing are **human-only**: there is no operation for them, by design. Open the PR and tell the human it is ready.
 * Do not weaken, delete or skip existing tests to make a change pass. The factory detects it, sends you back once, and flags the PR. If an expectation is wrong, say so in the PR so the owner can decide.
 * Your claim on a ticket can expire or be taken over. If it is, nothing you produce is accepted.
 * Do not try to merge, force-push or bypass the quality gate. The factory has protected paths, a daily run cap and a pause switch (`agent-factory op set_paused --paused=true`).

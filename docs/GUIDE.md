@@ -216,6 +216,18 @@ The library holds more than code. Part kinds now include **theme** (design token
 
 Choose **Built-in tracker** as a project's ticket source (or `agent-factory add o/r --tracker=local`, or `tracker: "local"` in `create_project`). There is no account, token or network involved: issues, epics, comments and states live in `state/projects/<id>/tracker.json`. Plans create real epics there, an epic closes by itself when its last ticket closes, and webhooks, scenarios and the inbox work as with any other tracker. Only the factory can create tickets, so there is no "who may queue work" list. Back up that file like any other state; a corrupt file stops the tracker and keeps a copy instead of starting empty.
 
+### The local forge (new): code without an account
+
+Choose **On this machine** as the place the code lives (Studio → New project, or `agent-factory add my-app --host=local`). The factory keeps a bare git repository for the project in `state/forge/<id>/repo.git` and the agent builds into it exactly as it would on GitHub.
+
+1. **Review.** The project's *Pull requests* tab lists the PRs the factory opened. Open one to see the files changed, a coloured diff, the quality gate, the agent's assumptions and the *Provenance* note (which commit the checks ran against, or that nothing machine-checked it).
+2. **Comment, merge or close.** Comments are read by the factory when you re-queue. **Merge** fast-forwards when the branch is simply ahead of the base, otherwise makes a clean merge commit; if it conflicts, nothing changes and you are told to re-queue the ticket so it is rebuilt on the current base. Merge is blocked if the branch changed after the factory verified it, or if it touches protected files (CI config, anything the repo lists in `.agent-factory.json`).
+3. **Publish.** Under the PR list, set a *publish target* (GitHub, GitLab, Bitbucket or any git remote) and press **Publish** to push the base branch. It never force-pushes; if the remote has commits you do not have, it refuses and you bring them in yourself. **Publish and switch** also moves the project to the real repository from then on (you say which usernames there may comment on PRs). The same is available as `agent-factory publish <project>` and as a `publish` scenario step that must come after a human approval step.
+
+Give a new project a **test command** (for example `npm test`): an empty repository has nothing to auto-detect, and without one every PR says it was not machine-checked.
+
+What it is not: a hosting server (nobody else can clone from it until you publish), a CI system, or a team review tool (no inline comments or multiple approvers).
+
 ### Keeping the agent honest (new)
 
 * **It cannot mark its own homework.** If a run removes assertions from an existing test, deletes a test file, or switches a test off, the quality gate flags it, sends the agent back once ("restore the test and fix the code; if an expectation is wrong, say why"), and flags the PR if it persists. New tests are always welcome. Make it stricter with `"qualityGate": { "blockTestWeakening": true }`, or protect specific files outright with `protectedPaths` (for example `test/fixtures/`) in the repo's `.agent-factory.json`, which the agent cannot edit.

@@ -1,6 +1,16 @@
 # Design: the local forge
 
-Status: proposal, nothing built yet. Read it, change what you disagree with, then I build it.
+Status: **built** (see the README's *Local-first* section). This document keeps the original proposal; the notes below say where the build differs from it.
+
+### What changed in the build
+- **Merge:** fast-forward when the branch is simply ahead; otherwise a clean merge commit (built with `git merge-tree` and `commit-tree`, no checkout). Fast-forward only was not workable: with several tickets built in parallel from the same base, every PR after the first merge would have been refused.
+- **Merge is blocked** when the branch head is not the one the factory last verified (a manual push, for example), as well as on protected-file changes and conflicts.
+- **Publish carries the full history** and pushes the **base branch only** (no PR mirroring). The proposed "refuse while PRs are open" rule was dropped: unmerged PRs are not on the base branch, so they are never included; the UI says how many are still open.
+- **Extra hardening found while testing:** the bare repo also has to ignore hooks in its own config, because a push runs `git-receive-pack` which reads that config and not the options the factory passes. A test with planted hooks caught this.
+- **Not built:** squashing agent PRs on publish, mirrored draft PRs on the remote, inline review comments, a lock for several factory processes.
+
+---
+
 
 ## Why
 

@@ -88,6 +88,11 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m) => engine.listTickets(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m, b) => engine.createTicket(m[1], b)],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/prs$/, async (m) => engine.listPrs(m[1])],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/prs\/(\d{1,9})$/, async (m) => engine.prDetail(m[1], m[2])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/prs\/(\d{1,9})\/(merge|close|comment)$/, async (m, b) => engine.prAction(m[1], m[2], m[3], b)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/publish$/, async (m) => engine.publishStatus(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/publish-target$/, async (m, b) => engine.setPublishTarget(m[1], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/publish$/, async (m, b) => engine.publish(m[1], b)],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/log$/, async (m) => {
       const dir = path.join(engine.projectDir(engine.project(m[1])), 'logs'); const files = fs.readdirSync(dir).sort();
       return { lines: files.length ? fs.readFileSync(path.join(dir, files.at(-1)), 'utf8').split('\n').slice(-200) : [] };

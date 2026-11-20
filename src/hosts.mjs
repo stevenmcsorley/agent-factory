@@ -3,6 +3,7 @@ import { githubHost } from './adapters/githost-github.mjs';
 import { gitlabHost } from './adapters/host-gitlab.mjs';
 import { bitbucketHost } from './adapters/host-bitbucket.mjs';
 import { gitHost } from './adapters/host-git.mjs';
+import { localHost, forgeDir } from './adapters/host-local.mjs';
 import { inspectRepo as ghInspect, whoami as ghWhoami } from './github.mjs';
 import { checkBaseUrl, TOKEN_ENV } from './sources.mjs';
 import { normalizeRepo } from './repoRef.mjs';
@@ -21,6 +22,11 @@ export const HOSTS = {
       whoami: ghWhoami, inspectRepo: () => ghInspect(repo),
       async openPr({ repo: r = repo, branch, base, title, body }) { const x = await (c.exec ?? run)('gh', ['pr', 'create', '-R', r, '--head', branch, '--base', base, '--title', title, '--body', body, '--draft']); if (x.code !== 0) throw new Error(`gh pr create failed: ${x.out.trim().slice(0, 300)}`); return x.out.trim().split('\n').pop(); },
       pr: githubHost({ repo, allowedAuthors: c.allowedAuthors }) }; },
+  },
+  local: {
+    label: 'On this machine', blurb: 'No account, no token, no network. Code lives in a repository inside the factory; you review the diff and merge here, and publish to GitHub (or anywhere) when you are ready.', fields: [], repoPattern: R_FLAT, repoHint: 'local/name', pr: true, local: true,
+    validate: () => [],
+    build: (p, c) => localHost({ project: p.id, dir: forgeDir(c.stateDir, p.id), base: p.base, exec: c.exec }),
   },
   gitlab: {
     label: 'GitLab', blurb: 'gitlab.com or self-managed. Opens merge requests ("Draft:") and reads pipeline logs and comments.',

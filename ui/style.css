@@ -312,3 +312,10 @@ details.ready { margin: 6px 0 10px; } details.ready summary { cursor: pointer; d
 .linklike { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
 .linklike:hover { text-decoration: underline; }
 .cmt { padding: 8px 0; border-bottom: 1px solid var(--line); }
+
+.diff { background: var(--bg); border: 1px solid var(--line); padding: 8px; overflow-x: auto; font: 12px/1.45 ui-monospace, monospace; margin: 8px 0 0; }
+.dl { display: block; white-space: pre; }
+.d-add { background: rgba(60, 170, 90, .18); }
+.d-del { background: rgba(220, 70, 70, .18); }
+.d-hunk { color: var(--accent); }
+.d-meta { color: var(--muted); }

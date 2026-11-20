@@ -39,9 +39,12 @@ export function validateScenario(raw) {
   const id = String(raw?.id ?? ''); if (!ID.test(id)) throw bad('scenario id must be lowercase letters, digits and dashes');
   const steps = Array.isArray(raw.steps) ? raw.steps : []; if (!steps.length || steps.length > 60) throw bad('a scenario needs between 1 and 60 steps');
   const seen = new Set(); const out = steps.map((s, i) => { const sid = String(s?.id ?? ''); if (!ID.test(sid) || seen.has(sid)) throw bad(`step ${i + 1}: id must be unique lowercase letters, digits and dashes`); seen.add(sid);
-    if (!s.type || !(STEP_TYPES.has(s.type) || ['ticket', 'check', 'approve', 'http', 'note'].includes(s.type))) throw bad(`step "${sid}": unknown type "${s.type}"${s.type?.includes('.') ? ' (is the plugin enabled?)' : ''}`);
+    if (!s.type || !(STEP_TYPES.has(s.type) || ['ticket', 'check', 'approve', 'http', 'note', 'publish'].includes(s.type))) throw bad(`step "${sid}": unknown type "${s.type}"${s.type?.includes('.') ? ' (is the plugin enabled?)' : ''}`);
     return { ...s, id: sid, title: clip(s.title ?? sid, 120), requires: Array.isArray(s.requires) ? s.requires.map(String) : i ? [steps[i - 1].id] : [] }; });
   for (const s of out) for (const r of s.requires) if (!seen.has(r) || r === s.id) throw bad(`step "${s.id}" requires unknown step "${r}"`);
+  // Publishing pushes code to a real remote: it may only run after a human approval step that it (transitively) requires.
+  const byId = new Map(out.map((s) => [s.id, s])); const approved = (s, seenIds = new Set()) => s.requires.some((r) => { if (seenIds.has(r)) return false; seenIds.add(r); const x = byId.get(r); return x.type === 'approve' || approved(x, seenIds); });
+  for (const s of out) if (s.type === 'publish' && !approved(s)) throw bad(`step "${s.id}" publishes code, so it must come after an approve step`);
   const secrets = (Array.isArray(raw.secrets) ? raw.secrets : []).map(String); for (const x of secrets) if (!SECRET.test(x)) throw bad(`secret "${x}" must look like AF_MY_TOKEN`);
   const allowHosts = (Array.isArray(raw.allowHosts) ? raw.allowHosts : []).map((h) => String(h).toLowerCase()); for (const h of allowHosts) if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(h) || /^\d+\.\d+\.\d+\.\d+$/.test(h)) throw bad(`allowHosts entry "${h}" must be a public host name`);
   const params = Object.fromEntries(Object.entries(raw.params ?? {}).slice(0, 20).map(([k, v]) => { if (!/^[a-zA-Z][\w]{0,30}$/.test(k)) throw bad(`param name "${k}" is not allowed`); return [k, { label: clip(v?.label ?? k, 60), required: !!v?.required, default: v?.default === undefined ? undefined : clip(v.default, 200), help: clip(v?.help, 200) }]; }));
@@ -88,6 +91,10 @@ const BUILTIN = {
   check: {
     describe: (a) => `check: ${a.check}${a.url ? ` ${a.url}` : ''}`,
     run: async (a, ctx) => { const fn = CHECKS[a.check]; if (!fn) throw bad(`Unknown check "${a.check}" (${Object.keys(CHECKS).join(', ')})`); const r = await fn({ ...ctx, args: a }); return r.ok ? { detail: r.detail } : { wait: true, detail: r.detail }; },
+  },
+  publish: {
+    describe: (a, ctx) => `push the base branch of this project's local repository to its publish target${a.switchHost ? ' and switch the project to that repository' : ''}`,
+    run: async (a, ctx) => { if (ctx.dryRun) return { dryRun: true }; const r = await ctx.engine.publish(ctx.project, { switchHost: !!a.switchHost, feedbackAuthors: a.feedbackAuthors }); return { detail: r.upToDate ? 'already up to date' : `pushed ${String(r.sha).slice(0, 10)}`, ...r }; },
   },
   approve: { describe: (a) => `ask a human: ${a.message ?? 'Continue?'}`, run: async () => ({ wait: true, detail: 'waiting for a human to approve' }) },
   http: {

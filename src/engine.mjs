@@ -14,7 +14,8 @@ import { LIBRARY_README, PARTS_WORKFLOW, CHECK_PARTS } from './library-seed.mjs'
 import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
 import { buildTickets, identifySource, publicSources, SOURCES, TOKEN_ENV, ossiconeSignupInfo } from './sources.mjs';
-import { buildHost, identifyHost, publicHosts, hostKind, HOSTS } from './hosts.mjs';
+import { buildHost, identifyHost, publicHosts, hostKind, HOSTS, validateHost } from './hosts.mjs';
+import { initForge, forgeDir } from './adapters/host-local.mjs';
 import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
 import { agents } from './adapters/agents.mjs';
 import { gitVcs } from './adapters/vcs.mjs';
@@ -84,7 +85,7 @@ export class Engine {
   deps(p) {
     const dir = this.projectDir(p);
     const log = path.join(dir, 'logs', `${new Date().toISOString().slice(0, 10)}.log`);
-    const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, dir: this.projectDir(p), projectId: p.id, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log });
     const a = this.cfg.agent;
@@ -245,8 +246,36 @@ export class Engine {
   }
 
   async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
+  // ---- the local forge: review, merge and publish. Human actions only (UI, REST, CLI): none of these is an agent operation.
+  _forge(p) { const a = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); if (!a.forge) throw Object.assign(new Error('This project does not use the local forge'), { status: 400 }); return a; }
+  prDetail(id, n) { return this._forge(this.project(id)).diff(n); }
+  async prAction(id, n, action, body = {}) {
+    const f = this._forge(this.project(id)); this.cache.delete(`p:${id}`);
+    if (action === 'merge') return f.merge(n); if (action === 'close') return f.close(n); if (action === 'comment') return f.comment(n, body.text);
+    throw Object.assign(new Error('Unknown action'), { status: 400 });
+  }
+  async setPublishTarget(id, { kind, repo: input, fields = {}, token }) {
+    const p = this.project(id); this._forge(p); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!['github', 'gitlab', 'bitbucket', 'git'].includes(kind)) throw bad('Publish to github, gitlab, bitbucket or git');
+    const repo = this._repoFor(kind, input); const { token: _t, ...clean } = fields; const upper = id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const target = { kind, repo, ...clean, ...(HOSTS[kind].fields.some((x) => x.secret) ? { tokenEnv: `AF_${upper}_PUBLISH_TOKEN` } : {}) };
+    const problems = validateHost({ id, repo, host: target }); if (problems.length) throw bad(problems.join('; '));
+    if (token && target.tokenEnv) this.saveSecret(target.tokenEnv, token);
+    p.publish = target; this._persist(); return { publish: this.publishInfo(id) };
+  }
+  publishInfo(id) { const p = this.project(id); this._forge(p); return p.publish ? { kind: p.publish.kind, repo: p.publish.repo } : null; }
+  _publishTarget(p) { if (!p.publish) throw Object.assign(new Error('Set a publish target first (where should this code go?)'), { status: 400 }); const t = buildHost({ id: p.id, repo: p.publish.repo, host: p.publish, tickets: p.tickets, feedbackAuthors: p.feedbackAuthors ?? [] }, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return { remoteUrl: t.cloneUrl(p.publish.repo), gitEnv: t.gitEnv() }; }
+  async publishStatus(id) { const p = this.project(id); const f = this._forge(p); if (!p.publish) return { target: null, open: f.list({ state: 'open' }).length }; const r = await f.ahead({ ...this._publishTarget(p), branch: p.base }); return { target: this.publishInfo(id), ...r, open: f.list({ state: 'open' }).length }; }
+  async publish(id, { switchHost = false, feedbackAuthors } = {}) {
+    const p = this.project(id); const f = this._forge(p); const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (switchHost && !(Array.isArray(feedbackAuthors) && feedbackAuthors.length)) throw bad('To switch this project to the published repository, say which usernames there may comment on pull requests (feedbackAuthors).');
+    const t = this._publishTarget(p); const st = await f.ahead({ ...t, branch: p.base }); let r = { pushed: false, upToDate: true, sha: st.local };
+    if (!st.upToDate) r = await f.publish({ ...t, branch: p.base });
+    if (switchHost) { const { repo: newRepo, ...hostCfg } = p.publish; p.host = hostCfg; p.repo = newRepo; p.feedbackAuthors = feedbackAuthors.map(String); delete p.publish; this._persist(); this.cache.delete(`p:${id}`); r.switched = true; }
+    return r;
+  }
   repoUrl(p) { const k = hostKind(p); return k === 'github' ? `https://github.com/${p.repo}` : k === 'gitlab' ? `${(p.host.baseUrl ?? 'https://gitlab.com').replace(/\/$/, '')}/${p.repo}` : k === 'bitbucket' ? `https://bitbucket.org/${p.repo}` : null; }
-  async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
+  async listPrs(id) { const p = this.project(id); const h = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); return (await this._cached(`p:${id}`, 15000, () => this.deps(p).host.listAgentPrs())).map((x) => ({ ...x, url: h.prUrl(p.repo, x.number) })); }
   async createTicket(id, { title, body, repo, epic }) {
     const p = this.project(id);
     if (!title || title.length > 200) throw Object.assign(new Error('title is required (max 200 chars)'), { status: 400 });
@@ -277,13 +306,14 @@ export class Engine {
     return n.repo;
   }
   async testHost({ kind, fields, token, repo: input }) { const repo = this._repoFor(kind, input); const r = await this._testHost({ kind, fields, token, repo }); return { ...r, repo }; }
-  async _testHost({ kind, fields, token, repo }) { return kind === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami(), supportsPrs: true } : identifyHost({ kind, fields, token, repo, fetchImpl: this.f.fetch, exec: this.f.exec }); }
+  async _testHost({ kind, fields, token, repo }) { if (kind === 'local') return { user: 'you', defaultBranch: 'main', private: true, supportsPrs: true }; return kind === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami(), supportsPrs: true } : identifyHost({ kind, fields, token, repo, fetchImpl: this.f.fetch, exec: this.f.exec }); }
   signupInfo(baseUrl) { return ossiconeSignupInfo(baseUrl, this.f.fetch); }
 
   // Add a project. Any ticket source × any code host. Tokens arrive as `secret` (tickets) / `hostSecret` (code host), are verified
   // against the real service BEFORE anything is saved, are written only to the secrets file, and never appear in the config or any response.
   async addProject({ id, repo: repoInput, base, host, hostSecret, source, secret, tickets, config, allowedRepos, feedbackAuthors, profile, verify }) {
     const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    let importFrom; if (host?.kind === 'local') { importFrom = host.importFrom; host = { kind: 'local' }; const slug = String(repoInput || id || '').replace(/^local\//, '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, ''); if (!slug) throw bad('Give the project a name'); repoInput = `local/${slug}`; }
     const kindGuess = host?.kind ?? (normalizeRepo(repoInput).host ?? 'github');
     const repo = this._repoFor(kindGuess, repoInput); if (!host && kindGuess !== 'github') host = { kind: kindGuess }; // pasted a GitLab/Bitbucket URL with no host chosen: use it
     id = id || repo.split('/').pop().toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -295,7 +325,7 @@ export class Engine {
     const hostDef = HOSTS[hk]; if (!hostDef) throw bad(`Unsupported code host: ${hk}`);
     if (hk !== 'github' && hostDef.fields.some((f) => f.secret)) hostCfg.tokenEnv ??= `AF_${upper}_GIT_TOKEN`;
     const hostToken = hostSecret ?? (hostCfg.tokenEnv ? this.env[hostCfg.tokenEnv] : undefined);
-    const hostInfo = hk === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami().catch(() => null) } : await identifyHost({ kind: hk, fields: hostFields, token: hostToken, repo, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const hostInfo = hk === 'local' ? { defaultBranch: base || 'main', user: 'you', private: true } : hk === 'github' ? { ...(await this.gh.inspectRepo(repo)), user: await this.gh.whoami().catch(() => null) } : await identifyHost({ kind: hk, fields: hostFields, token: hostToken, repo, fetchImpl: this.f.fetch, exec: this.f.exec });
     // 2. ticket source
     let t = tickets, ticketToken;
     if (source) {
@@ -307,13 +337,14 @@ export class Engine {
       const pickVal = source.pick !== undefined && def.pick?.type === 'number' ? Number(source.pick) : source.pick;
       t = { kind: source.kind, ...fields, ...(tokenEnv ? { tokenEnv } : {}), ...(def.pick ? { [def.pick.key]: pickVal } : {}), ...def.allow(identity) };
     }
-    t ??= hk === 'github' ? { kind: 'github', allowedAuthors: hostInfo.user ? [hostInfo.user] : [] } : null;
+    t ??= hk === 'local' ? { kind: 'local' } : hk === 'github' ? { kind: 'github', allowedAuthors: hostInfo.user ? [hostInfo.user] : [] } : null;
     if (!t) throw bad(`Choose where tickets live (GitHub Issues only works with a GitHub repo): Jira, Linear or Ossicone`);
     const p = { id, repo, base: base || hostInfo.defaultBranch, ...(hk !== 'github' ? { host: hostCfg } : {}), tickets: t, ...((config || verify) ? { config: { ...(config ?? {}), ...(verify ? { verify: String(verify).slice(0, 500) } : {}) } } : {}), ...(profile && typeof profile === 'object' ? (() => { const sp = sanitizeProfile(profile); sp.history = addHistory([], sp); return { profile: sp }; })() : {}), ...(allowedRepos ? { allowedRepos } : {}),
       ...((feedbackAuthors ?? (t.kind !== 'github' && hostInfo.user ? [hostInfo.user] : null)) ? { feedbackAuthors: feedbackAuthors ?? [hostInfo.user] } : {}) };
     const problems = validateConfig({ ...this.cfg, projects: [...this.cfg.projects, p] });
     if (problems.length) throw bad(problems.join('; '));
     // 3. side effects only after everything checked out
+    if (hk === 'local') await initForge({ dir: forgeDir(this.cfg.stateDir, id), base: p.base, importFrom, exec: this.f.exec });
     if (hostSecret) this.saveSecret(hostCfg.tokenEnv, hostSecret);
     if (secret && t.tokenEnv) this.saveSecret(t.tokenEnv, secret);
     if (t.kind === 'github') await this.gh.ensureLabels(repo);
@@ -350,7 +381,7 @@ export class Engine {
   async analyzeDraft({ kind = 'github', fields = {}, token, repo: input, base }) {
     const repo = this._repoFor(kind, input); const env = { ...this.env }; const draft = { id: 'draft', repo, host: { kind, ...fields, tokenEnv: 'AF_DRAFT_GIT_TOKEN' } };
     if (token) env.AF_DRAFT_GIT_TOKEN = token; else if (fields.tokenEnv) env.AF_DRAFT_GIT_TOKEN = this.env[fields.tokenEnv];
-    const hostAdapter = buildHost(draft, { env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const hostAdapter = buildHost(draft, { stateDir: this.cfg.stateDir, env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const baseBranch = base || (kind === 'github' ? (await this.gh.inspectRepo(repo)).defaultBranch : (await this._testHost({ kind, fields, token, repo })).defaultBranch);
     return { repo, base: baseBranch, profile: await this._analyzeWith(hostAdapter, repo, baseBranch, { ignore: this._analysisCfg(null) }) };
   }
@@ -372,7 +403,7 @@ export class Engine {
   }
   analysisJob(id) { this.project(id); return this.jobs.get(id) ?? { state: 'idle' }; }
   async analyzeProject(id, { onPhase } = {}) {
-    const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
+    const p = this.project(id); const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const prevHistory = p.profile?.history;
     const profile = await this._analyzeWith(hostAdapter, p.repo, p.base, { gate: this.cfg.limits.qualityRepoGate, ignore: this._analysisCfg(p), onPhase, onProfile: (pr) => { p.profile = { ...pr, history: prevHistory ?? [] }; this._persist(); } });
     profile.history = addHistory(prevHistory, profile);
@@ -730,10 +761,15 @@ export class Engine {
   setProjectPaused(id, paused) { const p = this.project(id); p.paused = !!paused; this._persist(); return p; }
 
   // Create a brand-new repo from a template, register it, and queue its first ticket (the spec).
-  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan, target, profile, tracker }) {
+  async createProject({ id, name, description, visibility, template, spec, brief, stack, decisions, sources, plan, target, profile, tracker, host, verify }) {
+    if (host === 'local') {          // a project that lives entirely on this machine: no GitHub repository to create
+      const p = await this.addProject({ id, repo: name || id, host: { kind: 'local' }, ...(verify ? { verify } : {}) });
+      if (target) this.setTarget(id, target); if (profile) { try { this.setProjectProfile(id, profile); } catch { /* never blocks creation */ } }
+      const out = { project: p, url: null }; Object.assign(out, await this._seedPack(id, { brief, stack, decisions, sources, plan })); if (spec) await this.createTicket(id, { title: `Build ${name}`, body: spec }); return out;
+    }
     const owner = await this.gh.whoami();
     const repo = await this.gh.createProjectRepo({ owner, name, description, visibility, template, identity: { name: owner, email: `${owner}@users.noreply.github.com` } });
-    const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch, ...(tracker === 'local' ? { source: { kind: 'local' } } : {}) });
+    const p = await this.addProject({ id, repo: repo.repo, base: repo.defaultBranch, ...(tracker === 'local' ? { source: { kind: 'local' } } : {}), ...(verify ? { verify } : {}) });
     if (target) this.setTarget(id, target);
     if (profile) { try { this.setProjectProfile(id, profile); } catch { /* an unknown profile never blocks creation */ } }
     const out = { project: p, url: repo.url }; Object.assign(out, await this._seedPack(id, { brief, stack, decisions, sources, plan }));

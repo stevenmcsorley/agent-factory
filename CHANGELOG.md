@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- **Local forge** (`host.kind: "local"`): a bare git repository and pull-request records per project, no account or token. Review the diff, comment, merge (fast-forward or clean merge commit; conflicts refused; blocked if the branch changed since verification or touches protected files) and close in the UI, REST or CLI. Merge and publish are human-only.
+- **Publish:** set a publish target (GitHub, GitLab, Bitbucket, any git remote) and push the base branch (never forced; refuses a diverged remote), optionally switching the project to the real repository. Also a `publish` scenario step that must follow an approval.
+- `create_project` / the new-project form can create a local project (`host: "local"`) and take a test command (`verify`). CLI: `add --host=local [--import=…]`, `merge`, `publish`.
+- Repository hardening found by test: the local repo ignores hooks in its own config; clones use `file://`; objects are fsck-checked.
+- README brought up to date (local-first mode, tracker and host tables, an honest verified / not-verified list).
 - **Built-in tracker** (`local` ticket source): issues, epics, comments and states inside the factory, no account needed; plans, scenarios, webhooks and the factory loop work on it unchanged. New project **Tracker** tab (epics with progress, ticket page with comments, close/reopen/requeue); board cards open the ticket. New API: ticket detail and tracker overview; `reopen` ticket action.
 - **Tests cannot be quietly weakened:** removed assertions, deleted test files and switched-off tests in a run are flagged by the quality gate (retry once, then flag; `blockTestWeakening` to block). New tests are never penalised.
 - **Fencing:** claims carry a token that is re-checked before anything is pushed or written to the tracker; a run that was replaced or expired pushes nothing and cannot release the replacement's lease.

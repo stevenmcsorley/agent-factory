@@ -244,7 +244,7 @@ test('API: catalog lists every tracker and host without leaking functions; sourc
   const s2 = createServer(e, { token: TOKEN, allowedHosts: hostsFor('127.0.0.1', port) }); await new Promise((r) => s2.listen(port, '127.0.0.1', r));
   const call = (p, body) => fetch(`http://127.0.0.1:${port}${p}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${TOKEN}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const cat = await (await call('/api/catalog')).json();
-  assert.deepEqual(cat.sources.map((s) => s.kind), ['github', 'local', 'ossicone', 'jira', 'linear']); assert.deepEqual(cat.hosts.map((h) => h.kind), ['github', 'gitlab', 'bitbucket', 'git']);
+  assert.deepEqual(cat.sources.map((s) => s.kind), ['github', 'local', 'ossicone', 'jira', 'linear']); assert.deepEqual(cat.hosts.map((h) => h.kind), ['github', 'local', 'gitlab', 'bitbucket', 'git']);
   assert.ok(cat.sources.every((s) => !('build' in s) && !('validate' in s)) && cat.sources.find((s) => s.kind === 'jira').fields.some((f) => f.secret));
   const t = await call('/api/sources/test', { kind: 'jira', fields: { baseUrl: 'https://x.atlassian.net' }, token: 'tok' }); assert.equal(t.status, 200); assert.deepEqual((await t.json()).projects, [{ id: 'PRJ', name: 'Proj (PRJ)' }]);
   const bad = await call('/api/sources/test', { kind: 'jira', fields: { baseUrl: 'http://evil.example.com' }, token: 'tok' }); assert.equal(bad.status, 400);
