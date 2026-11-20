@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Tests no longer leak temp folders.** `npm test` now runs through `scripts/run-tests.mjs`, which gives the run its own temporary folder and deletes it afterwards. Before, the suite left behind thousands of throwaway repositories and state folders in the OS temp directory (over 20,000 after a long session).
 - **Fix: commits failed on a machine with no git identity.** The agent's work was done and verified, then `git commit` stopped with "Author identity unknown" (found by running the full loop on a clean machine). The commit now falls back to `Agent Factory <agent-factory@localhost>` for whichever of name/email is missing, and never overrides an identity you have (config or environment). Regression test reproduces a machine with no git config.
 - **Fix: `init` said "Done" when the agent login had failed.** It now says setup is not complete, explains how to log in, and exits non-zero. Safe to re-run.
 - **`npm run demo` / `agent-factory demo`:** a populated factory with no Docker, no accounts and no agent, built in about a second in a throwaway folder and deleted on exit. Two sample projects on the built-in tracker and local forge, with real git branches and PRs (one merge-ready, one blocked because its branch changed after verification), a launched plan with a dependency still waiting, tickets in every state, real code analysis, and sample history so the Flow card has data. Only agent runs are pre-recorded, and a banner says so. Found by a clean-machine install test, where nothing but `drill` could be tried without Docker.

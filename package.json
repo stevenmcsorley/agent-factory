@@ -9,7 +9,7 @@
     "doctor": "node src/cli.mjs doctor",
     "analyze": "node src/cli.mjs analyze",
     "build-image": "node src/cli.mjs build-image",
-    "test": "node --test --test-force-exit test/*.test.mjs",
+    "test": "node scripts/run-tests.mjs",
     "drill": "node src/cli.mjs drill",
     "drill:real": "node scripts/real-drill.mjs",
     "demo": "node src/cli.mjs demo"
