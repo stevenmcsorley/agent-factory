@@ -40,7 +40,7 @@ function drawHeader(nav) {
       st ? h('button', { class: 'btn small', disabled: st.busy || st.paused, onclick: act(() => api('/control/tick', { method: 'POST', body: {} }), 'Checking for work…', () => refresh(true)) }, icon('play', 11), 'Run') : null,
       st ? h('button', { class: 'btn small', onclick: act(() => api(`/control/${st.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), st.paused ? 'Line resumed' : 'Line paused', () => refresh(true)) }, icon(st.paused ? 'play' : 'pause', 11), st.paused ? 'Resume' : 'Pause') : null,
       h('button', { class: 'btn small ghost', onclick: toggleTheme, 'aria-label': 'Toggle light/dark theme', title: 'Toggle theme' }, icon(isLight() ? 'moon' : 'sun', 13)),
-      h('button', { class: 'btn small ghost', onclick: openPalette, 'aria-label': 'Command palette' }, icon('search', 12), h('kbd', {}, 'Ctrl K')))));
+      h('button', { class: 'btn small ghost', onclick: openPalette, 'aria-label': 'Command palette' }, icon('search', 12), h('kbd', {}, 'Ctrl K')))), st?.demo ? h('div', { class: 'demo-strip' }, 'Demo: sample data in a throwaway folder. Pull requests, tickets, the plan and the code analysis are real; the agent runs and history are pre-recorded. No agent will run.') : null);
   document.title = st?.active ? `(${st.active}) Agent Factory` : 'Agent Factory';
 }
 

@@ -21,9 +21,20 @@ It can also run **entirely on your machine**: a built-in issue tracker and a loc
 
 > **Status: early, and used by one person so far.** It works end to end on real repositories (see [What's verified](#whats-verified), which also lists what is *not*), but it is young software that runs code written by an AI. Read [Security](#security-model) before pointing it at anything you care about, and start with a throwaway repo.
 
+## Look around first (no Docker, no accounts, no agent)
+
+```bash
+git clone https://github.com/stevenmcsorley/agent-factory.git && cd agent-factory
+npm install
+npm run demo      # opens a populated factory in a throwaway folder; Ctrl-C deletes it
+npm run drill     # watches nine guardrails hold against a misbehaving scripted agent
+```
+
+`npm run demo` builds two sample projects with real git branches and pull requests, a plan launched into tickets, the real code analysis, and sample run history. Open the PRs, read a diff, merge the one that is ready, and see the one that is **blocked because its branch changed after it was checked**. Only the agent runs and their history are pre-recorded; the header says so, and nothing will run. Needs only Node 22 and git (tested on a clean machine).
+
 ## Quickstart
 
-You need: **Node 22+**, **Docker** and **git**, plus a Codex (ChatGPT) or Claude login. The GitHub CLI (`gh auth login`) is only needed if you use GitHub; GitLab, Bitbucket and other hosts use a token you paste into the UI.
+You need: **Node 22+**, **Docker** and **git**, plus a Codex (ChatGPT) or Claude login (the demo and the drill need only Node and git). The GitHub CLI (`gh auth login`) is only needed if you use GitHub; GitLab, Bitbucket and other hosts use a token you paste into the UI.
 
 ```bash
 git clone https://github.com/stevenmcsorley/agent-factory.git
@@ -39,7 +50,7 @@ Open the printed link (it contains your UI token). Then either label an issue `a
 
 ## Local-first (no accounts needed)
 
-You do not need GitHub, a tracker or a token to try the whole loop:
+You do not need GitHub, a tracker or a token to run the whole loop (you do still need Docker and a logged-in agent: `npm run init` sets those up; without them, use `npm run demo` above):
 
 ```bash
 npm start                                 # open the printed link

@@ -26,6 +26,7 @@ const HELP = `agent-factory <command>
   start          run the factory and the web UI   (--no-loop = UI only)
   doctor         check that everything is ready
   add <o/r>      add a GitHub repo as a project  (--tracker=local to use the built-in tracker; --host=local to keep the code on this machine)
+  demo           look around a populated factory: no Docker, no agent, no accounts (--port=7788, --keep)
   drill          prove the guardrails hold: real loop and git, a misbehaving scripted agent, pass/fail per guardrail (--json, --only=id,id)
   merge <project> <pr>   merge a local-forge pull request (human action)
   publish <project>      push a local-forge project's base branch to its publish target
@@ -48,7 +49,7 @@ const HELP = `agent-factory <command>
   --config=PATH  (default ./agent-factory.json)`;
 
 function boot() {
-  if (!fs.existsSync(configPath)) { console.error(`No config at ${configPath}. Run: agent-factory init`); process.exit(1); }
+  if (!fs.existsSync(configPath)) { console.error(`No config at ${configPath}. Run: npm run init (from a clone) or npx github:stevenmcsorley/agent-factory init, or look around first with no setup: npm run demo`); process.exit(1); }
   const cfg = loadConfig(configPath);
   for (const [k, v] of Object.entries(loadSecrets(path.join(cfg.stateDir, 'secrets.env')))) process.env[k] ??= v; // real env wins
   return cfg;
@@ -57,6 +58,7 @@ function boot() {
 async function main() {
   if (cmd === 'help' || flags.help) return console.log(HELP);
   if (cmd === 'init') process.exit(await init({ configPath, root, flags }));
+  if (cmd === 'demo') { const { runDemo } = await import('./demo.mjs'); await runDemo({ flags }); return; }
   if (cmd === 'drill') {
     const { runDrill, formatDrill, drillList } = await import('./drill.mjs');
     if (flags.list) { for (const d of drillList()) console.log(`${d.id.padEnd(18)} ${d.title}`); process.exit(0); }

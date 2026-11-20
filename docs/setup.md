@@ -1,3 +1,5 @@
+> **Just want to look?** `npm install && npm run demo` needs only Node 22 and git: a populated factory with real pull requests to open and merge, no Docker, no agent, no accounts.
+
 # Setup guide
 
 Agent Factory needs three things on the machine that runs it: **Node 22+**, **Docker** and **git**. Everything else (the coding agent's CLI, its login, the sandbox image) is handled by `init`, which runs the agent inside Docker, so you do **not** need Codex or Claude installed yourself.

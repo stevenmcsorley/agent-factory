@@ -319,3 +319,5 @@ details.ready { margin: 6px 0 10px; } details.ready summary { cursor: pointer; d
 .d-del { background: rgba(220, 70, 70, .18); }
 .d-hunk { color: var(--accent); }
 .d-meta { color: var(--muted); }
+
+.demo-strip { background: var(--amber, #c98a00); color: #111; text-align: center; padding: 4px 12px; font: 12px/1.4 var(--mono, ui-monospace, monospace); }

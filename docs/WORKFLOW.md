@@ -127,7 +127,7 @@ What this does and does not show. Zero unsafe outcomes in two runs of six scenar
 
 ## 10. A walkthrough, in order
 
-1. `npm run drill`: nine guardrails, pass/fail with evidence.
+1. `npm run drill`: nine guardrails, pass/fail with evidence. `npm run demo` (no Docker or accounts): open the sample PRs, merge the ready one, and see the blocked one.
 2. `npm start`, then **Studio → New project → On this machine**: a project with no accounts; give it a brief and a test command.
 3. Queue a ticket; watch it travel the line. Open the PR: diff, quality gate, provenance. Merge it (your decision), then publish if you want.
 4. `npm run drill:real` (about five minutes, uses your agent) to see a real model on the same kinds of tickets, then read section 9a for how to interpret it.
