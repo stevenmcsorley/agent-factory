@@ -74,6 +74,7 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/overview$/, async () => engine.overview()],
     ['GET', /^\/api\/connect$/, async () => { const t = (x) => Math.round(JSON.stringify(x).length / 4); return { directTools: directTools().length, directTokens: t(directTools()), codeTokens: t(codeTools()), codeAvailable: await sandboxAvailable() }; }],
     ['GET', /^\/api\/activity$/, async () => engine.activity()],
+    ['GET', /^\/api\/flow$/, async (_m, _b, url) => engine.flow({ days: Math.min(Number(url.searchParams.get('days')) || 30, 365), project: url.searchParams.get('project') || undefined })],
     ['GET', /^\/api\/metrics$/, async (_m, _b, url) => engine.metrics({ days: Math.min(Number(url.searchParams.get('days')) || 14, 90) })],
     ['GET', /^\/api\/runs\/([a-f0-9]{8})$/, async (m) => engine.getRun(m[1])],
     ['GET', /^\/api\/runs$/, async (_m, _b, url) => engine.runs({ project: url.searchParams.get('project') || undefined, limit: Math.min(Number(url.searchParams.get('limit')) || 100, 500) })],

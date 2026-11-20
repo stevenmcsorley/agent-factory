@@ -14,6 +14,7 @@ import { LIBRARY_README, PARTS_WORKFLOW, CHECK_PARTS } from './library-seed.mjs'
 import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
 import { buildTickets, identifySource, publicSources, SOURCES, TOKEN_ENV, ossiconeSignupInfo } from './sources.mjs';
+import { flowMetrics } from './flow.mjs';
 import { buildHost, identifyHost, publicHosts, hostKind, HOSTS, validateHost } from './hosts.mjs';
 import { initForge, forgeDir } from './adapters/host-local.mjs';
 import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
@@ -99,6 +100,7 @@ export class Engine {
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
+      recordEvent: (ev) => this.recordEvent(p.id, ev.ticket, ev.event),
       briefRev: () => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); return pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions) ? pk.revision(pack) : undefined; },
       promptRules: () => getPrompt('task-rules', {}, this._promptDirs()),
       libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
@@ -138,6 +140,16 @@ export class Engine {
   getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); return r; }
 
   // Charts and KPIs, derived from the run log. "Neutral" outcomes (gate bounces, pauses, requeues) are not failures.
+  // ---- lifecycle events (ready, claimed, pr-opened, parked, failed, closed): the raw material for flow metrics. Append-only, one line each.
+  lifecycleEvents() { try { return fs.readFileSync(path.join(this.cfg.stateDir, 'events.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } }
+  _evIndex() { if (!this._evIdx) { this._evIdx = new Map(); for (const e of this.lifecycleEvents()) this._evIdx.set(`${e.project}\u0000${e.ticket}`, e.event); } return this._evIdx; }
+  recordEvent(project, ticket, event, at = new Date().toISOString()) {
+    try { const idx = this._evIndex(); const k = `${project}\u0000${ticket}`; if (idx.get(k) === event) return false;           // a ticket sitting in the queue is "ready" once, not every minute
+      fs.mkdirSync(this.cfg.stateDir, { recursive: true }); fs.appendFileSync(path.join(this.cfg.stateDir, 'events.jsonl'), `${JSON.stringify({ at, project, ticket: String(ticket), event })}\n`); idx.set(k, event); return true; } catch { return false; }     // metrics never break the loop
+  }
+  // A ticket we have followed that is now closed was accepted (merged, or closed by a human). Observed, so accurate to the polling interval, not the second.
+  _observeClosed(project, list) { const idx = this._evIndex(); for (const t of list ?? []) if (t.state === 'CLOSED') { const last = idx.get(`${project}\u0000${t.id}`); if (last && last !== 'closed') this.recordEvent(project, t.id, 'closed'); } }
+  flow({ days = 30, project } = {}) { return flowMetrics({ runs: this.runs({ limit: 100000 }).filter((r) => r.finished), events: this.lifecycleEvents(), days, project }); }
   metrics({ days = 14 } = {}) {
     const NEUTRAL = new Set(['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued', 'repo-not-allowed']);
     const all = this.runs({ limit: 100000 }).filter((r) => r.finished);
@@ -248,7 +260,7 @@ export class Engine {
     throw bad(`Unknown action: ${action}`, 404);
   }
 
-  async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, () => this.deps(p).tickets.listAgentTickets())); }
+  async listTickets(id) { const p = this.project(id); return this.overlay(id, await this._cached(`t:${id}`, 15000, async () => { const list = await this.deps(p).tickets.listAgentTickets(); this._observeClosed(id, list); return list; })); }
   // The command that checks the agent's work (and the container image it runs in) for one project. Empty clears it, so detection applies again.
   // The repo's own .agent-factory.json still wins over this, as everywhere else.
   setVerify(id, { verify, image } = {}) {
@@ -532,7 +544,7 @@ export class Engine {
     return ov.map((o) => { const dir = pk.packDir(this.cfg.stateDir, o.id); const pack = pk.loadPack(dir); const pr = o.profile;
       return { id: o.id, repo: o.repo, paused: o.paused, queue: o.queue, openPrs: o.prs, error: o.error ?? null, runs: o.metrics ? { total: o.metrics.runs, shipped: o.metrics.ok } : null,
         brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null, target: this.project(o.id).target ?? 'prototype', readiness: ready[o.id] ? { passed: ready[o.id].passed, total: ready[o.id].total, ready: ready[o.id].ready, checks: ready[o.id].checks } : null, publishedToRepo: !!pack.publishedAt, partsUsed: [...new Set(this._usage().entries.filter((u) => u.project === o.id).map((u) => u.slug))], sources: pack.sources.length,
-        quality: pr?.quality ? { gate: pr.quality.gate?.status ?? 'NONE', findings: pr.quality.counts?.total ?? 0, secrets: pr.quality.counts?.secrets ?? 0 } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null }; });
+        quality: pr?.quality ? { gate: pr.quality.gate?.status ?? 'NONE', findings: pr.quality.counts?.total ?? 0, secrets: pr.quality.counts?.secrets ?? 0 } : null, tests: pr?.structure ? `${pr.structure.testedFiles}/${pr.structure.sourceFiles}` : null, copiedPct: pr?.duplicates?.pct ?? null, verify: pr?.verify ?? null, verification: this.project(o.id).config?.verify ? 'set' : pr?.verify ? 'detected' : pr ? 'none' : 'unknown', verifyCmd: this.project(o.id).config?.verify ?? pr?.verify ?? null }; });
   }
 
   // ================================================================ Reuse library

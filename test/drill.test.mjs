@@ -4,9 +4,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { runDrill, formatDrill, drillList } from '../src/drill.mjs';
 
 test('the guardrail drill passes: every guardrail holds against real git and the real loop', async () => {
-  const results = await runDrill(); assert.equal(results.length, drillList().length); assert.ok(results.length >= 8);
+  const results = await runDrill(); assert.equal(results.length, drillList().length); assert.ok(results.length >= 9);
   for (const r of results) assert.ok(r.ok, `${r.id} failed:\n${r.evidence.filter((e) => !e.ok).map((e) => e.text).join('\n')}`); assert.ok(results.every((r) => r.evidence.length >= 2), 'each drill checks more than one thing');
-  const text = formatDrill(results); assert.match(text, /8\/8 guardrails held\./); assert.doesNotMatch(text, /\u001b/, 'no colour codes unless asked');
+  const text = formatDrill(results); assert.match(text, /9\/9 guardrails held\./); assert.doesNotMatch(text, /\u001b/, 'no colour codes unless asked');
 });
 
 test('the drill restores the environment it touches, can run a subset, and fails loudly (exit 1, named check) when a guardrail is broken', async () => {

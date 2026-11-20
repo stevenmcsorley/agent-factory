@@ -61,6 +61,7 @@ What is **not** independent, stated plainly: the repository's own tests live in 
 | A dead run is recovered; a poison ticket is handed to a human after two tries | `killed-run` |
 | A late or replaced worker cannot publish (fencing token) | `replaced-worker` |
 | Work stops when review cannot keep up (`maxOpenReviews`) | `review-backlog` |
+| A project the factory cannot test gets no agent runs, when you require it (`requireVerify`); otherwise the PR says it was not machine-checked | `unverified-blocked` |
 | Merge refuses a changed, protected or conflicting branch; a planted hook never runs | `forge-merge` |
 
 Also in place, covered by tests rather than the drill: containers on an `--internal` network with an allowlisted egress proxy; the agent gets no credentials; host-side git on agent-written checkouts is locked down (hooks, config, external diff drivers disabled); caps on runs per day, attempts, time and spend; Pause and a STOP file; tickets only from allow-listed authors.
@@ -92,26 +93,26 @@ Real ones, from building and using this. Each is fixed and has a regression test
 | Unreviewed change reaching production | The agent can only open draft PRs; merge and publish are human-only; protected paths cover CI and deploy config |
 | A confident but wrong change | Verify runs outside the agent; provenance says exactly what was checked; weakened tests are flagged |
 | Runaway cost or volume | Daily caps, attempt limits, time limits, a review-backlog cap, Pause and STOP |
-| Silent loss of verification | Provenance states "not machine-checked"; the Code tab shows the command in use; this was a real failure, see section 6 |
+| Silent loss of verification | Provenance states "not machine-checked"; the Portfolio flags an unverified project and shows the machine-checked share; `requireVerify` refuses to spend an agent run on a project that cannot be tested; this was a real failure, see section 6 |
 | Quiet drift between copies of the same logic | Repeated-code detection across projects, tracked parts with versions and upgrade tickets |
 | Treating a pass as permanent | A pass names the revisions it applies to |
 
 ## 8. How the workflow was improved on purpose
 
-The loop is: run it on real work, find where it failed or was overtrusted, turn the failure into a check and a regression test. Examples: a security review of host-side git produced the lock-down; a review of the workflow against a practitioner's draft playbook produced test-tampering detection, fencing, the review cap and provenance; using the factory to move three real projects onto shared parts exposed the verification gap above; writing tests for extracted code found bugs every copy shared; the drill exists so the guardrails are re-proven after every change instead of assumed.
+The Portfolio's **Flow** card (ready to merged, where work waits, rework, cost) is the measuring half of that loop. The loop is: run it on real work, find where it failed or was overtrusted, turn the failure into a check and a regression test. Examples: a security review of host-side git produced the lock-down; a review of the workflow against a practitioner's draft playbook produced test-tampering detection, fencing, the review cap and provenance; using the factory to move three real projects onto shared parts exposed the verification gap above; writing tests for extracted code found bugs every copy shared; the drill exists so the guardrails are re-proven after every change instead of assumed.
 
 ## 9. What this does not cover (open risks)
 
 - **One user.** It has been used by its author on their own projects, not yet by a team. Whether others can operate it is untested.
 - **The drill proves the factory's checks, not the model.** It uses a scripted agent. The test-tampering, fencing and quality checks have not yet been seen catching a real model misbehaving in a real run (the secret check has: a real agent run was sent back by the gate after it flagged a planted AWS key, then produced a clean change).
 - **No long soak.** Days of unattended running are untested.
-- **No cycle-time metrics yet** (ready to merged, review wait, rework rate).
+- **Flow metrics are new.** The Portfolio page shows ready-to-merged, review wait, build time, decision wait, first-pass and rework rates, machine-checked share and cost per accepted change, but they only count from when event recording began, and the page says so when the sample is under five accepted changes. They are measurements, not conclusions.
 - **Provider terms.** Using a consumer subscription for unattended agents may be restricted; see the README.
 - **The repository was itself built with an AI coding agent** (Claude Code), working to the author's decisions. The workflow above is also how that work was reviewed: independent checks of agent output (tests run in containers, servers started and exercised) before accepting it.
 
 ## 10. A walkthrough, in order
 
-1. `npm run drill`: eight guardrails, pass/fail with evidence.
+1. `npm run drill`: nine guardrails, pass/fail with evidence.
 2. `npm start`, then **Studio → New project → On this machine**: a project with no accounts; give it a brief and a test command.
 3. Queue a ticket; watch it travel the line. Open the PR: diff, quality gate, provenance. Merge it (your decision), then publish if you want.
 4. Break something on purpose (`docs/EXTENDING.md` shows how to add a rule) and run the drill again.

@@ -43,7 +43,8 @@ export async function tick({ tickets, sandbox, agent, vcs, config, stateDir }) {
   const recovered = await recover({ tickets, leases });
   // Do not start more work than review can absorb: once this many agent PRs are waiting for a human, stop claiming until some are merged or closed.
   if (config.maxOpenReviews) { const waiting = (await tickets.listAgentTickets()).filter((x) => x.state !== 'CLOSED' && (x.labels ?? []).includes('agent-review')).length; if (waiting >= config.maxOpenReviews) return [{ status: 'review-backlog', open: waiting, cap: config.maxOpenReviews }]; }
-  const queue = (await tickets.poll()).slice(0, config.maxConcurrent ?? 1);
+  const polled = await tickets.poll(); for (const t of polled) config.recordEvent?.({ ticket: t.id, event: 'ready' });    // everything waiting, not just what this tick will start
+  const queue = polled.slice(0, config.maxConcurrent ?? 1);
   const runs = await Promise.all(queue.map((t) => processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases })));
   return [...recovered.map((r) => ({ status: `recovered-${r.action}`, ticket: r.ticket })), ...runs];
 }
@@ -64,14 +65,14 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   const target = resolveRepo(t, config);
   if (target.error) {
     await tickets.comment(t.id, `agent-factory did not start work: ${target.error}. Add a \`repo:owner/name\` label for an allowed repository.`);
-    await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']);
+    await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']); config.recordEvent?.({ ticket: t.id, event: 'parked' });
     recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...run.finish('repo-not-allowed') });
     return rec;
   }
   const gate = assessTicket(t, config.gate);
   if (config.gate !== false && !gate.ok) {
     await tickets.comment(t.id, clarificationComment(gate.problems));
-    await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']);
+    await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']); config.recordEvent?.({ ticket: t.id, event: 'parked' });
     // deliberately no `finished`: gate rejections cost nothing and must not count toward maxRunsPerDay
     recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...run.finish('needs-info') });
     return rec;
@@ -81,6 +82,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   const owns = () => leases.valid(t.id, token);
   try { rec.briefRev = config.briefRev?.(); } catch { /* provenance is best effort */ }
   await tickets.label(t.id, ['agent-working'], ['agent-ready']); // claim
+  config.recordEvent?.({ ticket: t.id, event: 'claimed' });
   try {
     run.phase('sandbox', 'cloning the repository');
     ws = await sandbox.create({ cloneUrl: target.cloneUrl, branch, base: target.base, gitEnv: config.gitEnv });
@@ -88,8 +90,10 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     const cfg = effectiveConfig({ ...config, ...target.overrides }, ws.dir);
     const repoAnalysis = loadRepoConfig(ws.dir).analysis ?? {};            // read once, before the agent runs: it cannot loosen its own gate
     const ignore = makeIgnore({ patterns: [...(config.analysis?.ignore ?? []), ...(Array.isArray(repoAnalysis.ignore) ? repoAnalysis.ignore : [])], useDefaults: config.analysis?.ignoreDefaults !== false && repoAnalysis.ignoreDefaults !== false });
+    // Policy: with requireVerify, never spend an agent run on a project the factory cannot check. (Without it the PR opens and says it was not machine-checked.)
+    if (cfg.requireVerify && !cfg.verify) { rec.status = 'needs-info'; rec.blocked = 'unverified'; rec.question = 'This project has no test command, and the factory is set to require one (requireVerify), so no agent run was started. Set a test command in the Code tab (or add tests so one can be detected), then requeue this ticket.'; }
     let feedback = '';
-    for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {
+    for (let a = 1; a <= (rec.blocked ? 0 : (cfg.maxAttempts ?? 2)); a++) {
       rec.attempts = a;
       run.phase('agent', `attempt ${a}`);
       const r = await agent.run(sandbox, ws, buildPrompt(t, feedback, config.profileSummary, config.contextFor?.(t), config.promptRules?.()), { timeoutMs: cfg.timeoutMs ?? 900_000 });
@@ -135,17 +139,17 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       const assumptions = parseAssumptions(rec.agentSummary); if (assumptions) rec.assumptions = assumptions;
       rec.pr = await vcs.openPr(ws, { branch, base: target.base, repo: target.name, title: t.title, body: `Automated change for #${t.id}.\n\nDraft — review required. Attempts: ${rec.attempts}.${rec.parts?.length ? `\n\n### Reused library parts\n${rec.parts.map((x) => `- ${x.slug}@${x.version}`).join('\n')}` : ''}${provenanceNote(rec)}${qualityNote(rec.quality)}${assumptions ? `\n\n### Assumptions the agent made\n${assumptions}` : ''}` });
       await tickets.comment(t.id, `Opened ${rec.pr ?? `branch ${branch}`} after ${rec.attempts} attempt(s).${qualityNote(rec.quality, true)}${assumptions ? `\n\nAssumptions the agent made (please check):\n${assumptions}` : ''}`);
-      await tickets.label(t.id, ['agent-review'], ['agent-working']);
+      await tickets.label(t.id, ['agent-review'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'pr-opened' });
     } else if (rec.status === 'needs-info') {
       await tickets.comment(t.id, `agent-factory needs a little more information before it can build this:\n\n${rec.question}\n\nAnswer in the Agent Factory inbox and press Requeue (or edit the ticket and re-add the \`agent-ready\` label).`);
-      await tickets.label(t.id, ['agent-needs-info'], ['agent-working']);
+      await tickets.label(t.id, ['agent-needs-info'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'parked' });
     } else {
       await tickets.comment(t.id, `agent-factory gave up: ${rec.status}${rec.error ? ` (${rec.error})` : ''} after ${rec.attempts} attempt(s).`);
-      await tickets.label(t.id, ['agent-failed'], ['agent-working']);
+      await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'failed' });
     }
   } catch (e) {
     rec.status = 'error'; rec.error = String(e.message ?? e);
-    if (owns()) { await tickets.comment(t.id, `agent-factory error: ${rec.error.slice(0, 500)}`); await tickets.label(t.id, ['agent-failed'], ['agent-working']); }
+    if (owns()) { await tickets.comment(t.id, `agent-factory error: ${rec.error.slice(0, 500)}`); await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'failed' }); }
   } finally {
     leases.release(t.id, token);
     rec.finished = new Date().toISOString();
