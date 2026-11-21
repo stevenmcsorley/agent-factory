@@ -36,6 +36,8 @@ export function githubHost({ repo, allowedAuthors }) {
       ].filter((c) => c.raw && allowedAuthors.includes(c.author) && !c.raw.includes(MARKER));
       return { failedChecks, pending, comments };
     },
+    // Autonomous mode only. The PR opens as a draft, so mark it ready, then squash-merge and delete the branch. Branch protection that needs a human approval makes gh refuse: that is reported, not forced.
+    async merge(pr) { await gh(['pr', 'ready', String(pr.number), '-R', repo], { allowFail: true }); await gh(['pr', 'merge', String(pr.number), '-R', repo, '--squash', '--delete-branch']); return { merged: true }; },
     async comment(pr, text) { await gh(['pr', 'comment', String(pr.number), '-R', repo, '--body', `${text}\n\n${MARKER}`]); },
     async label(pr, name) {
       await gh(['label', 'create', name, '-R', repo, '--force']);

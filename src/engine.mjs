@@ -37,6 +37,7 @@ import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
 import { scheduleMethods } from './engine-schedule.mjs';
 import { roleMethods } from './engine-roles.mjs';
+import { autonomyMethods } from './engine-autonomy.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -127,7 +128,7 @@ export class Engine {
 
   loop(ms = this.cfg.pollMs) {
     this.pollMs = ms;
-    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); } catch (e) { console.error('cycle failed:', e.message); } this.nextAt = Date.now() + ms; this.timer = setTimeout(cycle, ms); };
+    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); await this.autopilotAll(); } catch (e) { console.error('cycle failed:', e.message); } this.nextAt = Date.now() + ms; this.timer = setTimeout(cycle, ms); };
     this.nextAt = Date.now() + 1000;
     this.timer = setTimeout(cycle, 1000);
   }
@@ -878,4 +879,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods);
