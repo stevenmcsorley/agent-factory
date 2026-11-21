@@ -1,5 +1,5 @@
 // Views for the local forge: review a pull request (diff, comments, merge, close) and publish the project to a real remote.
-import { h, api, ago, act } from './lib.js';
+import { h, icon, api, ago, act } from './lib.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
 const TAG = { open: 'ok', merged: 'live', closed: '' };
@@ -27,7 +27,7 @@ export function prPage(d, { id, back, rerender }) {
       h('p', { class: 'small muted' }, `${pr.branch} → ${pr.base} · opened ${ago(pr.createdAt)}`),
       pr.stale ? h('div', { class: 'note warn' }, 'The branch has changed since the factory last verified it. Merge is blocked until it is re-run.') : null,
       h('pre', { class: 'log-pre' }, pr.body || ''),
-      open ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: pr.stale, onclick: merge }, 'Merge'), h('button', { class: 'btn', onclick: post('close', {}, 'Closed') }, 'Close without merging'))
+      open ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: pr.stale, onclick: merge }, 'Merge'), h('button', { class: 'btn', title: 'Serve this branch on your machine so you can click around the site before merging', onclick: act(async () => { const r = await api(`/projects/${id}/live`, { method: 'POST', body: { pr: pr.number } }); window.open(r.url, '_blank', 'noopener'); }, 'Preview opened in a new tab (only this machine can see it)', rerender) }, icon('play', 13), 'Preview this branch'), h('button', { class: 'btn', onclick: post('close', {}, 'Closed') }, 'Close without merging'))
         : pr.state === 'merged' ? h('p', { class: 'small muted' }, `Merged as ${String(pr.mergedSha).slice(0, 10)}.`) : null),
     card(h('h2', {}, `Files changed (${d.files.length})`), h('ul', { class: 'plain' }, d.files.map((f) => h('li', { class: 'row between' }, h('code', {}, f.path), h('span', { class: 'small mono' }, f.added === null ? 'binary' : `+${f.added} −${f.removed}`)))),
       d.diff ? diffView(d.diff) : h('p', { class: 'muted small' }, d.note ?? 'No changes.'), d.truncated ? h('p', { class: 'small muted' }, 'The diff was cut at 400 KB.') : null),

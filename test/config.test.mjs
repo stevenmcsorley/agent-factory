@@ -61,3 +61,9 @@ test('CLI `service` prints a systemd unit for the given config, and `help` lists
   assert.match(out, /\[Service\]/); assert.match(out, /WorkingDirectory=\/srv\/factory/); assert.match(out, /ExecStart=.*cli\.mjs start --config=\/srv\/factory\/agent-factory\.json/); assert.match(out, /Restart=on-failure/);
   const help = execFileSync(process.execPath, [cli, 'help']).toString(); for (const c of ['init', 'start', 'doctor', 'add', 'service', 'token']) assert.match(help, new RegExp(`\\b${c}\\b`));
 });
+
+test('a second factory instance can name its own egress proxy and network; odd names are refused', () => {
+  const base = { agent: { kind: 'shell' }, ui: { host: '127.0.0.1' }, sandbox: { kind: 'docker', egress: { allow: ['x.test'], name: 'factory-egress-showcase', network: 'factory-agents-showcase' } }, projects: [] };
+  assert.deepEqual(validateConfig(base), []);
+  assert.match(validateConfig({ ...base, sandbox: { ...base.sandbox, egress: { allow: [], name: 'bad name; rm' } } }).join(), /sandbox\.egress\.name/);
+});

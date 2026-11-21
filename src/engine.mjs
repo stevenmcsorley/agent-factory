@@ -41,6 +41,7 @@ import { autonomyMethods } from './engine-autonomy.mjs';
 import { designMethods } from './engine-designs.mjs';
 import { visualMethods } from './engine-visual.mjs';
 import { notifyMethods } from './engine-notify.mjs';
+import { livePreviewMethods } from './engine-livepreview.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -86,7 +87,7 @@ export class Engine {
   async start() {
     await this.loadPlugins().catch((e) => console.error(`plugins: ${e.message}`));
     const s = this.cfg.sandbox;
-    if (s.kind === 'docker' && s.egress && !this.f.sandbox) this.egress = await (this.f.startEgress ?? startEgress)({ allow: s.egress.allow, image: s.image });
+    if (s.kind === 'docker' && s.egress && !this.f.sandbox) this.egress = await (this.f.startEgress ?? startEgress)({ allow: s.egress.allow, image: s.image, ...(s.egress.name ? { name: s.egress.name } : {}), ...(s.egress.network ? { network: s.egress.network } : {}) });   // a second factory instance names its own proxy so it cannot replace this one's
     this.deployFailures(false).catch(() => {});   // warm the post-merge pipeline check so the first Inbox visit does not wait on GitHub
   }
   async stopEgress() { await this.egress?.stop?.(); this.egress = null; }
@@ -140,7 +141,7 @@ export class Engine {
     this.nextAt = Date.now() + 1000;
     this.timer = setTimeout(cycle, 1000);
   }
-  halt() { clearTimeout(this.timer); }
+  halt() { clearTimeout(this.timer); this.stopAllLivePreviews?.().catch(() => {}); }
 
   // ---- live activity: runs publish phase events; we keep a ring buffer and the set of runs in flight
   _event(e) {
@@ -891,4 +892,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods);

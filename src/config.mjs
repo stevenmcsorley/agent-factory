@@ -43,6 +43,7 @@ export function validateConfig(cfg) {
   if (cfg.agent?.model != null && !MODEL_RE.test(String(cfg.agent.model))) e.push(`agent.model "${cfg.agent.model}" is not a valid model id`);
   if (cfg.agent?.reasoningEffort != null && !EFFORTS.includes(cfg.agent.reasoningEffort)) e.push(`agent.reasoningEffort must be one of ${EFFORTS.join(', ')}`);
   if (cfg.ui.host && !['127.0.0.1', 'localhost', '::1'].includes(cfg.ui.host) && !cfg.ui.allowRemote) e.push('ui.host must be loopback unless ui.allowRemote=true (put TLS in front and keep the UI token secret)');
+  for (const k of ['name', 'network']) if (cfg.sandbox?.egress?.[k] !== undefined && !/^[a-z0-9][a-z0-9_.-]{0,40}$/i.test(String(cfg.sandbox.egress[k]))) e.push(`sandbox.egress.${k} must be a simple docker name (letters, digits, - _ .)`);
   const seen = new Set();
   for (const p of cfg.projects ?? []) {
     if (!ID.test(p.id ?? '')) e.push(`project id "${p.id}" must match ${ID}`);
