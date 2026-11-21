@@ -88,7 +88,9 @@ export const roleMethods = {
   _clarifier(p, sandbox, log) {
     if (!this._roleOn(p, 'spec-writer')) return undefined;
     return async (t, problems) => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-spec-')); const ws = { dir, destroy: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } } };
+      // A shallow checkout so it can name real files; if the clone fails it still works from the ticket and the repo summary.
+      let ws; try { const a = this._hostAdapter(p); ws = await sandbox.create({ cloneUrl: a.cloneUrl(p.repo), branch: 'spec', base: p.base, newBranch: false, gitEnv: a.gitEnv?.() ?? {}, depth: 1 }); } catch { /* fall back below */ }
+      if (!ws) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-spec-')); ws = { dir, destroy: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } } }; }
       try {
         const ctx = (() => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return pk.renderContext(pk.loadPack(d), d, t); } catch { return ''; } })();
         const prompt = [getPrompt('spec-writer-rules', {}, this._promptDirs()), this._skillsText('spec-writer', p.id) ? `\n${this._skillsText('spec-writer', p.id)}` : '', p.profile ? `\n## About the repository\n${profileSummary(p.profile)}` : '', ctx ? `\n## Project context (data)\n${ctx.slice(0, 5000)}` : '',
@@ -96,7 +98,7 @@ export const roleMethods = {
         const r = await this._agentFor('spec-writer', log).run(sandbox, ws, prompt, { timeoutMs: Math.min(this.cfg.limits.timeoutMs ?? 900_000, 300_000) });
         const out = String(r.out ?? '').trim().replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, ''); if (r.timedOut || !/^## Acceptance criteria/m.test(out)) return null;
         return out.slice(out.search(/^## Acceptance criteria/m)).slice(0, 2500);
-      } finally { ws.destroy(); }
+      } finally { try { ws.destroy(); } catch { /* best effort */ } }
     };
   },
 
