@@ -71,7 +71,7 @@ test('the Inbox lists a failing pipeline first, counts it, and drops it once the
   e.gh = {}; const inbox1 = await e.inbox();
   assert.equal(inbox1.items[0].kind, 'deploy'); assert.equal(inbox1.items[0].project, 'app'); assert.equal(inbox1.items[0].pr, 5); assert.equal(inbox1.items[0].title, 'Deploy to Pi is failing on main'); assert.equal(inbox1.counts.deploys, 1);
   assert.equal((await e.inboxCount()).count >= 1, true);
-  runs = [run({ conclusion: 'success' }), ...runs]; e.cache.clear();
+  runs = [run({ conclusion: 'success' }), ...runs]; e._deploy.at = 0; await e.deployFailures(); await e._deployScan;   // older than two minutes: refreshes in the background
   const inbox2 = await e.inbox(); assert.equal(inbox2.items.filter((i) => i.kind === 'deploy').length, 0); assert.equal(inbox2.counts.deploys, 0);
 });
 
@@ -131,4 +131,17 @@ test('the PR says which changed files the test command did not cover, and the ru
   const rec = fs.readFileSync(path.join(root, 'state', 'runs.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).at(-1);
   assert.equal(rec.status, 'ok'); assert.deepEqual(rec.coverage, { scopes: ['frontend'], uncovered: ['backend/'], total: 1 });          // git lists a brand-new folder as one entry; README.md is not code
   assert.match(opened[0]?.body ?? '', /Not covered by that command:\*\* `backend\/` \(it only runs in `frontend\/`\)/);
+});
+
+test('the UI never waits on GitHub: a stale answer is served at once and refreshed in the background', async () => {
+  let release; const gate = new Promise((r) => { release = r; }); let calls = 0;
+  const e = engine([{ id: 'app', repo: 'me/app', base: 'main' }], async () => { calls++; await gate; return [run({ conclusion: 'failure' })]; });
+  const t0 = Date.now(); assert.deepEqual(await e.deployFailures(false), []);                          // first call with wait=false returns immediately, scan runs on its own
+  assert.ok(Date.now() - t0 < 100); assert.equal(calls, 1);
+  const first = e.deployFailures(true); release(); assert.equal((await first).length, 1);               // a caller that does wait gets the real answer once the scan ends
+  e._deploy.at = 0; let release2; const gate2 = new Promise((r) => { release2 = r; });
+  e.f.baseRuns = async () => { calls++; await gate2; return []; };
+  const t1 = Date.now(); const stale = await e.deployFailures(true); assert.equal(stale.length, 1); assert.ok(Date.now() - t1 < 100);   // stale answer served instantly, even with wait=true
+  assert.equal(calls, 2); await e.deployFailures(false); assert.equal(calls, 2);                           // and only one refresh runs at a time
+  release2(); await e._deployScan; assert.equal((await e.deployFailures(false)).length, 0);              // the refresh lands: the failure is gone
 });

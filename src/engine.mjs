@@ -81,6 +81,7 @@ export class Engine {
     await this.loadPlugins().catch((e) => console.error(`plugins: ${e.message}`));
     const s = this.cfg.sandbox;
     if (s.kind === 'docker' && s.egress && !this.f.sandbox) this.egress = await (this.f.startEgress ?? startEgress)({ allow: s.egress.allow, image: s.image });
+    this.deployFailures(false).catch(() => {});   // warm the post-merge pipeline check so the first Inbox visit does not wait on GitHub
   }
   async stopEgress() { await this.egress?.stop?.(); this.egress = null; }
 
@@ -239,18 +240,24 @@ export class Engine {
     return { items, errors, counts: { deploys: items.filter((i) => i.kind === 'deploy').length, decisions: items.filter((i) => i.kind === 'decision').length, reviews: items.filter((i) => i.kind === 'review').length } };
   }
   // What happens after a merge: workflows on a project's base branch whose latest finished run failed (see deploywatch.mjs). GitHub projects only, and a
-  // project can opt out with deployWatch:false. Cached because the Inbox polls; a GitHub or `gh` problem for one project is not an Inbox item, so it is skipped quietly.
-  async deployFailures() {
+  // project can opt out with deployWatch:false. Asking GitHub about every project takes seconds, and the UI polls, so this serves the last answer at once and
+  // refreshes in the background when it is older than two minutes. Only the very first call waits (and only when `wait` is true). A GitHub or `gh` problem
+  // for one project is not an Inbox item, so it is skipped quietly.
+  async deployFailures(wait = true) {
     if (this.demo) return [];
-    return this._cached('deploys', 120_000, async () => {
-      const out = [];
-      await Promise.all(this.cfg.projects.filter((p) => p.deployWatch !== false && p.repo && hostKind(p) === 'github').map(async (p) => {
-        try { for (const f of failingWorkflows(await (this.f.baseRuns ?? fetchBaseRuns)(p.repo, p.base ?? 'main', this.f.exec))) out.push({ project: p.id, repo: p.repo, base: p.base ?? 'main', ...f }); } catch { /* skip */ }
-      }));
-      return out;
-    });
+    const stale = !this._deploy || Date.now() - this._deploy.at > 120_000;
+    if (stale && !this._deployScan) this._deployScan = this._scanDeploys().then((v) => { this._deploy = { at: Date.now(), v }; }).catch(() => {}).finally(() => { this._deployScan = null; });
+    if (!this._deploy && wait && this._deployScan) await this._deployScan;
+    return this._deploy?.v ?? [];
   }
-  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures()).length; return { count: n }; }
+  async _scanDeploys() {
+    const out = [];
+    await Promise.all(this.cfg.projects.filter((p) => p.deployWatch !== false && p.repo && hostKind(p) === 'github').map(async (p) => {
+      try { for (const f of failingWorkflows(await (this.f.baseRuns ?? fetchBaseRuns)(p.repo, p.base ?? 'main', this.f.exec))) out.push({ project: p.id, repo: p.repo, base: p.base ?? 'main', ...f }); } catch { /* skip */ }
+    }));
+    return out;
+  }
+  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures(false)).length; return { count: n }; }
 
   // Act on a ticket from the inbox. Everything is validated; re-queueing re-runs the clarity gate so a vague ticket cannot just bounce back.
   async ticketAction(projectId, ticketId, action, payload = {}) {
