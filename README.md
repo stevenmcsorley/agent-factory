@@ -127,6 +127,9 @@ It listens on `127.0.0.1` only and every API call needs the token in `state/ui-t
 
 See the [illustrated guide](docs/GUIDE.md) for the walkthrough.
 
+## Autopilot
+Schedules, agent roles (a reviewer), editable skills, designs you approve, and an opt-in autonomous mode that merges and fixes on its own: see [docs/AUTOPILOT.md](docs/AUTOPILOT.md). All of it is controllable over MCP.
+
 ## Make it yours
 
 Everything is meant to be adapted: **scenarios** (JSON workflows with human approval gates: prototype only, ship to production, deploy to Cloudflare, your own), **plugins** (new deploy targets, trackers, hosts, rules, part kinds, operations; hash-pinned and enabled by you), **prompts** (a Markdown file replaces the agents' rules) and configuration. The factory can also manage its own repository, with its security core protected from self-edits. See [docs/EXTENDING.md](docs/EXTENDING.md).

@@ -117,3 +117,24 @@ test('without a reviewer the loop is exactly as before: no review phase, no revi
   const { deps } = setup('echo hi > b.txt', 'test -f b.txt');
   const [rec] = await tick(deps); assert.equal(rec.review, undefined); assert.ok(!rec.phases.some((p) => p.name === 'review'));
 });
+
+const withBody = (tpath, body) => fs.writeFileSync(tpath, JSON.stringify([{ id: 1, title: 'Add greeting', body, labels: ['agent-ready'] }]));
+test('allowed-files: a change outside the ticket\'s list is refused, nothing is pushed, and the agent is told what to put back', async () => {
+  const { deps, remote, tpath } = setup('echo hi > b.txt; echo no > c.txt', 'test -f b.txt');
+  withBody(tpath, 'Make b.txt say hi.\n\n```allowed-files\nb.txt\n```\n');
+  const [rec] = await tick(deps);
+  assert.equal(rec.status, 'outside-allowlist'); assert.match(rec.error, /c\.txt/); assert.equal(rec.attempts, 2);
+  assert.doesNotMatch(execFileSync('git', ['branch', '-a'], { cwd: remote }).toString(), /agent\//);
+});
+test('allowed-files: globs allow what they name, and a ticket without the block is unrestricted', async () => {
+  const a = setup('echo hi > b.txt', 'test -f b.txt'); withBody(a.tpath, 'Make b.txt say hi.\n\n```allowed-files\n*.txt\n```\n');
+  assert.equal((await tick(a.deps))[0].status, 'ok');
+  const b = setup('echo hi > b.txt; echo x > c.txt', 'test -f b.txt'); assert.equal((await tick(b.deps))[0].status, 'ok');
+});
+import { parseAllowedFiles, outsideAllowlist } from '../src/allowlist.mjs';
+test('allowed-files parsing: comments, junk and path escapes are dropped', () => {
+  assert.equal(parseAllowedFiles('no block here'), null);
+  assert.deepEqual(parseAllowedFiles('x\n```allowed-files\n# why\nsrc/**\n../etc/passwd\n/abs.js\n\n```'), ['src/**', 'abs.js']);
+  assert.deepEqual(outsideAllowlist(['src/a/b.js', 'docs/x.md', 'abs.js'], ['src/**', 'abs.js']), ['docs/x.md']);
+  assert.deepEqual(outsideAllowlist(['lib/x.js', 'libs/y.js'], ['lib/']), ['libs/y.js']);
+});

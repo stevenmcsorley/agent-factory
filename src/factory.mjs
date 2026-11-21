@@ -13,6 +13,7 @@ import { makeIgnore } from './ignore.mjs';
 import { getPrompt } from './prompts.mjs';
 import { coverageGap } from './coverage.mjs';
 import { feedbackFromReview } from './review.mjs';
+import { parseAllowedFiles, outsideAllowlist } from './allowlist.mjs';
 
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
@@ -113,6 +114,15 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       const status = await vcs.diffStat(ws); run.note('changed', changedFiles(status));
       const bad = protectedViolations(status, cfg.protectedPaths);
       if (bad.length) { rec.status = 'protected-path'; rec.error = `touched protected paths: ${bad.join(', ')}`; break; }
+      const allowed = parseAllowedFiles(t.body);   // the ticket's own allowed-files list, when it has one
+      if (allowed) {
+        const outside = outsideAllowlist(changedFiles(status), allowed);
+        if (outside.length) {
+          rec.status = 'outside-allowlist'; rec.error = `changed files outside the ticket's allowed-files list: ${outside.slice(0, 8).join(', ')}`;
+          if (a < (cfg.maxAttempts ?? 2)) { feedback = `This ticket allows changes ONLY to: ${allowed.join(', ')}. You also changed: ${outside.slice(0, 8).join(', ')}. Put those files back exactly as they were and keep the rest.`; continue; }
+          break;
+        }
+      }
       if (cfg.verify) {
         run.phase('verify', cfg.verify);
         const v = await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image });
