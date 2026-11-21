@@ -131,6 +131,7 @@ export function planPrompt(pack) {
     'Produce a delivery PLAN as a single JSON object and NOTHING else (no prose, no code edits, do not modify any file). Schema:',
     '{"summary": string, "epics": [{"id": "kebab-case", "title": string, "goal": string, "tickets": [{"id": "kebab-case-unique", "title": string, "body": string, "size": "S"|"M"|"L", "dependsOn": [ticket ids], "sources": [source ids]}]}]}',
     'Rules: 2 to 6 epics, each with 2 to 8 tickets. A ticket is ONE reviewable pull request of work, small enough for an AI agent to finish in one go. Each ticket body must name the files, modules or behaviour involved and end with an "Acceptance criteria:" bullet list that can be checked. Order tickets so foundations come first and use dependsOn for real dependencies only. Do not add features that are out of scope in the brief.',
+    'If .factory-context/designs/ exists it holds the owner\'s APPROVED designs (HTML mockups, and folders of SVG artwork). The tickets must build them faithfully: name the design in each ticket body (for example "follow the approved Home page design"), say which artwork files to use, and give every page its own ticket so the visual language is set by the first page and reused by the rest.',
     `Source ids you may cite: ${pack.sources.map((s) => s.id).join(', ') || '(none)'}.`,
   ].join('\n');
 }

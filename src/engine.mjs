@@ -562,7 +562,7 @@ export class Engine {
     onPhase?.('cloning the repository'); let ws;
     try {
       ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'plan', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 });
-      pk.materialize(pack, dir, ws.dir); onPhase?.('the agent is reading your brief and planning (a few minutes)');
+      pk.materialize(pack, dir, ws.dir); this._materializeDesigns?.(id, ws.dir); onPhase?.('the agent is reading your brief and planning (a few minutes)');
       const ask = async (prompt) => d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900000 });
       let raw = pk.extractJson((await ask(pk.planPrompt(pack))).out);
       if (!raw) { onPhase?.('asking again for a clean plan'); raw = pk.extractJson((await ask(`${pk.planPrompt(pack)}\nYour previous answer was not valid JSON. Reply with ONLY the JSON object.`)).out); }
