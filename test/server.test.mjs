@@ -166,3 +166,16 @@ test('MCP: a file attached to a project (base64) lands in its source material, a
   assert.equal(md.result.isError, undefined); assert.equal(e.getPack('app').sources.length, 2);
   close();
 });
+
+test('design preview: a short-lived address serves the mockup with a locked-down policy; unknown or expired ones 404', async () => {
+  const { call, close, e, port } = await boot();
+  const dir = e._designDir('app'); const ds = await import('../src/designs.mjs');
+  const d = ds.createDesign(dir, { title: 'T', request: 'A screen with a list of things' }); ds.addVersion(dir, d.id, { html: '<html><body><h1>Mock</h1><script>alert(1)</script></body></html>', rationale: 'r' });
+  const r = await (await call(`/api/projects/app/designs/${d.id}/view`, { method: 'POST', body: {} })).json(); assert.match(r.path, /^\/preview\/[a-f0-9]{36}$/);
+  const page = await call(r.path, { token: null }); assert.equal(page.status, 200); const csp = page.headers.get('content-security-policy');
+  assert.match(csp, /default-src 'none'/); assert.match(csp, /sandbox/); assert.match(csp, /frame-ancestors 'self'/); const html = await page.text(); assert.match(html, /Mock/); assert.doesNotMatch(html, /alert/);
+  assert.equal((await call('/preview/' + 'a'.repeat(36), { token: null })).status, 404);
+  assert.equal((await call(`/api/projects/app/designs/${d.id}/view`, { method: 'POST', body: {}, token: null })).status, 401, 'asking for an address needs the token');
+  assert.match((await call('/', { token: null })).headers.get('content-security-policy'), /frame-src 'self'/);
+  close();
+});

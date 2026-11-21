@@ -33,7 +33,7 @@ async function readJson(req, max = MAX_BODY) {
 // /api route (no cookies, so no CSRF), Host allowlist (DNS rebinding), Origin must match Host for writes, strict CSP, bounded bodies.
 export function createServer(engine, { token, allowedHosts }) {
   if (!token || token.length < 24) throw new Error('A UI token of at least 24 characters is required');
-  const doc = { at: 0, v: null };
+  const doc = { at: 0, v: null }; const previews = new Map();
   // A fingerprint of the UI files served right now: an open browser tab compares it with what it loaded and offers a reload when it changes.
   const BUILD = (() => { try { const h = crypto.createHash('sha1'); for (const f of fs.readdirSync(UI).filter((x) => /\.(js|css|html)$/.test(x)).sort()) h.update(f).update(fs.readFileSync(path.join(UI, f))); return h.digest('hex').slice(0, 10); } catch { return 'dev'; } })();
 
@@ -86,6 +86,34 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/settings$/, async () => engine.settings()],
     ['POST', /^\/api\/settings$/, async (_m, b) => engine.setSettings(b)],
     ['POST', /^\/api\/settings\/probe$/, async () => engine.probeAgent()],
+    // ---- schedule, autonomy, roles
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/waiting$/, async (m) => engine.waiting(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/schedule$/, async (m, b) => engine.setSchedule(m[1], b.schedule ?? null)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/autonomy$/, async (m) => engine.autonomyStatus(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/autonomy$/, async (m, b) => engine.setAutonomy(m[1], b.settings ?? null)],
+    ['GET', /^\/api\/autonomy$/, async () => engine.autonomy()],
+    ['POST', /^\/api\/autonomy$/, async (_m, b) => engine.setAutonomyAllowed(b)],
+    ['GET', /^\/api\/roles$/, async () => engine.roles()],
+    ['POST', /^\/api\/roles$/, async (_m, b) => engine.setRoles(b.roles ?? {})],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/roles$/, async (m, b) => engine.setProjectRoles(m[1], b.roles ?? {})],
+    // ---- skills
+    ['GET', /^\/api\/skills$/, async () => engine.skills()],
+    ['GET', /^\/api\/skills\/preview$/, async (_m, _b, url) => engine.previewSkills(url.searchParams.get('role') ?? '', url.searchParams.get('project') || undefined)],
+    ['POST', /^\/api\/skills\/draft$/, async (_m, b) => engine.startSkillDraft(b)],
+    ['GET', /^\/api\/skills\/draft\/([a-f0-9]{8})$/, async (m) => engine.skillDraft(m[1])],
+    ['POST', /^\/api\/skills$/, async (_m, b) => engine.saveSkill(b)],
+    ['GET', /^\/api\/skills\/([a-z0-9-]{1,41})$/, async (m) => engine.getSkill(m[1])],
+    ['POST', /^\/api\/skills\/([a-z0-9-]{1,41})\/delete$/, async (m) => engine.deleteSkill(m[1])],
+    // ---- designs
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/designs$/, async (m) => engine.designs(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs$/, async (m, b) => engine.startDesign(m[1], b)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})$/, async (m) => engine.getDesign(m[1], m[2])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/revise$/, async (m, b) => engine.reviseDesign(m[1], m[2], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/edit$/, async (m, b) => engine.editDesign(m[1], m[2], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/(approve|reject|reopen)$/, async (m, b) => engine.setDesignStatus(m[1], m[2], { approve: 'approved', reject: 'rejected', reopen: 'proposed' }[m[3]], b.version)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/delete$/, async (m) => engine.deleteDesign(m[1], m[2])],
+    // The mockup is shown in a frame, and a frame cannot send the bearer token: so the UI asks for a short-lived, unguessable address and the frame loads that.
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/view$/, async (m, b) => { const html = engine.designHtml(m[1], m[2], Number.isInteger(b.version) ? b.version : undefined); for (const [k, v] of previews) if (v.exp < Date.now()) previews.delete(k); const t = crypto.randomBytes(18).toString('hex'); previews.set(t, { html, exp: Date.now() + 5 * 60_000 }); return { path: `/preview/${t}` }; }],
     ['GET', /^\/api\/projects$/, async () => engine.cfg.projects],
     ['POST', /^\/api\/projects$/, async (_m, b) => engine.addProject(b)],
     ['POST', /^\/api\/projects\/new$/, async (_m, b) => engine.createProject(b)],
@@ -124,6 +152,11 @@ export function createServer(engine, { token, allowedHosts }) {
         try { const out = await engine.inboundTicket(hook[1], hook[2], await readJson(req)); return send(res, out.created ? 201 : 200, out); }
         catch (e) { return send(res, e.status ?? 500, { error: e.message, ...(e.problems ? { problems: e.problems } : {}) }); }
       }
+      const prev = /^\/preview\/([a-f0-9]{36})$/.exec(url.pathname);
+      if (prev) {   // a design mockup: the address is the credential, it expires, and the page can run nothing and fetch nothing
+        const v = previews.get(prev[1]); if (req.method !== 'GET' || !v || v.exp < Date.now()) return send(res, 404, { error: 'Not found' });
+        return send(res, 200, v.html, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox", 'Referrer-Policy': 'no-referrer' });
+      }
       const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/mcp' || url.pathname === '/mcp-code';
       if (!protectedPath) {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
@@ -132,7 +165,7 @@ export function createServer(engine, { token, allowedHosts }) {
         const file = path.join(UI, name);
         if (!TYPES[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, { error: 'Not found' });
         return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)], ...(name.startsWith('fonts') ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : {}),
-          'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+          'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
       }
       const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
       if (!bearer || !same(bearer, token)) return send(res, 401, { error: 'Missing or invalid token' }, { 'WWW-Authenticate': 'Bearer' });
