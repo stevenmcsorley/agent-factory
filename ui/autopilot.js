@@ -44,10 +44,13 @@ function scheduleCard(id, w, rerender) {
 }
 
 function rolesCard(id, roles, rerender, projectRoles) {
-  const r = roles.roles.reviewer; const own = projectRoles?.reviewer?.enabled;
-  const sel = h('select', { 'aria-label': 'Reviewer for this project' }, [['', `Use the factory setting (${r.enabled ? 'on' : 'off'})`], ['on', 'On for this project'], ['off', 'Off for this project']].map(([v, l]) => h('option', { value: v, selected: (own === undefined ? '' : own ? 'on' : 'off') === v }, l)));
-  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Reviewer agent')),
-    h('p', { class: 'muted small' }, r.blurb), lbl('For this project', sel), h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/roles`, { method: 'POST', body: { roles: { reviewer: sel.value === '' ? null : { enabled: sel.value === 'on' } } } }), 'Reviewer setting saved', rerender) }, 'Save'), h('a', { class: 'btn ghost', href: '#/settings' }, 'Model for each role')));
+  const toggles = Object.entries(roles.roles).filter(([, v]) => v.toggle);
+  const rows = toggles.map(([k, r]) => { const own = projectRoles?.[k]?.enabled;
+    const sel = h('select', { 'aria-label': `${r.label} for this project`, 'data-role': k }, [['', `Use the factory setting (${r.enabled ? 'on' : 'off'})`], ['on', 'On for this project'], ['off', 'Off for this project']].map(([v, l]) => h('option', { value: v, selected: (own === undefined ? '' : own ? 'on' : 'off') === v }, l)));
+    return h('div', { class: 'sfield' }, h('label', {}, r.label), sel, h('small', { class: 'help muted' }, r.blurb)); });
+  const save = act(async () => { const body = {}; for (const el of document.querySelectorAll('select[data-role]')) body[el.dataset.role] = el.value === '' ? null : { enabled: el.value === 'on' }; await api(`/projects/${id}/roles`, { method: 'POST', body: { roles: body } }); }, 'Saved', rerender);
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Reviewers and helpers')), h('p', { class: 'muted small' }, 'Extra agents for this project. Each one costs an extra agent run when it fires, so they are off until you turn them on.'), ...rows,
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: save }, 'Save'), h('a', { class: 'btn ghost', href: '#/settings' }, 'Model for each role')));
 }
 
 function autonomyCard(id, a, rerender) {

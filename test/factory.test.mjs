@@ -160,3 +160,15 @@ test('visual: new problems go back to the builder once; a check that cannot run 
   const c = setup('echo hi > b.txt', 'test -f b.txt'); c.deps.config.visual = async () => ({ status: 'fail', summary: 'still broken', findings: [{ severity: 'fail', route: '/', widths: [360], detail: 'Scrolls sideways' }], counts: { fail: 1, warn: 0, existing: 0 } });
   const [r3] = await tick(c.deps); assert.equal(r3.status, 'ok', 'opens the PR on the last attempt, flagged'); assert.equal(r3.visual.status, 'fail');
 });
+
+test('spec-writer: a vague ticket gets acceptance criteria drafted in, once, and then goes ahead', async () => {
+  const { deps, tpath } = setup('echo hi > b.txt', 'test -f b.txt'); deps.config.gate = {}; withBody(tpath, 'fix it');
+  let calls = 0; deps.config.clarify = async () => { calls++; return '## Acceptance criteria\n- When the page loads, b.txt exists with the text hi and a newline after it\n\n## Out of scope\n- anything else in the repo\n\n## Likely files\n- b.txt (the file to create)\n'; };
+  const [rec] = await tick(deps); assert.equal(rec.status, 'ok'); assert.equal(calls, 1);
+  const t = JSON.parse(fs.readFileSync(tpath))[0]; assert.match(t.body, /agent-factory:spec-writer/); assert.match(t.body, /Drafted by the spec-writer agent/); assert.match(t.body, /## Acceptance criteria/);
+});
+test('spec-writer: it only tries once per ticket, and without the role nothing changes', async () => {
+  const a = setup('echo hi > b.txt', 'test -f b.txt'); a.deps.config.gate = { minWords: 50 }; withBody(a.tpath, 'fix it\n<!-- agent-factory:spec-writer -->'); let calls = 0; a.deps.config.clarify = async () => { calls++; return '## Acceptance criteria\n- ok'; };
+  const [r1] = await tick(a.deps); assert.equal(r1.status, 'needs-info', 'already drafted once and still vague: parked'); assert.equal(calls, 0);
+  const b = setup('echo hi > b.txt', 'test -f b.txt'); b.deps.config.gate = {}; withBody(b.tpath, 'fix it'); const [r2] = await tick(b.deps); assert.equal(r2.status, 'needs-info');
+});

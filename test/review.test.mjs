@@ -26,11 +26,11 @@ test('skills: built-ins list, an override replaces one, deleting restores it, an
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-'));
   assert.ok(sk.listSkills(dir).some((s) => s.name === 'code-review' && s.builtin && !s.overridden));
   assert.match(sk.skillsFor(dir, { role: 'reviewer', project: 'a' }).text, /code-review/);
-  assert.doesNotMatch(sk.skillsFor(dir, { role: 'reviewer', project: 'a' }).text, /bugfix/);   // builder-only skill is not given to the reviewer
+  assert.doesNotMatch(sk.skillsFor(dir, { role: 'reviewer', project: 'a' }).text, /### Skills[\s\S]*bugfix:/);   // builder-only skill is not given to the reviewer
   sk.saveSkill(dir, { name: 'code-review', description: 'mine', roles: 'reviewer', body: 'Only check security.' });
   assert.equal(sk.getSkill(dir, 'code-review').overridden, true); assert.match(sk.skillsFor(dir, { role: 'reviewer', project: 'a' }).text, /Only check security/);
   assert.deepEqual(sk.deleteSkill(dir, 'code-review'), { removed: true, restoredBuiltin: true });
-  assert.match(sk.getSkill(dir, 'code-review').body, /senior engineer/);
+  assert.match(sk.getSkill(dir, 'code-review').body, /two separate axes/);
   sk.saveSkill(dir, { name: 'only-b', roles: 'builder', projects: 'b', body: 'Special rules for project b.' });
   assert.doesNotMatch(sk.skillsFor(dir, { role: 'builder', project: 'a' }).text, /only-b/); assert.match(sk.skillsFor(dir, { role: 'builder', project: 'b' }).text, /only-b/);
   assert.throws(() => sk.saveSkill(dir, { name: '../x', body: 'long enough text' }), /lowercase/);
@@ -75,4 +75,18 @@ test('skills over MCP: save, preview what a role receives, draft with the skill-
   await callOp(e, 'save_skill', r.draft); assert.equal(e.getSkill('safe-migrations').description, 'Keep migrations safe');
   await callOp(e, 'delete_skill', { name: 'house-style' }); assert.throws(() => e.getSkill('house-style'), /No skill/);
   await assert.rejects(() => callOp(e, 'draft_skill', { request: 'short' }), /Describe/);
+});
+
+import { combineReviews } from '../src/review.mjs';
+test('combined reviews: any changes wins, an error is never an approval, findings keep their source', () => {
+  const ok = { role: 'reviewer', verdict: 'approve', summary: 'fine', findings: [] }; const sec = { role: 'security', verdict: 'changes', summary: 'injection', findings: [{ severity: 'blocker', issue: 'sql' }] };
+  assert.equal(combineReviews([ok, sec]).verdict, 'changes'); assert.equal(combineReviews([ok, sec]).findings[0].source, 'security');
+  assert.equal(combineReviews([ok, { role: 'security', verdict: 'error', summary: 'timed out', findings: [] }]).verdict, 'error');
+  assert.equal(combineReviews([ok, { ...ok, role: 'security' }]).verdict, 'approve'); assert.equal(combineReviews([ok]).verdict, 'approve');
+  assert.deepEqual(combineReviews([ok, sec]).passes, [{ role: 'reviewer', verdict: 'approve' }, { role: 'security', verdict: 'changes' }]);
+});
+test('every built-in skill has a source line and goes to at least one real role', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sk-')); for (const s of sk.listSkills(dir)) { assert.ok(s.source, `${s.name} has no source`); assert.ok(s.roles.every((r) => sk.ROLE_NAMES.includes(r)), `${s.name} names an unknown role`); assert.ok(s.body.length < 1500, `${s.name} is too long to be read`); }
+  for (const role of ['builder', 'fixer', 'reviewer', 'security', 'designer', 'planner', 'spec-writer', 'skill-writer']) assert.ok(sk.skillsFor(dir, { role, project: 'a' }).names.length > 0, `${role} gets no skills`);
+  assert.ok(sk.skillsFor(dir, { role: 'builder', project: 'a' }).text.length < 6000);
 });

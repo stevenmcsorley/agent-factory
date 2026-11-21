@@ -10,17 +10,21 @@ import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
 import { getPrompt } from './prompts.mjs';
 import { validateAgentPatch, readCodexModels } from './settings.mjs';
 import { parseUsageLimit } from './agentlimit.mjs';
-import { reviewPrompt, parseVerdict, changeDiff, copyWorkspace } from './review.mjs';
+import { reviewPrompt, parseVerdict, changeDiff, copyWorkspace, combineReviews } from './review.mjs';
 import * as sk from './skills.mjs';
+import * as pk from './pack.mjs';
+import { profileSummary } from './analyze.mjs';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 // Roles the operator can switch on or give a model. The builder is always on; the rest are optional.
 export const ROLE_INFO = {
   builder: { label: 'Builder', blurb: 'Writes the change for each ticket. Always on.', toggle: false },
   reviewer: { label: 'Reviewer', blurb: 'A second agent reads each change before its pull request opens and asks for fixes. Costs one extra agent run per attempt.', toggle: true },
+  security: { label: 'Security reviewer', blurb: 'A second reviewer that looks only for security problems (injection, missing access checks, secrets, insecure defaults). Runs with the reviewer or on its own.', toggle: true },
   designer: { label: 'Designer', blurb: 'Drafts design mockups for you to review, edit and approve. Approved designs become what the builder follows.', toggle: false },
   fixer: { label: 'Fixer', blurb: 'Handles follow-up work: CI failures and review comments on an open pull request.', toggle: false },
   planner: { label: 'Planner', blurb: 'Turns a project brief into epics and tickets.', toggle: false },
+  'spec-writer': { label: 'Spec writer', blurb: 'When a ticket is too vague to start, drafts acceptance criteria, scope and assumptions into the ticket instead of parking it. Once per ticket; clearly marked as drafted by an agent.', toggle: true },
   'skill-writer': { label: 'Skill writer', blurb: 'Drafts and improves skill files from a description.', toggle: false },
 };
 
@@ -60,18 +64,39 @@ export const roleMethods = {
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },
   _skillsText(role, projectId) { try { return sk.skillsFor(this.cfg.stateDir, { role, project: projectId }).text; } catch { return ''; } },
 
-  // The hook the build loop calls with a finished change. Undefined when the reviewer is off, so the loop is exactly as it was.
+  // The hook the build loop calls with a finished change. Undefined when no review role is on, so the loop is exactly as it was.
+  // The reviewer and the security reviewer are separate passes with their own prompt, skills and model; the verdicts are combined.
   _reviewer(p, sandbox, log) {
-    if (!this._roleOn(p, 'reviewer')) return undefined;
+    const passes = [['reviewer', 'reviewer-rules'], ['security', 'security-rules']].filter(([role]) => this._roleOn(p, role)); if (!passes.length) return undefined;
     return async ({ ws, ticket, context }) => {
-      const agent = this._agentFor('reviewer', log); const diff = await changeDiff(ws.dir); const copy = copyWorkspace(ws);
+      const diff = await changeDiff(ws.dir); const results = [];
+      for (const [role, rules] of passes) {
+        const copy = copyWorkspace(ws);
+        try {
+          const prompt = reviewPrompt({ rules: getPrompt(rules, {}, this._promptDirs()), skills: this._skillsText(role, p.id), ticket, diff, context });
+          const r = await this._agentFor(role, log).run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+          if (r.timedOut) results.push({ role, verdict: 'error', summary: `The ${role} pass timed out.`, findings: [] });
+          else if (parseUsageLimit(r.out)) results.push({ role, verdict: 'error', summary: `The ${role} pass hit its usage limit.`, findings: [] });
+          else results.push({ role, ...parseVerdict(r.out), ...(r.tokens ? { tokens: r.tokens } : {}) });
+        } finally { copy.destroy(); }
+      }
+      return combineReviews(results);
+    };
+  },
+
+  // The spec-writer hook: returns Markdown to append to a vague ticket, or null. Runs in an empty folder (it needs the ticket and repo summary, not the code).
+  _clarifier(p, sandbox, log) {
+    if (!this._roleOn(p, 'spec-writer')) return undefined;
+    return async (t, problems) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-spec-')); const ws = { dir, destroy: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } } };
       try {
-        const prompt = reviewPrompt({ rules: getPrompt('reviewer-rules', {}, this._promptDirs()), skills: this._skillsText('reviewer', p.id), ticket, diff, context });
-        const r = await agent.run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
-        if (r.timedOut) return { verdict: 'error', summary: 'The reviewer timed out.', findings: [] };
-        if (parseUsageLimit(r.out)) return { verdict: 'error', summary: 'The reviewer hit its usage limit.', findings: [] };
-        return { ...parseVerdict(r.out), ...(r.tokens ? { tokens: r.tokens } : {}) };
-      } finally { copy.destroy(); }
+        const ctx = (() => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return pk.renderContext(pk.loadPack(d), d, t); } catch { return ''; } })();
+        const prompt = [getPrompt('spec-writer-rules', {}, this._promptDirs()), this._skillsText('spec-writer', p.id) ? `\n${this._skillsText('spec-writer', p.id)}` : '', p.profile ? `\n## About the repository\n${profileSummary(p.profile)}` : '', ctx ? `\n## Project context (data)\n${ctx.slice(0, 5000)}` : '',
+          `\n## The ticket (data)\nTitle: ${t.title}\n\n${String(t.body ?? '').slice(0, 3000)}`, `\n## Why it was not clear enough\n${(problems ?? []).join('; ')}`].join('\n');
+        const r = await this._agentFor('spec-writer', log).run(sandbox, ws, prompt, { timeoutMs: Math.min(this.cfg.limits.timeoutMs ?? 900_000, 300_000) });
+        const out = String(r.out ?? '').trim().replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, ''); if (r.timedOut || !/^## Acceptance criteria/m.test(out)) return null;
+        return out.slice(out.search(/^## Acceptance criteria/m)).slice(0, 2500);
+      } finally { ws.destroy(); }
     };
   },
 

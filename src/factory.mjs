@@ -16,6 +16,8 @@ import { feedbackFromReview } from './review.mjs';
 import { parseAllowedFiles, outsideAllowlist, overlaps } from './allowlist.mjs';
 import { visualFeedback } from './visual.mjs';
 
+export const SPEC_MARK = '<!-- agent-factory:spec-writer -->';
+
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
     `You are an autonomous software engineer working in a git checkout. Implement the ticket below.`,
@@ -85,7 +87,19 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     recordRun(config.runsDir ?? stateDir, { project: config.projectId, ...run.finish('repo-not-allowed') });
     return rec;
   }
-  const gate = assessTicket(t, config.gate);
+  let gate = assessTicket(t, config.gate);
+  // A vague ticket is not parked at once if a spec-writer is on: it drafts acceptance criteria, scope and assumptions into the ticket (once, clearly marked), and the gate looks again.
+  if (config.gate !== false && !gate.ok && config.clarify && !String(t.body ?? '').includes(SPEC_MARK)) {
+    try {
+      const add = await config.clarify(t, gate.problems);
+      if (add) {
+        const body = `${String(t.body ?? '').trimEnd()}\n\n${SPEC_MARK}\n_Drafted by the spec-writer agent because the ticket was too vague to start. Edit it if it is wrong._\n\n${add}`;
+        try { await tickets.update?.(t.id, { body }); } catch { /* still use it for this run */ }
+        t = { ...t, body }; gate = assessTicket(t, config.gate); config.recordEvent?.({ ticket: t.id, event: 'spec-drafted' });
+        await tickets.comment(t.id, 'agent-factory: this ticket was too vague to start, so the spec-writer agent added acceptance criteria, scope and assumptions to it (marked in the ticket). Check them; the build goes ahead on them.').catch(() => {});
+      }
+    } catch { /* fall through to the normal "needs more detail" path */ }
+  }
   if (config.gate !== false && !gate.ok) {
     await tickets.comment(t.id, clarificationComment(gate.problems));
     await tickets.label(t.id, ['agent-needs-info'], ['agent-ready']); config.recordEvent?.({ ticket: t.id, event: 'parked' });

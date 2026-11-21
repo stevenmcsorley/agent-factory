@@ -40,3 +40,12 @@ export function copyWorkspace(ws) {
   fs.cpSync(ws.dir, dir, { recursive: true, filter: (src) => !/(^|\/)(node_modules|\.venv|venv|dist|build|target|\.next)(\/|$)/.test(path.relative(ws.dir, src)) });
   return { ...ws, dir, destroy: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } } };
 }
+
+// One verdict from several passes: any "changes" wins; an error is never an approval (a pass that could not run must not wave the change through).
+export function combineReviews(results) {
+  if (results.length === 1) { const { role, ...r } = results[0]; return role === 'reviewer' ? r : { ...r, findings: r.findings.map((f) => ({ ...f, source: role })) }; }
+  const findings = results.flatMap((r) => r.findings.map((f) => ({ ...f, source: r.role })));
+  const verdict = results.some((r) => r.verdict === 'changes') ? 'changes' : results.some((r) => r.verdict === 'error') ? 'error' : 'approve';
+  const tokens = results.reduce((a, r) => (r.tokens ? { input: (a?.input ?? 0) + r.tokens.input, output: (a?.output ?? 0) + r.tokens.output } : a), undefined);
+  return { verdict, summary: results.map((r) => `${r.role}: ${r.summary || r.verdict}`).join(' | ').slice(0, 400), findings, passes: results.map((r) => ({ role: r.role, verdict: r.verdict })), ...(tokens ? { tokens } : {}) };
+}
