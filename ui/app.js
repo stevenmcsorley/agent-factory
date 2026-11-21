@@ -5,9 +5,10 @@ import { portfolio } from './portfolio.js';
 import { scenarios } from './scenarios.js';
 import { studio } from './studio.js';
 import { settings } from './settings.js';
+import { skillsPage } from './skills.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^new$/, newProject, 'studio']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^skills$/, skillsPage, 'settings'], [/^new$/, newProject, 'studio']];
 const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['studio', '#/studio', 'Studio'], ['inbox', '#/inbox', 'Inbox'], ['library', '#/library', 'Library'], ['scenarios', '#/scenarios', 'Scenarios'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health'], ['settings', '#/settings', 'Settings']];
 let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';

@@ -94,11 +94,34 @@ function historyCard(s) {
     s.history.length ? h('ul', { class: 'hist' }, s.history.map((e) => h('li', {}, h('span', { class: 'muted small' }, ago(e.at)), h('span', { class: 'mono small' }, lines(e).join(' · '))))) : h('p', { class: 'muted small' }, 'Nothing changed from this page yet.'));
 }
 
+function rolesCard(r, s, ctx) {
+  const known = s.models.length > 0; const rows = Object.entries(r.roles).map(([k, v]) => {
+    const model = known ? h('select', { 'aria-label': `${v.label} model` }, [h('option', { value: '' }, `Same as the default (${r.default.model ?? 'Codex default'})`), ...s.models.map((m) => h('option', { value: m.slug, selected: m.slug === v.agent.model }, m.name))]) : h('input', { value: v.agent.model ?? '', placeholder: 'same as the default', 'aria-label': `${v.label} model` });
+    const eff = h('select', { 'aria-label': `${v.label} reasoning effort` }, [['', 'default'], ...['minimal', 'low', 'medium', 'high', 'xhigh'].map((e) => [e, e])].map(([x, l]) => h('option', { value: x, selected: (v.agent.reasoningEffort ?? '') === x }, l)));
+    const on = h('input', { type: 'checkbox', id: `role-${k}`, 'aria-label': `${v.label} on` }); on.checked = v.enabled; on.disabled = !v.toggle;
+    const save = h('button', { class: 'btn small', onclick: async () => { try { await api('/roles', { method: 'POST', body: { roles: { [k]: { ...(v.toggle ? { enabled: on.checked } : {}), ...(s.agent.acceptsModel ? { agent: { model: model.value.trim() || null, ...(s.agent.acceptsEffort ? { reasoningEffort: eff.value || null } : {}) } } : {}) } } } }); toast(`${v.label} saved`, 'ok'); ctx.rerender(); } catch (e) { toast(e.message, 'bad'); } } }, 'Save');
+    return h('div', { class: 'rolerow' }, h('div', {}, h('label', { class: 'check', for: `role-${k}` }, on, h('b', {}, ` ${v.label}`)), h('small', { class: 'help muted' }, v.blurb)), s.agent.acceptsModel ? model : h('span', { class: 'muted small' }, 'n/a'), s.agent.acceptsEffort ? eff : h('span', {}), save);
+  });
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agent roles')), h('p', { class: 'muted small' }, 'The same agent can do different jobs, each with its own model and effort: a cheaper one to review, a stronger one to design. Roles you leave alone use the default above. The reviewer can also be switched per project, on its Autopilot tab.'), h('div', { class: 'roles' }, rows),
+    h('p', { class: 'muted small' }, h('a', { href: '#/skills' }, 'Edit the skills each role receives')));
+}
+
+function autonomyCard(a, ctx) {
+  const ack = h('input', { type: 'checkbox', id: 'au-ack' }); const cap = h('input', { type: 'number', min: '1', max: '500', value: a.maxMergesPerDay, 'aria-label': 'Automatic merges per day, all projects' });
+  const set = (body, done) => async (e) => { e.currentTarget.disabled = true; try { await api('/autonomy', { method: 'POST', body }); toast(done, 'ok'); ctx.rerender(); } catch (err) { toast(err.message, 'bad'); e.currentTarget.disabled = false; } };
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Autonomous merging'), a.allow ? h('span', { class: 'stamp warn' }, 'ALLOWED') : h('span', { class: 'stamp ok' }, 'off')),
+    h('p', { class: 'muted small' }, 'Off by default: the factory never merges. Switching this on only makes it POSSIBLE; each project still has to be put in autonomous mode on its own Autopilot tab. Switching it off again stops every project at once.'),
+    a.allow ? h('div', {}, h('p', {}, `Merged automatically today: ${a.mergedToday}.`), h('div', { class: 'sfield' }, h('label', {}, 'Most automatic merges per day, all projects'), cap),
+      h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: set({ maxMergesPerDay: Number(cap.value) }, 'Limit saved') }, 'Save limit'), h('button', { class: 'btn danger', onclick: set({ allow: false }, 'Autonomous merging is off. Nothing will merge without you.') }, 'Switch off for everything')))
+      : h('div', {}, h('label', { class: 'check', for: 'au-ack' }, ack, ' I understand that projects set to autonomous mode will merge pull requests with no human approval, and that I can switch this off at any time.'),
+        h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: (e) => { if (!ack.checked) { toast('Tick the box first', 'bad'); return; } return set({ allow: true }, 'Allowed. Now choose which projects use it.')(e); } }, 'Allow autonomous merging'))));
+}
+
 export const settings = {
-  async load() { const [s, st] = await Promise.all([api('/settings'), api('/status').catch(() => null)]); return { s, st }; },
-  draw({ s, st }, ctx) {
+  async load() { const [s, st, roles, au] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy')]); return { s, st, roles, au }; },
+  draw({ s, st, roles, au }, ctx) {
     return [head('Settings', 'Which model builds your tickets, and the guardrails around it. Changes apply from the next run and are saved to the config file: no restart.'),
-      agentCard(s, ctx), limitsCard(s, st, ctx), historyCard(s),
+      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), autonomyCard(au, ctx), historyCard(s),
       h('p', { class: 'muted small' }, `Not editable here on purpose: the agent type, sandbox and network allowlist, and the projects. Those are security boundaries and live in the config file.`)];
   },
 };
