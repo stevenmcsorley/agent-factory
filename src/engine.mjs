@@ -35,6 +35,7 @@ import { cleanPatterns, DEFAULT_IGNORE } from './ignore.mjs';
 import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
+import { scheduleMethods } from './engine-schedule.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -117,10 +118,10 @@ export class Engine {
   }
   // Projects take turns by default; limits.parallelProjects (1 to 8) lets that many projects build at the same time, each in its own lane. Mind disk and the agent's rate limits.
   tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); await sc.advanceAll(this, this.scenarios()).catch(() => {});
-    const queue = this.cfg.projects.filter((p) => !p.paused); const lanes = Math.max(1, Math.min(8, Number(this.cfg.limits.parallelProjects) || 1)); let next = 0;
+    const queue = this._dueProjects(); const lanes = Math.max(1, Math.min(8, Number(this.cfg.limits.parallelProjects) || 1)); let next = 0;
     const lane = async () => { while (next < queue.length) { const p = queue[next++]; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); this.lanes.set(p.id, Date.now()); try { out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } finally { this.lanes.delete(p.id); } } };
     await Promise.all(Array.from({ length: Math.min(lanes, queue.length) }, lane)); return out; }); }
-  feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this.cfg.projects) { if (p.paused) continue; const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this._dueProjects()) { const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
     this.pollMs = ms;
@@ -214,7 +215,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), verify: p.config?.verify ?? null, image: p.config?.image ?? null, profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, waiting: this._due(p).reasons, schedule: p.schedule ?? null, autonomy: p.autonomy ?? null, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), verify: p.config?.verify ?? null, image: p.config?.image ?? null, profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -874,3 +875,5 @@ export class Engine {
     return out;
   }
 }
+
+Object.assign(Engine.prototype, scheduleMethods);
