@@ -149,14 +149,24 @@ function reviewCard(it, ctx) {
     h('div', { class: 'row gap-t' }, it.pr ? ext(it.pr.url, [icon('pr', 13), ` Review PR #${it.pr.number}`], 'btn primary') : h('span', { class: 'muted small' }, 'PR link unavailable (it may have been merged or closed)'),
       h('button', { class: 'btn', onclick: async () => { if (confirm(`Mark “${it.title}” done by closing the ticket? Merge the PR first.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', ctx.rerender)(); } }, 'Done: close ticket')));
 }
+// A pipeline on a project's base branch is failing after a merge (see src/deploywatch.mjs). It clears itself when a later run of that workflow goes green.
+function deployCard(it) {
+  return h('article', { class: 'slip bad' },
+    h('div', { class: 'slip-top' }, h('span', { class: 'stamp bad' }, 'Failing after merge'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, ago(it.updatedAt))),
+    h('h3', {}, it.title),
+    h('p', { class: 'small muted' }, it.pr ? `From PR #${it.pr}: ` : 'Latest commit: ', it.headline || it.sha),
+    h('div', { class: 'row gap-t' }, ext(it.url, [icon('alert', 13), ' Open the failed run'], 'btn primary'),
+      h('span', { class: 'muted small' }, 'Clears by itself when the next run passes. Nothing is rolled back for you.')));
+}
 export const inboxPage = {
   async load() { return { inbox: await api('/inbox') }; },
   draw({ inbox }, ctx) {
-    const dec = inbox.items.filter((i) => i.kind === 'decision'), rev = inbox.items.filter((i) => i.kind === 'review');
+    const dec = inbox.items.filter((i) => i.kind === 'decision'), rev = inbox.items.filter((i) => i.kind === 'review'), dep = inbox.items.filter((i) => i.kind === 'deploy');
     const sec = (key, items, node) => keyed(node, key, items);
-    return [head('Inbox', dec.length || rev.length ? `${dec.length} need${dec.length === 1 ? 's' : ''} a decision · ${rev.length} ready to review. Nothing here is merged for you.` : 'Nothing is waiting on you.'),
+    return [head('Inbox', dec.length || rev.length || dep.length ? `${dep.length ? `${dep.length} failing after merge · ` : ''}${dec.length} need${dec.length === 1 ? 's' : ''} a decision · ${rev.length} ready to review. Nothing here is merged for you.` : 'Nothing is waiting on you.'),
       inbox.errors.length ? h('div', { class: 'callout bad' }, icon('alert', 16), inbox.errors.map((e) => `${e.project}: ${e.error}`).join(' · ')) : null,
-      !dec.length && !rev.length ? card('reg', empty('All clear', 'No tickets are stuck and no PRs are waiting. Issue a work order from the control room.', h('a', { class: 'btn primary', href: '#/' }, 'Back to the control room'))) : null,
+      !dec.length && !rev.length && !dep.length ? card('reg', empty('All clear', 'No tickets are stuck and no PRs are waiting. Issue a work order from the control room.', h('a', { class: 'btn primary', href: '#/' }, 'Back to the control room'))) : null,
+      dep.length ? sec('deploys', dep, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Failing after merge · ${dep.length}`)), dep.map((i) => deployCard(i)))) : null,
       dec.length ? sec('decisions', dec, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Needs your decision · ${dec.length}`)), dec.map((i) => decisionCard(i, ctx)))) : null,
       rev.length ? sec('reviews', rev, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Ready to review · ${rev.length}`)), rev.map((i) => reviewCard(i, ctx)))) : null];
   },

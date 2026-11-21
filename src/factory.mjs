@@ -10,6 +10,7 @@ import { parseNeedsInfo, parseAssumptions } from './triage.mjs';
 import { changeQuality, feedbackFor } from './quality.mjs';
 import { makeIgnore } from './ignore.mjs';
 import { getPrompt } from './prompts.mjs';
+import { coverageGap } from './coverage.mjs';
 
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
@@ -23,7 +24,8 @@ export function buildPrompt(t, extra = '', profile = '', context = '', rules = g
 
 // What this change was built from and what was actually checked, so a pass is tied to the revisions it names.
 function provenanceNote(rec) {
-  const bits = [rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, rec.agentRuns ? null : null].filter(Boolean);
+  const cov = rec.coverage ? `- **Not covered by that command:** ${rec.coverage.uncovered.map((f) => `\`${f}\``).join(', ')}${rec.coverage.total > rec.coverage.uncovered.length ? ` and ${rec.coverage.total - rec.coverage.uncovered.length} more` : ''} (it only runs in ${rec.coverage.scopes.map((x) => `\`${x}/\``).join(', ')}). Review those by hand.` : null;
+  const bits = [rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
   return bits.length ? `\n\n### Provenance\n${bits.join('\n')}\n- If this branch changes after this point, the result above no longer applies to it.` : '';
 }
 // A short, honest note for the PR and the ticket about the quality gate on the change.
@@ -112,6 +114,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
         const v = await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image });
         run.note('verifyTail', tail(v.out));
         if (v.code !== 0) { rec.status = 'verify-failed'; feedback = v.out.slice(-3000); continue; }
+        const gap = coverageGap(cfg.verify, rec.changed); if (gap) run.note('coverage', gap); else delete rec.coverage;   // files this command does not exercise: named on the PR, never a block
       }
       // Quality gate on the CHANGED lines only ("clean as you code"): one chance to fix its own change, then secrets stop the PR and anything else is flagged on it.
       if (cfg.qualityGate !== false) {

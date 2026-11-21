@@ -15,6 +15,7 @@ import { tick } from './factory.mjs';
 import { feedbackTick } from './feedback.mjs';
 import { buildTickets, identifySource, publicSources, SOURCES, TOKEN_ENV, ossiconeSignupInfo } from './sources.mjs';
 import { flowMetrics } from './flow.mjs';
+import { failingWorkflows, fetchBaseRuns } from './deploywatch.mjs';
 import { buildHost, identifyHost, publicHosts, hostKind, HOSTS, validateHost } from './hosts.mjs';
 import { initForge, forgeDir } from './adapters/host-local.mjs';
 import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
@@ -232,10 +233,24 @@ export class Engine {
         items.push(item);
       }
     }
-    items.sort((a, b) => (a.kind === b.kind ? String(b.updatedAt).localeCompare(String(a.updatedAt)) : a.kind === 'decision' ? -1 : 1));
-    return { items, errors, counts: { decisions: items.filter((i) => i.kind === 'decision').length, reviews: items.filter((i) => i.kind === 'review').length } };
+    for (const f of await this.deployFailures()) items.push({ ...f, id: `deploy-${f.runId}`, kind: 'deploy', state: 'failed', title: `${f.workflow} is failing on ${f.base}`, updatedAt: f.at });
+    const rank = { deploy: 0, decision: 1, review: 2 };
+    items.sort((a, b) => (a.kind === b.kind ? String(b.updatedAt).localeCompare(String(a.updatedAt)) : (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3)));
+    return { items, errors, counts: { deploys: items.filter((i) => i.kind === 'deploy').length, decisions: items.filter((i) => i.kind === 'decision').length, reviews: items.filter((i) => i.kind === 'review').length } };
   }
-  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); return { count: n }; }
+  // What happens after a merge: workflows on a project's base branch whose latest finished run failed (see deploywatch.mjs). GitHub projects only, and a
+  // project can opt out with deployWatch:false. Cached because the Inbox polls; a GitHub or `gh` problem for one project is not an Inbox item, so it is skipped quietly.
+  async deployFailures() {
+    if (this.demo) return [];
+    return this._cached('deploys', 120_000, async () => {
+      const out = [];
+      await Promise.all(this.cfg.projects.filter((p) => p.deployWatch !== false && p.repo && hostKind(p) === 'github').map(async (p) => {
+        try { for (const f of failingWorkflows(await (this.f.baseRuns ?? fetchBaseRuns)(p.repo, p.base ?? 'main', this.f.exec))) out.push({ project: p.id, repo: p.repo, base: p.base ?? 'main', ...f }); } catch { /* skip */ }
+      }));
+      return out;
+    });
+  }
+  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures()).length; return { count: n }; }
 
   // Act on a ticket from the inbox. Everything is validated; re-queueing re-runs the clarity gate so a vague ticket cannot just bounce back.
   async ticketAction(projectId, ticketId, action, payload = {}) {

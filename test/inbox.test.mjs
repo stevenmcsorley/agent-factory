@@ -14,7 +14,7 @@ const res = (status, body) => ({ ok: status < 400, status, json: async () => bod
 function setup(tickets) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ib-')); const tp = path.join(root, 't.json'); fs.writeFileSync(tp, JSON.stringify(tickets));
   const cfg = withDefaults({ stateDir: path.join(root, 'state'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [{ id: 'app', repo: 'me/app', base: 'main', tickets: { kind: 'file', path: tp } }] });
-  const e = new Engine(cfg, { configPath: path.join(root, 'c.json'), factories: { tickets: (p) => fileTickets(p.tickets.path), hostAdapter: () => ({ pr: { listAgentPrs: async () => [{ number: 9, branch: 'agent/3-add-it', sha: 's', title: 'Add it' }] }, prUrl: (_r, n) => `https://example.test/pr/${n}`, gitEnv: () => ({}), cloneUrl: () => 'x' }) } });
+  const e = new Engine(cfg, { configPath: path.join(root, 'c.json'), factories: { baseRuns: async () => [], tickets: (p) => fileTickets(p.tickets.path), hostAdapter: () => ({ pr: { listAgentPrs: async () => [{ number: 9, branch: 'agent/3-add-it', sha: 's', title: 'Add it' }] }, prUrl: (_r, n) => `https://example.test/pr/${n}`, gitEnv: () => ({}), cloneUrl: () => 'x' }) } });
   return { e, tp, read: () => JSON.parse(fs.readFileSync(tp, 'utf8')) };
 }
 const vague = { id: 1, title: 'Fix it', body: 'Now', labels: ['agent-needs-info'], comments: ['agent-factory did not start work: it is too short to act on'] };
@@ -27,7 +27,7 @@ test('inbox gathers decisions (with reason + run) before reviews (with the PR), 
   fs.mkdirSync(e.cfg.stateDir, { recursive: true });
   fs.writeFileSync(path.join(e.cfg.stateDir, 'runs.jsonl'), JSON.stringify({ id: 'abcd1234', project: 'app', ticket: 2, status: 'verify-failed', error: 'tests failed', finished: new Date().toISOString() }) + '\n');
   const inbox = await e.inbox();
-  assert.deepEqual(inbox.counts, { decisions: 2, reviews: 1 });
+  assert.deepEqual(inbox.counts, { deploys: 0, decisions: 2, reviews: 1 });
   assert.deepEqual(inbox.items.map((i) => i.kind), ['decision', 'decision', 'review']); assert.deepEqual(inbox.items.map((i) => i.id).sort(), [1, 2, 3]); // decisions first
   const f = inbox.items.find((i) => i.id === 2); assert.equal(f.run.status, 'verify-failed'); assert.match(f.comments.at(-1).body, /gave up/); assert.ok(f.body);
   assert.equal(inbox.items.find((i) => i.id === 3).pr.number, 9); assert.equal((await e.inboxCount()).count, 3);
