@@ -6,6 +6,9 @@ All of it can be driven from the UI (a project's **Autopilot** and **Designs** t
 ## Why is this waiting?
 `why_waiting` (and the Autopilot tab's "Right now" card) lists every reason a ready ticket is not being picked up: the factory is paused, the project is paused, it is outside its schedule, the daily run cap or budget is reached. Each reason says when it can resume.
 
+## Notifications (`set_notifications`, `test_notification`)
+One address (https, or http on this machine) gets a small JSON POST when something needs you: `pr-ready`, `merged`, `failed`, `parked` (needs detail or a decision), `deploy-failing`, `cap-reached`, `held`. An ntfy.sh topic works as-is and shows on your phone; the `text` field suits Slack-style webhooks. Duplicates within a minute are dropped, at most 30 go out a minute, and a down destination never affects the factory. The address is the only secret, so make it hard to guess. Ready tickets also show on the board why they are waiting.
+
 ## Schedules (`set_schedule`)
 Per project: `startAt` (nothing before this date), `hoursPerDay` (agent time per local day, counted from recorded runs), `windows` (`[{days:[0-6], from:"22:00", to:"06:00"}]`, may cross midnight; after midnight a window belongs to the day it started on), `priority` (1 first to 9 last when many projects are due), `stopWhenDone` (pause the project when its plan is complete). Times are the machine's local time. A run already in progress is never cut off at a boundary; the next one simply does not start.
 For 100 projects at 5 hours a day each: give them all `hoursPerDay: 5`, give the important ones a lower `priority`, and keep `limits.parallelProjects` and `maxRunsPerDay` at what your plan can carry.

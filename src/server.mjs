@@ -99,6 +99,9 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m) => engine.getPreview(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m, b) => engine.setPreview(m[1], b.preview ?? null)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview\/check$/, async (m) => engine.startVisualCheck(m[1])],
+    ['GET', /^\/api\/notify$/, async () => engine.getNotify()],
+    ['POST', /^\/api\/notify$/, async (_m, b) => engine.setNotify(b.notify ?? null)],
+    ['POST', /^\/api\/notify\/test$/, async () => engine.testNotify()],
     // ---- skills
     ['GET', /^\/api\/skills$/, async () => engine.skills()],
     ['GET', /^\/api\/skills\/preview$/, async (_m, _b, url) => engine.previewSkills(url.searchParams.get('role') ?? '', url.searchParams.get('project') || undefined)],

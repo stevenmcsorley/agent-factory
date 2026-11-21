@@ -40,6 +40,7 @@ import { roleMethods } from './engine-roles.mjs';
 import { autonomyMethods } from './engine-autonomy.mjs';
 import { designMethods } from './engine-designs.mjs';
 import { visualMethods } from './engine-visual.mjs';
+import { notifyMethods } from './engine-notify.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -113,7 +114,7 @@ export class Engine {
       setHolds: (list) => { (this.holds ??= new Map()).set(p.id, list); },
       openChanges: async () => { const prs = await host.listAgentPrs(); const runs = readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && Array.isArray(r.changed)); return prs.map((pr) => ({ pr: pr.number, files: runs.filter((r) => Number(/(\d+)$/.exec(String(r.pr))?.[1]) === pr.number).flatMap((r) => r.changed.map((f) => String(f).replace(/^\S+\s+/, ''))) })).filter((o) => o.files.length); },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); this._materializeDesigns(p.id, wsDir); },
-      recordEvent: (ev) => this.recordEvent(p.id, ev.ticket, ev.event),
+      recordEvent: (ev) => { const fresh = this.recordEvent(p.id, ev.ticket, ev.event); if (fresh) this._notifyEvent(p.id, ev); return fresh; },
       briefRev: () => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); return pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions) ? pk.revision(pack) : undefined; },
       promptRules: () => getPrompt('task-rules', {}, this._promptDirs()),
       libraryParts: () => this._catalogNow().filter((x) => x.origin?.project !== p.id), recordParts: (wsDir, t) => this._recordParts(p, t, wsDir), profileSummary: profileSummary(p.profile), cloneUrl: hostAdapter.cloneUrl(p.repo), cloneUrlFor: (r) => hostAdapter.cloneUrl(r), prLink: (n) => hostAdapter.prUrl(p.repo, n), gitEnv: hostAdapter.gitEnv(), runsDir: this.cfg.stateDir, repos, onEvent: (e) => this._event(e) };
@@ -134,7 +135,7 @@ export class Engine {
 
   loop(ms = this.cfg.pollMs) {
     this.pollMs = ms;
-    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); await this.autopilotAll(); } catch (e) { console.error('cycle failed:', e.message); } this.nextAt = Date.now() + ms; this.timer = setTimeout(cycle, ms); };
+    const cycle = async () => { try { await this.tickAll(); await this.feedbackAll(); await this.autopilotAll(); await this.notifyScan(); } catch (e) { console.error('cycle failed:', e.message); } this.nextAt = Date.now() + ms; this.timer = setTimeout(cycle, ms); };
     this.nextAt = Date.now() + 1000;
     this.timer = setTimeout(cycle, 1000);
   }
@@ -210,7 +211,11 @@ export class Engine {
   // itself knows. Overlay the factory's own live knowledge so the hopper/board never flicker back to a stale state.
   overlay(projectId, tickets) {
     const live = new Set([...this.active.values()].filter((a) => a.project === projectId).map((a) => String(a.ticket)));
-    return tickets.map((t) => {
+    let waitFor = () => null;
+    try { const p = this.project(projectId); const due = this._due(p); const holds = new Map((this.holds?.get(projectId) ?? []).map((x) => [String(x.ticket), x.reason]));
+      const first = due.reasons[0]; const why = first ? `${first.reason}${first.nextAt ? ` (resumes ${new Date(first.nextAt).toLocaleString()})` : ''}` : null;
+      waitFor = (t) => (t.labels.includes('agent-ready') ? (holds.get(String(t.id)) ?? why) : null); } catch { /* unknown project: no reasons */ }
+    return tickets.map((t0) => { const w = waitFor(t0); const t = w ? { ...t0, waiting: w } : t0;
       const swap = (to) => ({ ...t, labels: [...t.labels.filter((l) => !['agent-ready', 'agent-working', 'agent-review', 'agent-failed', 'agent-needs-info'].includes(l)), to] });
       if (live.has(String(t.id))) return swap('agent-working');
       const o = this.outcomes.get(`${projectId}#${t.id}`);
@@ -885,4 +890,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods);

@@ -63,9 +63,11 @@ export const autonomyMethods = {
         st.merges.push({ project: p.id, pr: pr.number, title: pr.title, ticket: rec?.ticket, at: new Date().toISOString(), review: rec?.review?.verdict ?? null });
         this._audit({ what: 'merge', auto: true, project: p.id, pr: pr.number, ticket: rec?.ticket, review: rec?.review?.verdict ?? null, checked: rec?.verifyCmd ?? null });
         if (rec?.ticket != null) { try { await d.tickets.comment(rec.ticket, `agent-factory merged ${pr.title ? `"${pr.title}"` : `#${pr.number}`} automatically (autonomous mode): checks passed${rec.review ? `, reviewer ${rec.review.verdict}` : ''}.`); await d.tickets.close?.(rec.ticket); } catch { /* the merge happened; closing the ticket is best effort */ } }
+        this._notify({ event: 'merged', project: p.id, title: pr.title ?? `PR #${pr.number}`, detail: 'merged automatically', url: this._hostAdapter(p).prUrl?.(p.repo, pr.number) });
         this.cache.delete(`p:${p.id}`); this.cache.delete(`t:${p.id}`); results.push({ pr: pr.number, status: 'merged' });
       } catch (e) { held.push({ pr: pr.number, title: pr.title, blockers: [`merge refused: ${String(e.message ?? e).slice(0, 200)}`] }); results.push({ pr: pr.number, status: 'merge-failed' }); }
     }
+    const before = new Set((st.held[p.id] ?? []).map((x) => x.pr)); for (const x of held) if (!before.has(x.pr)) this._notify({ event: 'held', project: p.id, title: x.title ?? `PR #${x.pr}`, detail: x.blockers[0] });
     st.held[p.id] = held; this._autoSave(st); return results;
   },
 

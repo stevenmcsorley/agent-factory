@@ -117,11 +117,24 @@ function autonomyCard(a, ctx) {
         h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: (e) => { if (!ack.checked) { toast('Tick the box first', 'bad'); return; } return set({ allow: true }, 'Allowed. Now choose which projects use it.')(e); } }, 'Allow autonomous merging'))));
 }
 
+function notifyCard(n, ctx) {
+  const c = n.notify; const url = h('input', { type: 'url', value: c?.url ?? '', placeholder: 'https://ntfy.sh/your-private-topic', 'aria-label': 'Notification address', autocomplete: 'off', spellcheck: 'false' });
+  const boxes = Object.entries(n.events).map(([k, label]) => { const b = h('input', { type: 'checkbox', id: `nt-${k}`, 'data-ev': k }); b.checked = c ? c.events.includes(k) : true; return h('label', { class: 'check', for: `nt-${k}` }, b, ` ${label}`); });
+  const body = () => ({ url: url.value.trim(), events: [...document.querySelectorAll('input[data-ev]')].filter((b) => b.checked).map((b) => b.dataset.ev) });
+  const run = (fn, done) => async (e) => { e.currentTarget.disabled = true; try { const r = await fn(); if (done) toast(typeof done === 'function' ? done(r) : done, r?.sent === false ? 'bad' : 'ok'); ctx.rerender(); } catch (err) { toast(err.message, 'bad'); e.currentTarget.disabled = false; } };
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('plug', 17), 'Notifications'), c ? h('span', { class: 'stamp ok' }, 'on') : h('span', { class: 'stamp' }, 'off')),
+    h('p', { class: 'muted small' }, 'Get told when something needs you, without watching this page. The factory POSTs a small JSON message to one address: an ntfy.sh topic works as-is (it shows on your phone), and so does any webhook. Use a private, hard-to-guess address, because anyone who knows it can read the messages. https only.'),
+    h('div', { class: 'sfield' }, h('label', {}, 'Address'), url), h('label', {}, 'Tell me when'), h('div', { class: 'rolebox' }, boxes),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: run(() => api('/notify', { method: 'POST', body: { notify: body() } }), 'Saved') }, icon('check', 13), 'Save'),
+      c ? h('button', { class: 'btn', onclick: run(() => api('/notify/test', { method: 'POST', body: {} }), (r) => (r.sent ? 'Sent. Check your device.' : `Not sent: ${r.why}`)) }, 'Send a test') : null,
+      c ? h('button', { class: 'btn ghost', onclick: run(() => api('/notify', { method: 'POST', body: { notify: null } }), 'Notifications off') }, 'Turn off') : null));
+}
+
 export const settings = {
-  async load() { const [s, st, roles, au] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy')]); return { s, st, roles, au }; },
-  draw({ s, st, roles, au }, ctx) {
+  async load() { const [s, st, roles, au, nt] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy'), api('/notify')]); return { s, st, roles, au, nt }; },
+  draw({ s, st, roles, au, nt }, ctx) {
     return [head('Settings', 'Which model builds your tickets, and the guardrails around it. Changes apply from the next run and are saved to the config file: no restart.'),
-      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), autonomyCard(au, ctx), historyCard(s),
+      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
       h('p', { class: 'muted small' }, `Not editable here on purpose: the agent type, sandbox and network allowlist, and the projects. Those are security boundaries and live in the config file.`)];
   },
 };
