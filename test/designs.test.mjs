@@ -75,3 +75,49 @@ test('designer failing is shown on the design, not lost', async () => {
   const made = await callOp(e, 'create_design', { project: 'a', title: 'Broken', request: 'A screen that will not get made' }); const d = await settle(e, made.id);
   assert.equal(d.status, 'failed'); assert.match(d.error, /did not produce a design/);
 });
+
+const LOGO = '<?xml version="1.0"?><svg viewBox="0 0 24 24"><script>alert(1)</script><g onclick="x()"><path d="M2 2h20v20H2z" fill="currentColor"/></g><image href="https://evil/x.png"/><use href="https://evil/s.svg#a"/><a xlink:href="javascript:alert(1)"><circle cx="12" cy="12" r="4" style="fill:url(https://evil/p)"/></a><foreignObject><div>hi</div></foreignObject></svg>';
+test('svg cleaning: nothing active, nothing that fetches, and it must really be an svg', () => {
+  const c = ds.cleanSvg(LOGO); assert.doesNotMatch(c, /script|onclick|<image|evil|javascript|foreignObject|<\?xml/i); assert.match(c, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/); assert.match(c, /M2 2h20v20H2z/);
+  assert.equal(ds.cleanSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><use href="#a"/></svg>').includes('href="#a"'), true, 'a fragment reference inside the file is fine');
+  assert.throws(() => ds.cleanSvg('<div>no</div>'), /not an SVG/); assert.throws(() => ds.cleanSvg('<svg viewBox="0 0 1 1">'), /not closed/); assert.throws(() => ds.cleanSvg(`<svg>${'x'.repeat(61_000)}</svg>`), /at most/);
+});
+
+test('assets: versions of files with a contact sheet, approval, what the builder is told, and published paths', () => {
+  const p = dir(); const d = ds.createDesign(p, { title: 'Brand', request: 'A logo mark and three icons for a gym booking app', kind: 'assets' }); assert.equal(d.kind, 'assets');
+  assert.throws(() => ds.addVersion(p, d.id, { html: PAGE }), /set of assets/); assert.throws(() => ds.createDesign(p, { title: 'x', request: 'long enough request', kind: 'nope' }), /kind must be/);
+  const v1 = ds.addAssetVersion(p, d.id, { files: [{ name: 'Logo Mark.svg', svg: LOGO }, { name: 'logo-mark', svg: '<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>' }], rationale: 'Bold mark.' });
+  assert.deepEqual(v1.versions[0].files, ['logo-mark', 'logo-mark-2']); assert.equal(v1.status, 'proposed'); assert.match(ds.readHtml(p, d.id), /<span class="i"[^>]*><svg/); assert.doesNotMatch(ds.readHtml(p, d.id), /<img/);   // inline, so currentColor follows the panel assert.match(ds.readHtml(p, d.id), /logo-mark\.svg/);
+  assert.equal(ds.designContext(p), '', 'proposed is not approved'); ds.setStatus(p, d.id, 'approved', 1);
+  assert.match(ds.designContext(p), /Approved artwork[\s\S]*do not draw your own[\s\S]*\.factory-context\/designs\/[a-f0-9]{8}\/[\s\S]*logo-mark\.svg, logo-mark-2\.svg/);
+  const ws = dir(); ds.materializeDesigns(p, ws); assert.ok(fs.existsSync(path.join(ws, '.factory-context', 'designs', d.id, 'logo-mark.svg')));
+  ds.setPublished(p, d.id, { dir: 'public/brand', pr: 'https://x/pr/1' }); assert.match(ds.designContext(p), /already in the repository at public\/brand\//);
+  assert.throws(() => ds.addAssetVersion(p, d.id, { files: [] }), /no files/); assert.throws(() => ds.addAssetVersion(p, d.id, { files: Array.from({ length: 13 }, (_, i) => ({ name: `f${i}`, svg: '<svg viewBox="0 0 1 1"></svg>' })) }), /At most 12/);
+});
+
+import { execFileSync } from 'node:child_process';
+test('assets over MCP: request, revise, hand edit, approve, publish to the repo as a PR; a screen cannot be published', async () => {
+  const prompts = []; let n = 0;
+  const e = boot(async (_sb, ws, prompt) => { prompts.push(prompt); n++; const out = path.join(ws.dir, '.factory-design', 'assets'); fs.mkdirSync(out, { recursive: true }); fs.writeFileSync(path.join(out, 'logo.svg'), `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="${n + 3}"/></svg>`); fs.writeFileSync(path.join(out, 'icon-home.svg'), '<svg viewBox="0 0 24 24"><path d="M3 12l9-9 9 9"/></svg>'); return { out: `Round ${n}.`, code: 0 }; });
+  const made = await callOp(e, 'create_design', { project: 'a', title: 'Brand set', request: 'A logo and a home icon for the app, calm and simple', kind: 'assets' });
+  let d = await settle(e, made.id); assert.equal(d.status, 'proposed'); assert.deepEqual(d.versions[0].files.sort(), ['icon-home', 'logo']); assert.match(prompts[0], /SET of SVG artwork[\s\S]*What to draw/);
+  await callOp(e, 'revise_design', { project: 'a', design: d.id, feedback: 'Make the circle bigger' }); d = await settle(e, d.id); assert.equal(d.versions.length, 2); assert.match(prompts[1], /previous\/[\s\S]*bigger/);
+  await callOp(e, 'edit_design', { project: 'a', design: d.id, files: [{ name: 'icon-search', svg: '<svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/></svg>' }, { name: 'icon-home', svg: null }], note: 'swapped an icon' }); d = e.getDesign('a', d.id);
+  assert.deepEqual(d.versions[2].files.sort(), ['icon-search', 'logo']); assert.equal(d.versions[2].by, 'you');
+  await assert.rejects(() => callOp(e, 'publish_assets', { project: 'a', design: d.id }), /Approve the artwork first/); await callOp(e, 'approve_design', { project: 'a', design: d.id });
+  // publish into a real git checkout with a fake host
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-')); const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, stdio: 'pipe' }).toString(); git(remote, 'init', '-q', '-b', 'main'); fs.writeFileSync(path.join(remote, 'README.md'), 'x\n'); git(remote, 'add', '-A'); git(remote, 'commit', '-qm', 'i');
+  const pushed = []; e.f.sandbox = { create: async () => { const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-')); git(dd, 'clone', '-q', remote, '.'); return { dir: dd, destroy() {} }; } };
+  e.f.vcs = { diffStat: async (ws) => git(ws.dir, 'status', '--porcelain'), commitAndPush: async (ws, o) => { git(ws.dir, 'add', '-A'); git(ws.dir, 'commit', '-qm', o.message); pushed.push({ files: git(ws.dir, 'ls-files').split('\n').filter((f) => f.endsWith('.svg')), msg: o.message }); }, openPr: async (_ws, o) => { pushed.at(-1).title = o.title; return 'https://example.test/pr/9'; } };
+  await assert.rejects(() => callOp(e, 'publish_assets', { project: 'a', design: d.id, dir: '../../etc' }), /not allowed/);
+  const r = await callOp(e, 'publish_assets', { project: 'a', design: d.id, dir: 'public/brand' }); assert.deepEqual(r, { published: true, pr: 'https://example.test/pr/9', dir: 'public/brand' });
+  assert.deepEqual(pushed[0].files.sort(), ['public/brand/icon-search.svg', 'public/brand/logo.svg']); assert.equal(pushed[0].title, 'Add artwork: Brand set'); assert.match(e._designContext('a'), /already in the repository at public\/brand\//);
+  const screen = await callOp(e, 'create_design', { project: 'a', title: 'Home', request: 'A home screen with a queue of tickets' }); await settle(e, screen.id).catch(() => {});
+});
+
+test('assets: you can start a set by hand when the designer produced nothing', async () => {
+  const e = boot(async () => ({ out: 'no files', code: 0 }));
+  const made = await callOp(e, 'create_design', { project: 'a', title: 'By hand', request: 'A set I will draw myself, starting empty', kind: 'assets' }); const d = await settle(e, made.id); assert.equal(d.status, 'failed');
+  await callOp(e, 'edit_design', { project: 'a', design: d.id, files: [{ name: 'mine', svg: '<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>' }] });
+  const after = e.getDesign('a', d.id); assert.equal(after.status, 'proposed'); assert.deepEqual(after.versions[0].files, ['mine']);
+});

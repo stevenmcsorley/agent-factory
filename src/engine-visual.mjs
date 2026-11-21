@@ -49,8 +49,37 @@ export const visualMethods = {
       const v = evaluate(rep, baseline); const { keys, ...slim } = v; return { ...slim, baseline: !!baseline, checkedAt: new Date().toISOString(), ...(v.status === 'error' && rep.serverLog ? { serverLog: rep.serverLog } : {}) };
     };
   },
+  // ---- screenshots of the app as it is today (the base branch). Separate from the baseline: capturing never changes what counts as "already wrong".
+  getScreens(id) { const p = this.project(id); const f = readJson(path.join(this._visualDir(id), 'screens.json')); return { configured: !!p.preview, at: f?.at ?? null, pages: f?.pages ?? [], job: this.screenJobs?.get(id) ?? null }; },
+  startScreenshots(id) {
+    const p = this.project(id); if (!p.preview) throw bad('Set up the visual check first (Autopilot tab): how to start the app, its port and the routes to capture');
+    this.screenJobs ??= new Map(); if (this.screenJobs.get(id)?.state === 'running') return this.screenJobs.get(id);
+    const job = { state: 'running', startedAt: Date.now(), phase: 'starting' }; this.screenJobs.set(id, job);
+    this._screensOnBase(p, (ph) => { job.phase = ph; }).then((r) => { job.state = 'done'; job.result = r; }).catch((e) => { job.state = 'error'; job.error = String(e.message ?? e).slice(0, 400); }).finally(() => { job.finishedAt = Date.now(); });
+    return job;
+  },
+  async _screensOnBase(p, onPhase) {
+    const d = this.deps(p); let ws; const dir = this._visualDir(p.id);
+    try {
+      onPhase?.('cloning the base branch'); ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'screens', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 });
+      onPhase?.('starting the app and taking screenshots'); fs.rmSync(path.join(dir, 'screens'), { recursive: true, force: true });
+      const rep = await runVisual({ sandbox: d.sandbox, ws, preview: p.preview, outDir: path.join(dir, 'screens'), timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, image: p.preview.image ?? this.cfg.sandbox.visualImage ?? VISUAL_IMAGE });
+      if (!rep.ok) throw bad(`${rep.error}${rep.serverLog ? `: ${rep.serverLog.slice(-200)}` : ''}`);
+      const pages = rep.pages.filter((x) => x.shot).map((x) => ({ route: x.route, width: x.width, scheme: x.scheme, shot: x.shot, ...(x.summary ? { summary: x.summary } : {}) }));
+      fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'screens.json'), JSON.stringify({ at: new Date().toISOString(), pages })); return { pages: pages.length };
+    } finally { try { ws?.destroy(); } catch { /* best effort */ } }
+  },
+  // Handed to the designer: light-mode screenshots at phone and desktop width, and the page summaries (real text, fonts, colours).
+  _materializeScreens(id, wsDir) {
+    try {
+      const f = readJson(path.join(this._visualDir(id), 'screens.json')); if (!f?.pages?.length) return; const out = path.join(wsDir, '.factory-context', 'current-screens'); fs.mkdirSync(out, { recursive: true });
+      const keep = f.pages.filter((x) => x.scheme === 'light' && [360, 1280].includes(x.width)).slice(0, 12);
+      for (const x of keep) { try { fs.copyFileSync(path.join(this._visualDir(id), 'screens', x.shot), path.join(out, x.shot)); } catch { /* skip */ } }
+      fs.writeFileSync(path.join(out, 'screens.json'), JSON.stringify({ capturedAt: f.at, note: 'The app as it looks today. summary = the real page title, headings, buttons, fonts and colours at desktop width.', pages: keep.map(({ route, width, shot, summary }) => ({ route, width, file: shot, summary })) }, null, 1));
+    } catch { /* context is a helper, never a blocker */ }
+  },
   visualFile(id, runId, file) {
-    if (!/^(baseline|[a-f0-9]{8})$/.test(runId) || !/^[a-z0-9-]+\.png$/.test(file)) throw bad('Not found', 404);
+    if (!/^(baseline|screens|[a-f0-9]{8})$/.test(runId) || !/^[a-z0-9-]+\.png$/.test(file)) throw bad('Not found', 404);
     const f = path.join(this._visualDir(id), runId, file); if (!fs.existsSync(f)) throw bad('Not found', 404); return fs.readFileSync(f);
   },
 };

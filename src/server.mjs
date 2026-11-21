@@ -96,6 +96,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/roles$/, async () => engine.roles()],
     ['POST', /^\/api\/roles$/, async (_m, b) => engine.setRoles(b.roles ?? {})],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/roles$/, async (m, b) => engine.setProjectRoles(m[1], b.roles ?? {})],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/screens$/, async (m) => engine.getScreens(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/screens\/capture$/, async (m) => engine.startScreenshots(m[1])],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m) => engine.getPreview(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m, b) => engine.setPreview(m[1], b.preview ?? null)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview\/check$/, async (m) => engine.startVisualCheck(m[1])],
@@ -117,6 +119,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/revise$/, async (m, b) => engine.reviseDesign(m[1], m[2], b)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/edit$/, async (m, b) => engine.editDesign(m[1], m[2], b)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/(approve|reject|reopen)$/, async (m, b) => engine.setDesignStatus(m[1], m[2], { approve: 'approved', reject: 'rejected', reopen: 'proposed' }[m[3]], b.version)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/publish$/, async (m, b) => engine.publishAssets(m[1], m[2], b)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/files$/, async (m, _b, url) => ({ files: engine.designAssets(m[1], m[2], Number(url.searchParams.get('version')) || undefined) })],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/delete$/, async (m) => engine.deleteDesign(m[1], m[2])],
     // The mockup is shown in a frame, and a frame cannot send the bearer token: so the UI asks for a short-lived, unguessable address and the frame loads that.
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/view$/, async (m, b) => { const html = engine.designHtml(m[1], m[2], Number.isInteger(b.version) ? b.version : undefined); for (const [k, v] of previews) if (v.exp < Date.now()) previews.delete(k); const t = crypto.randomBytes(18).toString('hex'); previews.set(t, { html, exp: Date.now() + 5 * 60_000 }); return { path: `/preview/${t}` }; }],
@@ -183,7 +187,7 @@ export function createServer(engine, { token, allowedHosts }) {
         const out = Array.isArray(body) ? (await Promise.all(body.map((m) => handleRpc(engine, m, { code: url.pathname === '/mcp-code' })))).filter(Boolean) : await handleRpc(engine, body, { code: url.pathname === '/mcp-code' });
         return out === null || (Array.isArray(out) && !out.length) ? (res.writeHead(202, { 'Cache-Control': 'no-store' }), res.end()) : send(res, 200, out);
       }
-      const shot = /^\/api\/projects\/([a-z0-9-]+)\/visual\/(baseline|[a-f0-9]{8})\/([a-z0-9-]+\.png)$/.exec(url.pathname);
+      const shot = /^\/api\/projects\/([a-z0-9-]+)\/visual\/(baseline|screens|[a-f0-9]{8})\/([a-z0-9-]+\.png)$/.exec(url.pathname);
       if (shot && req.method === 'GET') return send(res, 200, engine.visualFile(shot[1], shot[2], shot[3]), { 'Content-Type': 'image/png' });
       for (const [method, re, fn] of routes) {
         const m = re.exec(url.pathname);

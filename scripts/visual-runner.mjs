@@ -18,7 +18,7 @@ while (Date.now() < deadline) { try { const r = await fetch(base + (spec.readyPa
 if (!up) { fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify({ ok: false, error: `The app did not answer on port ${spec.port} within ${spec.startTimeoutSec ?? 90} seconds` })); process.exit(0); }
 
 // Measured inside the page. Plain function: serialised and run by Playwright.
-function measure({ phone }) {
+function measure({ phone, summary }) {
   const vis = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
   const sel = (el) => { const id = el.id ? `#${el.id}` : ''; const cls = typeof el.className === 'string' && el.className.trim() ? `.${el.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''; return `${el.tagName.toLowerCase()}${id}${cls}`.slice(0, 80); };
   const out = { overflow: null, tapTargets: [], contrast: [] };
@@ -44,7 +44,14 @@ function measure({ phone }) {
     const size = parseFloat(s.fontSize); const large = size >= 24 || (size >= 18.66 && Number(s.fontWeight) >= 700); const need = large ? 3 : 4.5;
     if (ratio < need) out.contrast.push({ el: sel(el), ratio: Math.round(ratio * 100) / 100, need, text: n.nodeValue.trim().slice(0, 30) });
   }
-  out.contrast = out.contrast.slice(0, 12); return out;
+  out.contrast = out.contrast.slice(0, 12);
+  if (summary) {   // the real facts about this page, so a designer can start from what exists even without looking at the picture
+    const txt = (el) => (el.textContent || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 60); const cs = getComputedStyle(document.body);
+    const buttons = [...document.querySelectorAll('button, a[role=button], input[type=submit]')].filter(vis); const accent = buttons.map((b) => getComputedStyle(b).backgroundColor).find((c) => parse(c) && parse(c).a > 0 && c !== cs.backgroundColor);
+    out.summary = { title: document.title.slice(0, 80), headings: [...document.querySelectorAll('h1, h2, h3')].filter(vis).slice(0, 10).map(txt), buttons: buttons.slice(0, 8).map(txt).filter(Boolean), navLinks: [...document.querySelectorAll('nav a, header a')].filter(vis).slice(0, 10).map(txt).filter(Boolean),
+      fontFamily: cs.fontFamily.slice(0, 90), background: cs.backgroundColor, text: cs.color, accent: accent ?? null, inputs: document.querySelectorAll('input:not([type=hidden]), select, textarea').length };
+  }
+  return out;
 }
 
 const slug = (route) => (route === '/' ? 'home' : route.replace(/^\//, '').replace(/[^a-z0-9]+/gi, '-').replace(/-+$/, '').slice(0, 40) || 'page');
@@ -62,8 +69,8 @@ for (const route of spec.routes) {
       page.on('response', (r) => { if (r.url().startsWith(base) && r.status() >= 400) failed.push(`${r.status()} ${new URL(r.url()).pathname}`.slice(0, 120)); });
       let status = null, error = null;
       try { const r = await page.goto(base + route, { waitUntil: 'load', timeout: 30000 }); status = r?.status() ?? null; await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}); await sleep(400); } catch (e) { error = String(e.message ?? e).slice(0, 200); }
-      let m = { overflow: null, tapTargets: [], contrast: [] }; let shot = null;
-      if (!error) { try { m = await page.evaluate(measure, { phone: !!vp.phone }); } catch (e) { error = `measure failed: ${String(e.message ?? e).slice(0, 120)}`; }
+      let m = { overflow: null, tapTargets: [], contrast: [], summary: null }; let shot = null;
+      if (!error) { try { m = await page.evaluate(measure, { phone: !!vp.phone, summary: vp.w === 1280 && scheme === 'light' }); } catch (e) { error = `measure failed: ${String(e.message ?? e).slice(0, 120)}`; }
         shot = `${slug(route)}-${vp.w}-${scheme}.png`; try { await page.screenshot({ path: path.join(OUT, shot), fullPage: true, timeout: 15000 }); } catch { shot = null; } }
       pages.push({ route, width: vp.w, scheme, status, error, shot, consoleErrors: [...new Set(consoleErrors)].slice(0, 5), failedRequests: [...new Set(failed)].slice(0, 5), ...m });
       await ctx.close();

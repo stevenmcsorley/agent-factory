@@ -72,7 +72,7 @@ function autonomyCard(id, a, rerender) {
 }
 
 // Screenshots need the token, which an <img> cannot send: fetch each one and show it from a blob.
-const shotImg = (project, runId, file, label) => { const img = h('img', { alt: label, class: 'vshot', loading: 'lazy' }); fetch(`/api/projects/${project}/visual/${runId}/${file}`, { headers: { Authorization: `Bearer ${session.token}` } }).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => { img.alt = `${label} (not available)`; }); return img; };
+export const shotImg = (project, runId, file, label) => { const img = h('img', { alt: label, class: 'vshot', loading: 'lazy' }); fetch(`/api/projects/${project}/visual/${runId}/${file}`, { headers: { Authorization: `Bearer ${session.token}` } }).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => { img.alt = `${label} (not available)`; }); return img; };
 const SEV = { fail: 'bad', warn: 'warn' };
 export function visualResult(v, { project, runId }) {
   if (!v) return null;

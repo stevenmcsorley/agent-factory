@@ -7,7 +7,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 export const STATUSES = ['drafting', 'proposed', 'approved', 'rejected', 'failed'];
-const LIMITS = { html: 400_000, title: 100, request: 6_000, feedback: 4_000, rationale: 1_500, comments: 60, versions: 30, designs: 40 };
+export const KINDS = ['screen', 'assets'];
+const LIMITS = { svg: 60_000, assetFiles: 12, html: 400_000, title: 100, request: 6_000, feedback: 4_000, rationale: 1_500, comments: 60, versions: 30, designs: 40 };
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const clip = (v, n) => String(v ?? '').replace(/\r\n/g, '\n').replace(/\u0000/g, '').slice(0, n);
 const ID = /^[a-f0-9]{8}$/;
@@ -26,6 +27,25 @@ export function cleanDesignHtml(input) {
   return html;
 }
 
+// SVG artwork is data we will commit to a repo and show in pages, so it is cleaned on the way in: nothing active, nothing that fetches, nothing outside the picture.
+export function cleanSvg(input) {
+  let svg = clip(input, LIMITS.svg + 1).trim(); if (svg.length > LIMITS.svg) throw bad(`An SVG file can be at most ${LIMITS.svg / 1000} KB`);
+  const start = svg.search(/<svg[\s>]/i); if (start < 0) throw bad('That is not an SVG (it has no <svg> element)'); svg = svg.slice(start); const end = svg.toLowerCase().lastIndexOf('</svg>'); if (end < 0) throw bad('The SVG is not closed'); svg = svg.slice(0, end + 6);
+  svg = svg.replace(/<!--[\s\S]*?-->/g, '').replace(/<\?xml[\s\S]*?\?>/g, '').replace(/<!DOCTYPE[^>]*>/gi, '').replace(/<(script|foreignObject|iframe|object|embed|image|audio|video|animate|set)\b[\s\S]*?(<\/\1\s*>|\/>)/gi, '')
+    .replace(/<\/?(script|foreignObject|iframe|object|embed|image|link|meta)\b[^>]*>/gi, '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s(xlink:)?href\s*=\s*("(?!#)[^"]*"|'(?!#)[^']*')/gi, '').replace(/@import[^;]+;?/gi, '').replace(/url\(\s*(['"]?)\s*(?!#)[^)]*\)/gi, 'none');
+  if (!/<svg[^>]*\sxmlns=/i.test(svg)) svg = svg.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  return svg;
+}
+const assetName = (n) => { const base = String(n ?? '').replace(/\.svg$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40); if (!base) throw bad('Every asset needs a file name'); return base; };
+const dataUri = (svg) => `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+// A contact sheet so the set can be judged at a glance: every file on light and dark, at three sizes.
+function contactSheet(title, files) {
+  // Inline, not <img>: an image does not inherit the text colour, so a currentColor icon would turn black on the dark panel.
+  const cell = (f, bg, fg) => `<div class="c" style="background:${bg};color:${fg}">${[96, 40, 20].map((px) => `<span class="i" style="width:${px}px;height:${px}px">${f.svg}</span>`).join('')}</div>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:14px system-ui;margin:0;padding:20px;background:#f4f4f2;color:#222}h1{font-size:18px;margin:0 0 16px}.row{display:grid;grid-template-columns:150px 1fr 1fr;gap:10px;align-items:center;margin-bottom:10px}.n{font:12px ui-monospace,monospace}.c{display:flex;gap:16px;align-items:center;padding:12px 16px;border:1px solid #ddd;border-radius:8px}.i{display:block;flex:none}.i svg{width:100%;height:100%;display:block}@media(max-width:560px){.row{grid-template-columns:1fr}}</style></head><body><h1>${title.replace(/[<>&]/g, '')}</h1>${files.map((f) => `<div class="row"><div class="n">${f.name}.svg</div>${cell(f, '#ffffff', '#111')}${cell(f, '#161616', '#eee')}</div>`).join('')}</body></html>`;
+}
+
 const load = (packDir, id) => { try { return JSON.parse(fs.readFileSync(path.join(dirOf(packDir, id), 'design.json'), 'utf8')); } catch (e) { if (e.status) throw e; throw bad('No such design', 404); } };
 const save = (packDir, d) => { d.updatedAt = new Date().toISOString(); write(path.join(dirOf(packDir, d.id), 'design.json'), JSON.stringify(d, null, 2)); return d; };
 
@@ -34,20 +54,35 @@ export function listDesigns(packDir) {
   return ids.map((id) => { try { return load(packDir, id); } catch { return null; } }).filter(Boolean).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 export const getDesign = (packDir, id) => load(packDir, id);
-export function createDesign(packDir, { title, request }) {
+export function createDesign(packDir, { title, request, kind = 'screen' }) {
+  if (!KINDS.includes(kind)) throw bad(`kind must be one of ${KINDS.join(', ')}`);
   const t = clip(title, LIMITS.title).trim(), r = clip(request, LIMITS.request).trim();
   if (!t) throw bad('Give the design a title'); if (r.length < 15) throw bad('Describe what to design (a sentence or two at least)');
   if (listDesigns(packDir).length >= LIMITS.designs) throw bad(`A project can have ${LIMITS.designs} designs. Delete one you no longer need.`);
-  const d = { id: crypto.randomBytes(4).toString('hex'), title: t, request: r, status: 'drafting', versions: [], comments: [], createdAt: new Date().toISOString() };
+  const d = { id: crypto.randomBytes(4).toString('hex'), kind, title: t, request: r, status: 'drafting', versions: [], comments: [], createdAt: new Date().toISOString() };
   return save(packDir, d);
 }
 export function addVersion(packDir, id, { html, rationale, by = 'designer', feedback }) {
-  const d = load(packDir, id); if (d.versions.length >= LIMITS.versions) throw bad(`A design keeps ${LIMITS.versions} versions at most`);
+  const d = load(packDir, id); if (d.kind === 'assets') throw bad('This design is a set of assets: save SVG files, not a page'); if (d.versions.length >= LIMITS.versions) throw bad(`A design keeps ${LIMITS.versions} versions at most`);
   const clean = cleanDesignHtml(html); const n = (d.versions.at(-1)?.n ?? 0) + 1;
   write(path.join(dirOf(packDir, id), `v${n}.html`), clean);
   d.versions.push({ n, at: new Date().toISOString(), by, bytes: clean.length, rationale: clip(rationale, LIMITS.rationale).trim(), ...(feedback ? { feedback: clip(feedback, LIMITS.feedback) } : {}) });
   d.status = 'proposed'; delete d.error; return save(packDir, d);
 }
+// Assets: a set of SVG files. Each version is a folder v<n>/ of files plus v<n>.html, the contact sheet shown in the preview frame.
+export function addAssetVersion(packDir, id, { files, rationale, by = 'designer', feedback }) {
+  const d = load(packDir, id); if (d.kind !== 'assets') throw bad('This design is a screen, not a set of assets'); if (d.versions.length >= LIMITS.versions) throw bad(`A design keeps ${LIMITS.versions} versions at most`);
+  const list = Array.isArray(files) ? files : Object.entries(files ?? {}).map(([name, svg]) => ({ name, svg })); if (!list.length) throw bad('There are no files to save'); if (list.length > LIMITS.assetFiles) throw bad(`At most ${LIMITS.assetFiles} files per set`);
+  const seen = new Set(); const clean = list.map((f) => { let name = assetName(f.name); while (seen.has(name)) name = `${name}-2`; seen.add(name); return { name, svg: cleanSvg(f.svg) }; });
+  const n = (d.versions.at(-1)?.n ?? 0) + 1; for (const f of clean) write(path.join(dirOf(packDir, id), `v${n}`, `${f.name}.svg`), f.svg); write(path.join(dirOf(packDir, id), `v${n}.html`), contactSheet(d.title, clean));
+  d.versions.push({ n, at: new Date().toISOString(), by, bytes: clean.reduce((a, f) => a + f.svg.length, 0), files: clean.map((f) => f.name), rationale: clip(rationale, LIMITS.rationale).trim(), ...(feedback ? { feedback: clip(feedback, LIMITS.feedback) } : {}) });
+  d.status = 'proposed'; delete d.error; return save(packDir, d);
+}
+export function readAssets(packDir, id, version) {
+  const d = load(packDir, id); const n = version ?? d.approvedVersion ?? d.versions.at(-1)?.n; const v = d.versions.find((x) => x.n === n); if (!v?.files) throw bad('No such version', 404);
+  return v.files.map((name) => ({ name, svg: fs.readFileSync(path.join(dirOf(packDir, id), `v${Number(n)}`, `${name}.svg`), 'utf8') }));
+}
+export function setPublished(packDir, id, info) { const d = load(packDir, id); d.published = { ...info, at: new Date().toISOString() }; return save(packDir, d); }
 export function readHtml(packDir, id, version) {
   const d = load(packDir, id); const n = version ?? d.approvedVersion ?? d.versions.at(-1)?.n; if (!d.versions.some((v) => v.n === n)) throw bad('No such version', 404);
   return fs.readFileSync(path.join(dirOf(packDir, id), `v${Number(n)}.html`), 'utf8');
@@ -73,13 +108,16 @@ const styleOf = (html) => [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g
 // What the builder is told about approved designs: a short brief per design plus the stylesheet (colours, type, spacing live there), and where the full file is.
 export function designContext(packDir) {
   const approved = listDesigns(packDir).filter((d) => d.status === 'approved' && d.approvedVersion); if (!approved.length) return '';
-  const parts = approved.slice(0, 6).map((d) => { let css = ''; try { css = styleOf(readHtml(packDir, d.id, d.approvedVersion)).slice(0, 2500); } catch { /* skip */ }
+  const screens = approved.filter((d) => d.kind !== 'assets'); const sets = approved.filter((d) => d.kind === 'assets'); const out = [];
+  if (screens.length) out.push(`### Approved designs (follow these: same look, same patterns. They are the owner's decision, not a suggestion)\n${screens.slice(0, 6).map((d) => { let css = ''; try { css = styleOf(readHtml(packDir, d.id, d.approvedVersion)).slice(0, 2500); } catch { /* skip */ }
     const v = d.versions.find((x) => x.n === d.approvedVersion);
-    return `#### ${d.title}\nWhat it is: ${d.request.slice(0, 400)}\n${v?.rationale ? `Designer's notes: ${v.rationale}\n` : ''}Full mockup: .factory-context/designs/${d.id}.html\n${css ? `Its stylesheet (the colours, type and spacing to reuse):\n\`\`\`css\n${css}\n\`\`\`` : ''}`; });
-  return `### Approved designs (follow these: same look, same patterns. They are the owner's decision, not a suggestion)\n${parts.join('\n\n')}`;
+    return `#### ${d.title}\nWhat it is: ${d.request.slice(0, 400)}\n${v?.rationale ? `Designer's notes: ${v.rationale}\n` : ''}Full mockup: .factory-context/designs/${d.id}.html\n${css ? `Its stylesheet (the colours, type and spacing to reuse):\n\`\`\`css\n${css}\n\`\`\`` : ''}`; }).join('\n\n')}`);
+  if (sets.length) out.push(`### Approved artwork (use these files; do not draw your own logo, icons or illustrations)\n${sets.slice(0, 6).map((d) => { const v = d.versions.find((x) => x.n === d.approvedVersion); const where = d.published?.dir ? `already in the repository at ${d.published.dir}/` : `in .factory-context/designs/${d.id}/ (copy into the project where it belongs, for example public/ or src/assets/)`;
+    return `#### ${d.title}\nWhat it is: ${d.request.slice(0, 300)}\nFiles (${where}): ${(v?.files ?? []).map((f) => `${f}.svg`).join(', ')}`; }).join('\n\n')}`);
+  return out.join('\n\n');
 }
 export function materializeDesigns(packDir, wsDir) {
   const approved = listDesigns(packDir).filter((d) => d.status === 'approved' && d.approvedVersion); if (!approved.length) return;
   const out = path.join(wsDir, '.factory-context', 'designs'); fs.mkdirSync(out, { recursive: true });
-  for (const d of approved) { try { fs.writeFileSync(path.join(out, `${d.id}.html`), readHtml(packDir, d.id, d.approvedVersion)); } catch { /* skip */ } }
+  for (const d of approved) { try { if (d.kind === 'assets') { for (const f of readAssets(packDir, d.id, d.approvedVersion)) { fs.mkdirSync(path.join(out, d.id), { recursive: true }); fs.writeFileSync(path.join(out, d.id, `${f.name}.svg`), f.svg); } } else fs.writeFileSync(path.join(out, `${d.id}.html`), readHtml(packDir, d.id, d.approvedVersion)); } catch { /* skip */ } }
 }
