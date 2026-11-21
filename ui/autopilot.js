@@ -1,6 +1,6 @@
 // The Autopilot tab of a project: why it may be waiting, when it may work (schedule), the reviewer, and autonomous mode.
 // SECURITY: every string reaches the DOM through h() (textContent).
-import { h, icon, api, toast, ago, act } from './lib.js';
+import { h, icon, api, toast, ago, act, session } from './lib.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -8,8 +8,8 @@ const hours = (ms) => (ms >= 3_600_000 ? `${(ms / 3_600_000).toFixed(1)} h` : `$
 const lbl = (text, ctl, help) => h('div', { class: 'sfield' }, h('label', {}, text), ctl, help ? h('small', { class: 'help muted' }, help) : null);
 
 export async function loadAutopilot(id) {
-  const [waiting, auto, roles] = await Promise.all([api(`/projects/${id}/waiting`), api(`/projects/${id}/autonomy`), api('/roles')]);
-  return { waiting, auto, roles };
+  const [waiting, auto, roles, preview] = await Promise.all([api(`/projects/${id}/waiting`), api(`/projects/${id}/autonomy`), api('/roles'), api(`/projects/${id}/preview`)]);
+  return { waiting, auto, roles, preview };
 }
 
 function waitingCard(w) {
@@ -68,7 +68,37 @@ function autonomyCard(id, a, rerender) {
     a.fixes.length ? h('p', { class: 'muted small' }, `Fix tickets filed: ${a.fixes.map((f) => `${f.workflow} (${f.attempts})`).join(', ')}.`) : null);
 }
 
-export function autopilotTab(data, { id, rerender, project }) {
+// Screenshots need the token, which an <img> cannot send: fetch each one and show it from a blob.
+const shotImg = (project, runId, file, label) => { const img = h('img', { alt: label, class: 'vshot', loading: 'lazy' }); fetch(`/api/projects/${project}/visual/${runId}/${file}`, { headers: { Authorization: `Bearer ${session.token}` } }).then((r) => (r.ok ? r.blob() : Promise.reject())).then((b) => { img.src = URL.createObjectURL(b); }).catch(() => { img.alt = `${label} (not available)`; }); return img; };
+const SEV = { fail: 'bad', warn: 'warn' };
+export function visualResult(v, { project, runId }) {
+  if (!v) return null;
+  const shots = (v.shots ?? []).filter((f) => /-(360|1280)-light\.png$/.test(f)).slice(0, 6);
+  return h('div', {}, h('p', {}, h('span', { class: `pill2 ${v.status === 'pass' ? 'solid' : v.status === 'fail' ? 'bad' : v.status === 'warn' ? 'warn' : ''}` }, v.status), ' ', v.summary),
+    v.findings?.length ? h('ul', { class: 'reasons' }, v.findings.map((f) => h('li', {}, h('span', { class: `pill2 ${SEV[f.severity] ?? ''}` }, f.kind), ' ', h('b', {}, f.route), h('span', { class: 'muted small' }, ` at ${f.widths.join(', ')}px · ${f.detail}`)))) : null,
+    shots.length ? h('div', { class: 'vshots' }, shots.map((f) => h('figure', {}, shotImg(project, runId, f, f), h('figcaption', { class: 'muted small' }, f.replace(/\.png$/, ''))))) : null);
+}
+export function visualRunCard(run) { return run.visual ? h('section', { class: 'card' }, h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Visual check')), visualResult(run.visual, { project: run.project, runId: run.id })) : null; }
+
+function previewCard(id, pv, rerender, poll) {
+  const p = pv.preview ?? {}; const job = pv.job;
+  const cmd = h('input', { value: p.command ?? '', placeholder: 'npm run dev -- --port 4173 --host 127.0.0.1', 'aria-label': 'Start command' }); const port = h('input', { type: 'number', value: p.port ?? '', placeholder: '4173', 'aria-label': 'Port' });
+  const routes = h('textarea', { rows: 3, 'aria-label': 'Routes' }); routes.value = (p.routes ?? ['/']).join('\n'); const install = h('input', { value: p.install ?? '', placeholder: 'npm ci (optional)', 'aria-label': 'Install command' });
+  const on = h('input', { type: 'checkbox', id: 'pv-on' }); on.checked = p.enabled !== false;
+  if (job?.state === 'running') poll?.();
+  const save = act(async () => { await api(`/projects/${id}/preview`, { method: 'POST', body: { preview: { command: cmd.value, port: Number(port.value), routes: routes.value, ...(install.value.trim() ? { install: install.value } : {}), enabled: on.checked } } }); }, 'Saved. Now record the baseline.', rerender);
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Visual check'), p.command ? h('span', { class: `stamp ${p.enabled === false ? '' : 'ok'}` }, p.enabled === false ? 'off' : 'on') : h('span', { class: 'stamp' }, 'not set up')),
+    h('p', { class: 'muted small' }, 'Tests cannot see a layout that breaks on a phone, text you cannot read, or a page that throws. After a change passes its tests, the app is started and every route loaded at 360, 768 and 1280 px (light and dark). NEW problems go back to the builder; problems already there are recorded once and ignored. Node dev servers and static sites are supported. Needs the browser image: docker build -f Dockerfile.visual -t agent-factory-visual:latest .'),
+    h('div', { class: 'sfields' }, lbl('Start command', cmd, 'One line. It must listen on the port.'), lbl('Port', port)), h('label', {}, 'Routes to load (one per line)'), routes, lbl('Install first', install, 'Run before the start command, if the app needs its dependencies.'),
+    h('label', { class: 'check', for: 'pv-on' }, on, ' Check every change'),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: save }, icon('check', 13), 'Save'), p.command ? h('button', { class: 'btn', disabled: job?.state === 'running', onclick: act(() => api(`/projects/${id}/preview/check`, { method: 'POST', body: {} }), 'Checking the base branch…', rerender) }, icon('play', 13), job?.state === 'running' ? 'Checking…' : pv.baseline ? 'Re-record baseline' : 'Check now and record baseline') : null,
+      p.command ? h('button', { class: 'btn ghost', onclick: act(() => api(`/projects/${id}/preview`, { method: 'POST', body: { preview: null } }), 'Visual check removed', rerender) }, 'Remove') : null),
+    job?.state === 'running' ? h('div', { class: 'note info' }, icon('clock', 14), ` ${job.phase}`) : null, job?.state === 'error' ? h('div', { class: 'note bad' }, icon('alert', 14), ` ${job.error}`) : null,
+    job?.result?.status === 'error' ? h('div', { class: 'note bad' }, icon('alert', 14), h('div', {}, job.result.summary, job.result.serverLog ? h('pre', { class: 'preview' }, job.result.serverLog) : null)) : null,
+    pv.baseline ? h('div', {}, h('h3', {}, 'Baseline'), h('p', { class: 'muted small' }, `Recorded ${ago(pv.baseline.at)} on the base branch: ${pv.baseline.summary}`), pv.baseline.findings?.length ? h('details', {}, h('summary', {}, `${pv.baseline.findings.length} existing finding${pv.baseline.findings.length === 1 ? '' : 's'}`), visualResult({ ...pv.baseline, status: 'info', summary: '', shots: [] }, { project: id, runId: 'baseline' })) : null, pv.baseline.shots?.length ? h('details', {}, h('summary', {}, 'Screenshots'), visualResult({ status: 'info', summary: '', findings: [], shots: pv.baseline.shots }, { project: id, runId: 'baseline' })) : null) : null);
+}
+
+export function autopilotTab(data, { id, rerender, project, poll }) {
   if (!data) return h('div', { class: 'empty' }, h('b', {}, 'Could not load autopilot'));
-  return h('div', { class: 'stack' }, waitingCard(data.waiting), scheduleCard(id, data.waiting, rerender), rolesCard(id, data.roles, rerender, project?.roles), autonomyCard(id, data.auto, rerender));
+  return h('div', { class: 'stack' }, waitingCard(data.waiting), scheduleCard(id, data.waiting, rerender), rolesCard(id, data.roles, rerender, project?.roles), previewCard(id, data.preview, rerender, poll), autonomyCard(id, data.auto, rerender));
 }

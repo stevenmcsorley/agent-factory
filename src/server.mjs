@@ -96,6 +96,9 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/roles$/, async () => engine.roles()],
     ['POST', /^\/api\/roles$/, async (_m, b) => engine.setRoles(b.roles ?? {})],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/roles$/, async (m, b) => engine.setProjectRoles(m[1], b.roles ?? {})],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m) => engine.getPreview(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m, b) => engine.setPreview(m[1], b.preview ?? null)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview\/check$/, async (m) => engine.startVisualCheck(m[1])],
     // ---- skills
     ['GET', /^\/api\/skills$/, async () => engine.skills()],
     ['GET', /^\/api\/skills\/preview$/, async (_m, _b, url) => engine.previewSkills(url.searchParams.get('role') ?? '', url.searchParams.get('project') || undefined)],
@@ -165,7 +168,7 @@ export function createServer(engine, { token, allowedHosts }) {
         const file = path.join(UI, name);
         if (!TYPES[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, { error: 'Not found' });
         return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)], ...(name.startsWith('fonts') ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : {}),
-          'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
+          'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
       }
       const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];
       if (!bearer || !same(bearer, token)) return send(res, 401, { error: 'Missing or invalid token' }, { 'WWW-Authenticate': 'Bearer' });
@@ -177,6 +180,8 @@ export function createServer(engine, { token, allowedHosts }) {
         const out = Array.isArray(body) ? (await Promise.all(body.map((m) => handleRpc(engine, m, { code: url.pathname === '/mcp-code' })))).filter(Boolean) : await handleRpc(engine, body, { code: url.pathname === '/mcp-code' });
         return out === null || (Array.isArray(out) && !out.length) ? (res.writeHead(202, { 'Cache-Control': 'no-store' }), res.end()) : send(res, 200, out);
       }
+      const shot = /^\/api\/projects\/([a-z0-9-]+)\/visual\/(baseline|[a-f0-9]{8})\/([a-z0-9-]+\.png)$/.exec(url.pathname);
+      if (shot && req.method === 'GET') return send(res, 200, engine.visualFile(shot[1], shot[2], shot[3]), { 'Content-Type': 'image/png' });
       for (const [method, re, fn] of routes) {
         const m = re.exec(url.pathname);
         if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req, bodyLimit(url.pathname)) : {}, url) ?? {});

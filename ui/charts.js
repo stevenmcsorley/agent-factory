@@ -28,7 +28,7 @@ const GLYPHS = {
   push: () => [P('M4 15.5v3a1.5 1.5 0 001.5 1.5h13a1.5 1.5 0 001.5-1.5v-3'), s('g', { class: 'arrow' }, P('M12 15V4'), P('M7.5 8.5L12 4l4.5 4.5'))],
   ship: () => [s('g', { class: 'plane' }, P('M21 3L3 10.5l7 2.5 2.5 7z'), P('M21 3L10 13')), P('M3.5 20.5h6', 'ground')],
 };
-const glyphKey = (k) => (k === 'pr' ? 'ship' : k); // the pipeline calls the last stage `pr`; on screen it is "Ship"
+const glyphKey = (k) => (k === 'pr' ? 'ship' : k === 'visual' ? 'review' : k); // the pipeline calls the last stage `pr`; on screen it is "Ship"
 export const stationGlyph = (key, size = 22) => { const k = glyphKey(key); return s('svg', { viewBox: '0 0 24 24', width: size, height: size, class: `ic ic-${k}`, 'aria-hidden': 'true' }, ...(GLYPHS[k] ?? GLYPHS.claim)()); };
 
 // The assembly line. Built ONCE and updated in place: tickets slide from the hopper to their station and on to the chute, the belt keeps

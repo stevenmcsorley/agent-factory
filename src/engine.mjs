@@ -39,6 +39,7 @@ import { scheduleMethods } from './engine-schedule.mjs';
 import { roleMethods } from './engine-roles.mjs';
 import { autonomyMethods } from './engine-autonomy.mjs';
 import { designMethods } from './engine-designs.mjs';
+import { visualMethods } from './engine-visual.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -107,6 +108,7 @@ export class Engine {
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._designContext?.(p.id), this._planContext(p, t), this._partsContext(p, t).text, this._skillsText('builder', p.id)].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
+      visual: this._visualHook(p, sb),
       setHolds: (list) => { (this.holds ??= new Map()).set(p.id, list); },
       openChanges: async () => { const prs = await host.listAgentPrs(); const runs = readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && Array.isArray(r.changed)); return prs.map((pr) => ({ pr: pr.number, files: runs.filter((r) => Number(/(\d+)$/.exec(String(r.pr))?.[1]) === pr.number).flatMap((r) => r.changed.map((f) => String(f).replace(/^\S+\s+/, ''))) })).filter((o) => o.files.length); },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); this._materializeDesigns(p.id, wsDir); },
@@ -221,7 +223,7 @@ export class Engine {
     const m = this.metrics();
     return Promise.all(this.cfg.projects.map(async (p) => {
       // closed tickets are history, not queue (see the CLOSED filter below)
-      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, waiting: this._due(p).reasons, schedule: p.schedule ?? null, autonomy: p.autonomy ?? null, roles: p.roles ?? null, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), verify: p.config?.verify ?? null, image: p.config?.image ?? null, profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
+      const out = { id: p.id, repo: p.repo, base: p.base, paused: !!p.paused, waiting: this._due(p).reasons, schedule: p.schedule ?? null, autonomy: p.autonomy ?? null, roles: p.roles ?? null, preview: p.preview ? { enabled: p.preview.enabled !== false } : null, host: hostKind(p), source: p.tickets.kind, repoUrl: this.repoUrl(p), verify: p.config?.verify ?? null, image: p.config?.image ?? null, profile: p.profile ?? null, ...(() => { const pack = pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)); return { brief: pk.completeness(pack), plan: pack.plan ? { status: pack.plan.status, ...this.planProgress(pack.plan) } : null }; })(), verify: p.config?.verify ?? p.profile?.verify ?? null, queue: {}, prs: 0, metrics: m.projects[p.id] ?? null };
       try { (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED').forEach((t) => { const s = stateOf(t.labels); out.queue[s] = (out.queue[s] ?? 0) + 1; }); out.prs = (await this.listPrs(p.id)).length; } catch (e) { out.error = String(e.message).slice(0, 160); }
       return out;
     }));
@@ -882,4 +884,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods);

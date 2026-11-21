@@ -27,6 +27,7 @@ export function mergeVerdict({ global, auto, run, feedback, seenComments = [], m
     if (run.quality && run.quality.passed === false) b.push('the quality gate flagged the change');
     if (auto?.requireChecks !== false && !run.verifyCmd) b.push('no test command checked this change');
     if (auto?.requireChecks !== false && run.coverage?.uncovered?.length) b.push(`the test command does not cover ${run.coverage.uncovered.slice(0, 3).join(', ')}${run.coverage.uncovered.length > 3 ? '…' : ''}`);
+    if (run.visual && (run.visual.status === 'fail' || (run.visual.status === 'error' && auto?.requireChecks !== false))) b.push(run.visual.status === 'fail' ? 'the visual check found new problems' : 'the visual check could not run');
     if (run.review?.verdict === 'changes') b.push('the reviewer asked for changes');
     else if (auto?.requireReviewer !== false && run.review?.verdict !== 'approve') b.push(run.review ? 'the reviewer did not approve' : 'no reviewer agent has approved it');
   }

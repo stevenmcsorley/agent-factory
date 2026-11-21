@@ -14,6 +14,7 @@ import { getPrompt } from './prompts.mjs';
 import { coverageGap } from './coverage.mjs';
 import { feedbackFromReview } from './review.mjs';
 import { parseAllowedFiles, outsideAllowlist, overlaps } from './allowlist.mjs';
+import { visualFeedback } from './visual.mjs';
 
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
@@ -29,7 +30,8 @@ export function buildPrompt(t, extra = '', profile = '', context = '', rules = g
 function provenanceNote(rec) {
   const cov = rec.coverage ? `- **Not covered by that command:** ${rec.coverage.uncovered.map((f) => `\`${f}\``).join(', ')}${rec.coverage.total > rec.coverage.uncovered.length ? ` and ${rec.coverage.total - rec.coverage.uncovered.length} more` : ''} (it only runs in ${rec.coverage.scopes.map((x) => `\`${x}/\``).join(', ')}). Review those by hand.` : null;
   const rvw = rec.review ? `- **Reviewer agent:** ${rec.review.verdict === 'approve' ? 'approved' : rec.review.verdict === 'changes' ? `asked for changes (${rec.review.findings.filter((f) => f.severity !== 'minor').length} blocking), not resolved` : 'gave no usable verdict'}${rec.review.summary ? `: ${rec.review.summary}` : ''}` : null;
-  const bits = [rvw, rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
+  const vis = rec.visual ? `- **Visual check:** ${rec.visual.status === 'pass' ? 'no new problems' : rec.visual.status === 'error' ? `could not run (${rec.visual.summary})` : `${rec.visual.summary}`}${rec.visual.status === 'fail' || rec.visual.status === 'warn' ? `: ${rec.visual.findings.slice(0, 4).map((f) => `${f.route} @${f.widths.join('/')}px ${f.detail}`).join('; ')}` : ''}` : null;
+  const bits = [rvw, vis, rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
   return bits.length ? `\n\n### Provenance\n${bits.join('\n')}\n- If this branch changes after this point, the result above no longer applies to it.` : '';
 }
 // A short, honest note for the PR and the ticket about the quality gate on the change.
@@ -148,6 +150,14 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
             if (q.blockers.length) { rec.status = 'quality-failed'; rec.error = `quality gate: ${q.blockers.join('; ')}`; break; }
           }
         }
+      }
+      // Optional visual check: the app is started and each page loaded at phone, tablet and desktop width. New problems go back to the builder like a failing test;
+      // a check that could not run (the app would not start, no browser image) never blocks, it is recorded.
+      if (config.visual) {
+        run.phase('visual', 'loading the app at three widths');
+        let v; try { v = await config.visual({ ws, ticket: t, runId: rec.id }); } catch (e) { v = { status: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [], counts: { fail: 0, warn: 0, existing: 0 } }; }
+        run.note('visual', v);
+        if (v.status === 'fail' && a < (cfg.maxAttempts ?? 2)) { rec.status = 'visual-failed'; feedback = visualFeedback(v); continue; }
       }
       // Optional second opinion: another agent reads the change. Blocking findings go back to the builder once per attempt; on the last attempt the PR still opens, flagged.
       if (config.review) {

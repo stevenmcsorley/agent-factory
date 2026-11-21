@@ -1,0 +1,8 @@
+# Visual-check image: Node + Playwright with Chromium baked in, so the check needs no network at run time.
+# Build: docker build -f Dockerfile.visual -t agent-factory-visual:latest .
+# Runs as the host user's uid (the sandbox passes --user), so everything it needs must be world-readable.
+FROM node:22-bookworm
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN mkdir -p /opt/pw && cd /opt/pw && npm init -y >/dev/null && npm install playwright@1.49.1 && npx playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/pw /opt/pw-browsers && npm cache clean --force
+WORKDIR /work

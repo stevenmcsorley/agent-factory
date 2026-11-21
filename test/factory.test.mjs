@@ -150,3 +150,13 @@ test('overlap: tickets without a declared file list are never held', async () =>
   const { deps } = setup('echo hi > b.txt', 'test -f b.txt'); let asked = false; deps.config.openChanges = async () => { asked = true; return [{ pr: 9, files: ['b.txt'] }]; };
   assert.equal((await tick(deps))[0].status, 'ok'); assert.equal(asked, false, 'no look-up when nothing declares files');
 });
+
+test('visual: new problems go back to the builder once; a check that cannot run is recorded and never blocks', async () => {
+  const a = setup('echo hi >> b.txt', 'test -f b.txt'); let n = 0;
+  a.deps.config.visual = async ({ runId }) => { n++; assert.match(runId, /^[a-f0-9]{8}$/); return n === 1 ? { status: 'fail', summary: '1 new problem', findings: [{ severity: 'fail', route: '/', widths: [360], detail: 'Scrolls sideways' }], counts: { fail: 1, warn: 0, existing: 0 } } : { status: 'pass', summary: 'No new visual problems', findings: [], counts: { fail: 0, warn: 0, existing: 0 } }; };
+  const [rec] = await tick(a.deps); assert.equal(rec.status, 'ok'); assert.equal(rec.attempts, 2); assert.equal(rec.visual.status, 'pass'); assert.ok(rec.phases.some((p) => p.name === 'visual'));
+  const b = setup('echo hi > b.txt', 'test -f b.txt'); b.deps.config.visual = async () => { throw new Error('no browser image'); };
+  const [r2] = await tick(b.deps); assert.equal(r2.status, 'ok'); assert.equal(r2.visual.status, 'error'); assert.match(r2.visual.summary, /no browser image/);
+  const c = setup('echo hi > b.txt', 'test -f b.txt'); c.deps.config.visual = async () => ({ status: 'fail', summary: 'still broken', findings: [{ severity: 'fail', route: '/', widths: [360], detail: 'Scrolls sideways' }], counts: { fail: 1, warn: 0, existing: 0 } });
+  const [r3] = await tick(c.deps); assert.equal(r3.status, 'ok', 'opens the PR on the last attempt, flagged'); assert.equal(r3.visual.status, 'fail');
+});
