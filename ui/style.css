@@ -365,3 +365,15 @@ label.check { display: flex; align-items: center; gap: 10px; text-transform: non
 .vwrap { overflow-x: auto; } .vtable { width: 100%; border-collapse: collapse; font-size: 13px; } .vtable th { text-align: left; font: 600 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line-2); } .vtable td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; } .vtable tr.on td { background: var(--panel-2); } .vtable .pill2 { margin-left: 6px; } .vact { white-space: nowrap; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .dacts { flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; } .note.ok { border-left-color: var(--green); }
 input[type=search] { max-width: 320px; }
+
+/* the agent bench, under the factory line */
+.bench { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; padding: 14px 16px 16px; border-top: 1px dashed var(--line-2); }
+.agent { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line-2); background: var(--panel); min-height: 92px; align-content: start; transition: border-color .2s ease, background .2s ease, opacity .2s ease; } .agent.check { border-style: dashed; }
+.agent.idle { opacity: .55; } .agent.live { opacity: 1; border-color: var(--orange); background: var(--panel-2); box-shadow: inset 3px 0 0 var(--orange); }
+.agent .a-top { display: flex; align-items: center; gap: 8px; } .agent .a-top b { font: 700 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; flex: 1; } .agent .a-ico { color: var(--muted); display: inline-flex; } .agent.live .a-ico { color: var(--orange); }
+.agent .a-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-2); } .agent.live .a-dot { background: var(--orange); animation: a-pulse 1.4s ease-in-out infinite; }
+.agent .a-what { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); } .agent.idle .a-what { color: var(--muted); }
+.agent .a-where { font-size: 12px; min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .agent .a-where small { color: var(--muted); }
+.agent .a-meta { display: flex; justify-content: space-between; gap: 8px; font: 500 10.5px var(--mono); color: var(--muted); margin-top: auto; } .agent .a-clock { color: var(--orange); font-weight: 700; }
+@keyframes a-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+@media (prefers-reduced-motion: reduce) { .agent .a-dot { animation: none; } }

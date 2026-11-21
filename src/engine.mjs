@@ -42,6 +42,7 @@ import { designMethods } from './engine-designs.mjs';
 import { visualMethods } from './engine-visual.mjs';
 import { notifyMethods } from './engine-notify.mjs';
 import { livePreviewMethods } from './engine-livepreview.mjs';
+import { agentMethods } from './engine-agents.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -147,12 +148,13 @@ export class Engine {
   _event(e) {
     this.events.push(e); if (this.events.length > 300) this.events.shift();
     if (e.type === 'start' || e.type === 'end') this.cache.clear(); // queue counts must reflect a run starting/finishing immediately, not 15s later
-    if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [] });
+    if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [], feedback: /^Feedback round/.test(e.title ?? '') });
     const a = this.active.get(e.run);
-    if (e.type === 'phase' && a) { a.phase = e.phase; a.detail = e.detail; a.phaseStarted = e.at; a.phases.push({ name: e.phase, at: e.at }); }
+    if (e.type === 'phase' && a) { a.phase = e.phase; a.detail = e.detail; a.phaseStarted = e.at; a.phases.push({ name: e.phase, at: e.at }); a.role = undefined; a.roleDetail = undefined; a.roleStarted = undefined; }
+    if (e.type === 'role' && a) { a.role = e.role ?? undefined; a.roleDetail = e.detail; a.roleStarted = e.at; }
     if (e.type === 'end') { const a2 = this.active.get(e.run); this.active.delete(e.run); if (a2?.ticket != null) this.outcomes.set(`${a2.project}#${a2.ticket}`, { status: e.status, at: Date.now() }); }
   }
-  activity() { return { active: [...this.active.values()], events: this.events.slice(-80).reverse() }; }
+  activity() { return { active: [...this.active.values()], events: this.events.slice(-80).reverse(), agents: this.agentsNow(), roster: this.agentRoster() }; }
   getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); return r; }
 
   // Charts and KPIs, derived from the run log. "Neutral" outcomes (gate bounces, pauses, requeues) are not failures.
@@ -892,4 +894,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods);

@@ -137,7 +137,7 @@ test('MCP /mcp-code: two tools, cheap index, execute runs JS against the ops, er
 
 test('API: activity, metrics and run detail endpoints', async () => {
   const { call, close } = await boot(); const j = async (r) => r.json();
-  assert.deepEqual(Object.keys(await j(await call('/api/activity'))).sort(), ['active', 'events']);
+  assert.deepEqual(Object.keys(await j(await call('/api/activity'))).sort(), ['active', 'agents', 'events', 'roster']);
   const m = await j(await call('/api/metrics?days=7')); assert.equal(m.days.length, 7); assert.ok('totals' in m && 'projects' in m);
   assert.equal((await call('/api/runs/deadbeef')).status, 404); assert.equal((await call('/api/runs/not-hex!')).status, 404);
   close();

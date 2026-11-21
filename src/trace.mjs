@@ -11,6 +11,8 @@ export function startRun(base, { onEvent, project } = {}) {
   return {
     rec,
     phase(name, detail) { close(); rec.phases.push({ name, detail, t: Date.now() }); rec.phase = name; emit({ type: 'phase', phase: name, detail }); },
+    // Which agent is working inside the current phase (the reviewer and the security reviewer both run in 'review'). A live signal only: it adds no phase to the record.
+    role(name, detail) { emit({ type: 'role', role: name, detail }); },
     note(key, value) { rec[key] = value; },
     finish(status) {
       close(); if (status) rec.status = status;

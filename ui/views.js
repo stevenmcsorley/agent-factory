@@ -44,15 +44,33 @@ export function intake(projects, rerender) {
     h('div', { class: 'intake-foot' }, sel, hint, h('button', { class: 'btn primary', onclick: go }, 'Issue work order', icon('arrow', 14))));
 }
 
+// The agent bench: one tile per agent role, in pipeline order, under the conveyor. A tile lights up while that agent is working and says what on, for how long, and with which model.
+const BENCH_ICON = { 'spec-writer': 'ticket', builder: 'spark', tester: 'check', reviewer: 'shield', security: 'alert', designer: 'folder', planner: 'pulse', fixer: 'git', 'skill-writer': 'plug', verify: 'check', visual: 'search' };
+const elapsed = (since) => { const sec = Math.max(0, Math.round((Date.now() - Date.parse(since)) / 1000)); return sec >= 3600 ? `${Math.floor(sec / 3600)}h ${Math.floor(sec % 3600 / 60)}m` : sec >= 60 ? `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, '0')}s` : `${sec}s`; };
+function agentBench() {
+  const root = h('div', { class: 'bench', role: 'list', 'aria-label': 'Agents' }); const tiles = new Map(); let key = '';
+  const build = (r) => { const t = { el: h('div', { class: `agent ${r.kind} idle`, role: 'listitem' }), what: h('div', { class: 'a-what' }, 'idle'), where: h('div', { class: 'a-where' }), clock: h('span', { class: 'a-clock' }), model: h('span', { class: 'a-model' }) };
+    t.el.append(h('div', { class: 'a-top' }, h('span', { class: 'a-ico' }, icon(BENCH_ICON[r.role] ?? 'spark', 15)), h('b', {}, r.label), h('i', { class: 'a-dot' })), t.what, t.where, h('div', { class: 'a-meta' }, t.clock, t.model)); return t; };
+  const update = (roster, agents) => {
+    const shown = roster.filter((r) => r.enabled || agents.some((a) => a.role === r.role)); const k = shown.map((r) => r.role).join(','); if (k !== key) { key = k; tiles.clear(); root.replaceChildren(...shown.map((r) => { const t = build(r); tiles.set(r.role, t); return t.el; })); }
+    for (const r of shown) { const t = tiles.get(r.role); const mine = agents.filter((a) => a.role === r.role); const a = mine[0]; t.el.classList.toggle('idle', !a); t.el.classList.toggle('live', !!a); t.what.textContent = a ? `${a.what}${a.detail ? ` · ${a.detail}` : ''}` : 'idle';
+      t.where.replaceChildren(...(a ? [a.run ? h('a', { href: `#/run/${a.run}` }, `${a.project} · ${a.ticket != null ? `#${a.ticket} ` : ''}${(a.title ?? '').slice(0, 44)}`) : h('a', { href: a.project ? `#/project/${a.project}` : '#/skills' }, `${a.project ? `${a.project} · ` : ''}${(a.title ?? '').slice(0, 44)}`), ...(mine.length > 1 ? [h('small', {}, ` +${mine.length - 1} more`)] : [])] : []));
+      t.clock.dataset.since = a?.since ?? ''; t.clock.textContent = a ? elapsed(a.since) : ''; t.model.textContent = r.kind === 'check' ? 'no model' : `${(r.model ?? 'default model').replace(/^gpt-/, '')} · ${r.effort ?? 'default'}`; }
+  };
+  const timer = setInterval(() => { if (!root.isConnected) { clearInterval(timer); return; } for (const c of root.querySelectorAll('.a-clock')) if (c.dataset.since) c.textContent = elapsed(c.dataset.since); }, 1000);
+  return { root, update };
+}
+
 // The line card lives for the whole page visit and is updated in place (see persist()).
 function lineCard(state0) {
   const L = createLine(CORE_STAGES);
   const stamp = h('span', { class: 'stamp' }); const follow = h('a', { class: 'btn small', href: '#/', hidden: true }, 'Follow', icon('arrow', 12));
-  const el = h('section', { class: 'card line-card reg' }, h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg));
+  const bench = agentBench();
+  const el = h('section', { class: 'card line-card reg' }, h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg), bench.root);
   el.__update = (st) => {
-    L.update(st);
+    L.update(st); bench.update(st.roster ?? [], st.agents ?? []);
     stamp.className = `stamp ${st.active.length ? 'live' : st.paused ? 'warn' : ''}`;
-    stamp.replaceChildren(...(st.active.length ? [h('i', { class: 'dot' }), `${st.active.length} on the line`] : [st.paused ? 'paused' : st.nextIn != null ? `idle · next check in ${st.nextIn}s` : 'idle']));
+    stamp.replaceChildren(...(st.active.length ? [h('i', { class: 'dot' }), `${st.active.length} on the line${(st.agents ?? []).filter((a) => a.kind === 'agent').length ? ` · ${(st.agents ?? []).filter((a) => a.kind === 'agent').length} agent${(st.agents ?? []).filter((a) => a.kind === 'agent').length === 1 ? '' : 's'} working` : ''}`] : [st.paused ? 'paused' : st.nextIn != null ? `idle · next check in ${st.nextIn}s` : 'idle']));
     follow.hidden = !st.active.length; if (st.active[0]) follow.href = `#/run/${st.active[0].run}`;
   };
   el.__update(state0); return el;
@@ -81,7 +99,7 @@ export const overview = {
     const stable = (node, key, sig) => keyed(node, key, sig);
     return [
       stable(launcher(projects, st), 'launcher', [projects.length, st.lanes?.running?.length ?? 0, st.lanes?.parallel ?? 1, st.active]),
-      persist('line', { queued, shipped, active: activity.active, paused: st.paused, nextIn }, lineCard),
+      persist('line', { queued, shipped, active: activity.active, agents: activity.agents ?? [], roster: activity.roster ?? [], paused: st.paused, nextIn }, lineCard),
       stable(h('section', { class: 'spec' },
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),

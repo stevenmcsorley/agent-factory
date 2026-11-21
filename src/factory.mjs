@@ -93,7 +93,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   // A vague ticket is not parked at once if a spec-writer is on: it drafts acceptance criteria, scope and assumptions into the ticket (once, clearly marked), and the gate looks again.
   if (config.gate !== false && !gate.ok && config.clarify && !String(t.body ?? '').includes(SPEC_MARK)) {
     try {
-      const add = await config.clarify(t, gate.problems);
+      run.role('spec-writer', 'drafting acceptance criteria'); const add = await config.clarify(t, gate.problems); run.role(null);
       if (add) {
         const body = `${String(t.body ?? '').trimEnd()}\n\n${SPEC_MARK}\n_Drafted by the spec-writer agent because the ticket was too vague to start. Edit it if it is wrong._\n\n${add}`;
         try { await tickets.update?.(t.id, { body }); } catch { /* still use it for this run */ }
@@ -187,7 +187,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       // Optional second opinion: another agent reads the change. Blocking findings go back to the builder once per attempt; on the last attempt the PR still opens, flagged.
       if (config.review) {
         run.phase('review', 'a second agent reads the change');
-        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t) }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
+        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t), role: (n, d) => run.role(n, d) }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
         run.note('review', rv);
         if (rv.verdict === 'changes' && a < (cfg.maxAttempts ?? 2)) { rec.status = 'review-changes'; feedback = feedbackFromReview(rv); continue; }
       }

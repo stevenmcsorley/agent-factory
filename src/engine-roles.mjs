@@ -71,10 +71,10 @@ export const roleMethods = {
   // The reviewer and the security reviewer are separate passes with their own prompt, skills and model; the verdicts are combined.
   _reviewer(p, sandbox, log) {
     const passes = [['reviewer', 'reviewer-rules'], ['security', 'security-rules']].filter(([role]) => this._roleOn(p, role)); if (!passes.length) return undefined;
-    return async ({ ws, ticket, context }) => {
+    return async ({ ws, ticket, context, role: announce }) => {
       const diff = await changeDiff(ws.dir); const results = [];
       for (const [role, rules] of passes) {
-        const copy = copyWorkspace(ws);
+        announce?.(role, role === 'security' ? 'checking for security problems' : 'reading the change'); const copy = copyWorkspace(ws);
         try {
           const prompt = reviewPrompt({ rules: getPrompt(rules, {}, this._promptDirs()), skills: this._skillsText(role, p.id), ticket, diff, context });
           const r = await this._agentFor(role, log).run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
