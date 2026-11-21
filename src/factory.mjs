@@ -12,6 +12,7 @@ import { changeQuality, feedbackFor } from './quality.mjs';
 import { makeIgnore } from './ignore.mjs';
 import { getPrompt } from './prompts.mjs';
 import { coverageGap } from './coverage.mjs';
+import { feedbackFromReview } from './review.mjs';
 
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
@@ -26,7 +27,8 @@ export function buildPrompt(t, extra = '', profile = '', context = '', rules = g
 // What this change was built from and what was actually checked, so a pass is tied to the revisions it names.
 function provenanceNote(rec) {
   const cov = rec.coverage ? `- **Not covered by that command:** ${rec.coverage.uncovered.map((f) => `\`${f}\``).join(', ')}${rec.coverage.total > rec.coverage.uncovered.length ? ` and ${rec.coverage.total - rec.coverage.uncovered.length} more` : ''} (it only runs in ${rec.coverage.scopes.map((x) => `\`${x}/\``).join(', ')}). Review those by hand.` : null;
-  const bits = [rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
+  const rvw = rec.review ? `- **Reviewer agent:** ${rec.review.verdict === 'approve' ? 'approved' : rec.review.verdict === 'changes' ? `asked for changes (${rec.review.findings.filter((f) => f.severity !== 'minor').length} blocking), not resolved` : 'gave no usable verdict'}${rec.review.summary ? `: ${rec.review.summary}` : ''}` : null;
+  const bits = [rvw, rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
   return bits.length ? `\n\n### Provenance\n${bits.join('\n')}\n- If this branch changes after this point, the result above no longer applies to it.` : '';
 }
 // A short, honest note for the PR and the ticket about the quality gate on the change.
@@ -129,6 +131,13 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
             if (q.blockers.length) { rec.status = 'quality-failed'; rec.error = `quality gate: ${q.blockers.join('; ')}`; break; }
           }
         }
+      }
+      // Optional second opinion: another agent reads the change. Blocking findings go back to the builder once per attempt; on the last attempt the PR still opens, flagged.
+      if (config.review) {
+        run.phase('review', 'a second agent reads the change');
+        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t) }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
+        run.note('review', rv);
+        if (rv.verdict === 'changes' && a < (cfg.maxAttempts ?? 2)) { rec.status = 'review-changes'; feedback = feedbackFromReview(rv); continue; }
       }
       rec.status = 'ok';
       break;

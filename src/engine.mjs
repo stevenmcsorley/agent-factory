@@ -36,6 +36,7 @@ import { assessTicket } from './gate.mjs';
 import { AGENT_LABELS } from './labels.mjs';
 import { inspectRepo, ensureLabels, createProjectRepo, whoami } from './github.mjs';
 import { scheduleMethods } from './engine-schedule.mjs';
+import { roleMethods } from './engine-roles.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -87,14 +88,14 @@ export class Engine {
   async stopEgress() { await this.egress?.stop?.(); this.egress = null; }
 
   // Everything the core loop needs for one project, built fresh from config.
-  deps(p) {
+  deps(p, role = 'builder') {
     const dir = this.projectDir(p);
     const log = path.join(dir, 'logs', `${new Date().toISOString().slice(0, 10)}.log`);
     const hostAdapter = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, dir: this.projectDir(p), projectId: p.id, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log });
     const a = this.cfg.agent;
-    const agent = this.f.agent ?? agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log });
+    const agent = this._agentFor(role, log);
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
@@ -102,7 +103,8 @@ export class Engine {
     // Precedence stays: the repo's .agent-factory.json, then the project's own setting, then this detection, then root detection at run time.
     const detected = !p.config?.verify && p.profile?.verify ? { verify: p.profile.verify, ...(!p.config?.image && p.profile.image ? { image: p.profile.image } : {}) } : {};
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
-      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._designContext?.(p.id), this._planContext(p, t), this._partsContext(p, t).text, this._skillsText('builder', p.id)].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      review: this._reviewer(p, sb, log),
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); },
       recordEvent: (ev) => this.recordEvent(p.id, ev.ticket, ev.event),
       briefRev: () => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); return pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions) ? pk.revision(pack) : undefined; },
@@ -121,7 +123,7 @@ export class Engine {
     const queue = this._dueProjects(); const lanes = Math.max(1, Math.min(8, Number(this.cfg.limits.parallelProjects) || 1)); let next = 0;
     const lane = async () => { while (next < queue.length) { const p = queue[next++]; await this.releasePlan(p.id).catch(() => {}); const d = this.deps(p); this.lanes.set(p.id, Date.now()); try { out.push(...(await tick(d)).map((r) => ({ project: p.id, ...r }))); } finally { this.lanes.delete(p.id); } } };
     await Promise.all(Array.from({ length: Math.min(lanes, queue.length) }, lane)); return out; }); }
-  feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this._dueProjects()) { const d = this.deps(p); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
+  feedbackAll() { return this._exclusive('feedback', async () => { const out = []; for (const p of this._dueProjects()) { const d = this.deps(p, 'fixer'); out.push(...(await feedbackTick(d)).map((r) => ({ project: p.id, ...r }))); } return out; }); }
 
   loop(ms = this.cfg.pollMs) {
     this.pollMs = ms;
@@ -542,7 +544,7 @@ export class Engine {
     return job;
   }
   async planProject(id, { onPhase } = {}) {
-    const p = this.project(id); const dir = this._packDir(id); const pack = pk.loadPack(dir); const d = this.deps(p);
+    const p = this.project(id); const dir = this._packDir(id); const pack = pk.loadPack(dir); const d = this.deps(p, 'planner');
     onPhase?.('cloning the repository'); let ws;
     try {
       ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'plan', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 });
@@ -876,4 +878,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods);

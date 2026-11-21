@@ -90,3 +90,30 @@ test('a normal summary that merely mentions NEEDS_INFO is not a request for info
   const { deps } = setup("echo hi > b.txt; echo 'Done. (Did not need NEEDS_INFO: this time.)'", 'test -f b.txt'); deps.config.gate = false;
   assert.equal((await tick(deps))[0].status, 'ok');
 });
+
+test('reviewer: blocking findings send the change back to the builder once, then it ships with the verdict recorded', async () => {
+  const { deps } = setup('echo hi >> b.txt', 'test -f b.txt'); const seen = [];
+  deps.config.review = async ({ ticket }) => { seen.push(ticket.id); return seen.length === 1 ? { verdict: 'changes', summary: 'No input check', findings: [{ severity: 'major', file: 'b.txt', issue: 'unchecked' }] } : { verdict: 'approve', summary: 'Fine', findings: [] }; };
+  const [rec] = await tick(deps);
+  assert.equal(rec.status, 'ok'); assert.equal(rec.attempts, 2); assert.equal(rec.review.verdict, 'approve'); assert.equal(seen.length, 2);
+  assert.ok(rec.phases.some((p) => p.name === 'review'));
+});
+
+test('reviewer: still asking for changes on the last attempt means the PR opens flagged, never silently approved', async () => {
+  const { deps } = setup('echo hi >> b.txt', 'test -f b.txt');
+  deps.config.review = async () => ({ verdict: 'changes', summary: 'Wrong approach', findings: [{ severity: 'blocker', file: 'b.txt', issue: 'bad' }] });
+  const [rec] = await tick(deps);
+  assert.equal(rec.status, 'ok'); assert.equal(rec.review.verdict, 'changes');
+});
+
+test('reviewer: a crashing reviewer is "error", not an approval, and does not block the PR', async () => {
+  const { deps } = setup('echo hi > b.txt', 'test -f b.txt');
+  deps.config.review = async () => { throw new Error('reviewer exploded'); };
+  const [rec] = await tick(deps);
+  assert.equal(rec.status, 'ok'); assert.equal(rec.review.verdict, 'error'); assert.match(rec.review.summary, /exploded/);
+});
+
+test('without a reviewer the loop is exactly as before: no review phase, no review field', async () => {
+  const { deps } = setup('echo hi > b.txt', 'test -f b.txt');
+  const [rec] = await tick(deps); assert.equal(rec.review, undefined); assert.ok(!rec.phases.some((p) => p.name === 'review'));
+});

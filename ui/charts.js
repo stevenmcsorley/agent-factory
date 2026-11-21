@@ -24,6 +24,7 @@ const GLYPHS = {
   agent: () => { const pins = ['M9 3v3', 'M15 3v3', 'M9 18v3', 'M15 18v3', 'M3 9h3', 'M3 15h3', 'M18 9h3', 'M18 15h3'].map((d, i) => { const e = P(d, 'pin'); e.style.animationDelay = `${i * 0.13}s`; return e; });
     return [s('rect', { x: 6, y: 6, width: 12, height: 12, rx: 2 }), s('rect', { x: 10, y: 10, width: 4, height: 4, rx: 0.8, class: 'core' }), ...pins]; },
   verify: () => [s('g', { class: 'glass' }, s('circle', { cx: 10.5, cy: 10.5, r: 6.2 }), P('M15.2 15.2L20.5 20.5'), P('M7.8 10.6l2 2 3.6-4', 'tick'))],
+  review: () => [s('g', { class: 'glass' }, P('M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z'), s('circle', { cx: 12, cy: 12, r: 3 }))],
   push: () => [P('M4 15.5v3a1.5 1.5 0 001.5 1.5h13a1.5 1.5 0 001.5-1.5v-3'), s('g', { class: 'arrow' }, P('M12 15V4'), P('M7.5 8.5L12 4l4.5 4.5'))],
   ship: () => [s('g', { class: 'plane' }, P('M21 3L3 10.5l7 2.5 2.5 7z'), P('M21 3L10 13')), P('M3.5 20.5h6', 'ground')],
 };

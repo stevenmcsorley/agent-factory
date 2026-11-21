@@ -63,7 +63,7 @@ export const OUTCOME = {
   'protected-path': ['bad', 'Blocked: protected path'], 'repo-not-allowed': ['warn', 'Repo not allowed'], 'budget-exhausted': ['warn', 'Budget reached'], stopped: ['info', 'Paused'], running: ['info', 'Running'],
   'recovered-requeued': ['info', 'Requeued'], 'recovered-failed': ['bad', 'Gave up'] };
 export const pill = (status) => { const [c, t] = OUTCOME[status] ?? ['', status]; return h('span', { class: `stamp ${c}` }, h('i', { class: 'dot' }), t); };
-export const STAGES = [['claim', 'Claim'], ['sandbox', 'Sandbox'], ['agent', 'Agent'], ['verify', 'Verify'], ['push', 'Push'], ['pr', 'Ship']];
+export const STAGES = [['claim', 'Claim'], ['sandbox', 'Sandbox'], ['agent', 'Agent'], ['verify', 'Verify'], ['review', 'Review'], ['push', 'Push'], ['pr', 'Ship']];
 export const STATES = { ready: ['info', 'Queued'], working: ['live', 'Working'], review: ['ok', 'In review'], failed: ['bad', 'Failed'], 'needs-info': ['warn', 'Needs info'], 'needs-human': ['bad', 'Needs a human'], other: ['', 'Other'] };
 
 // ---- render continuity: entrance animations and number roll-ups play on NAVIGATION only, never on a background refresh.
