@@ -29,6 +29,7 @@ const ID = /^[a-z0-9][a-z0-9-]{0,40}$/;
 export function withDefaults(cfg) {
   const c = { ...DEFAULTS, ...cfg, ui: { ...DEFAULTS.ui, ...cfg.ui }, sandbox: { ...DEFAULTS.sandbox, ...cfg.sandbox }, limits: { ...DEFAULTS.limits, ...cfg.limits } };
   c.agent = { ...DEFAULTS.agent, ...cfg.agent };
+  if (c.ui.previewPort === undefined) c.ui.previewPort = Number(c.ui.port) + 1;   // where project sites are previewed (0 switches previews off)
   if (c.sandbox.egress === undefined && EGRESS_DEFAULTS[c.agent.kind])
     c.sandbox.egress = { allow: [...EGRESS_DEFAULTS[c.agent.kind], ...PACKAGE_HOSTS] };
   return c;
@@ -44,6 +45,7 @@ export function validateConfig(cfg) {
   if (cfg.agent?.reasoningEffort != null && !EFFORTS.includes(cfg.agent.reasoningEffort)) e.push(`agent.reasoningEffort must be one of ${EFFORTS.join(', ')}`);
   if (cfg.ui.host && !['127.0.0.1', 'localhost', '::1'].includes(cfg.ui.host) && !cfg.ui.allowRemote) e.push('ui.host must be loopback unless ui.allowRemote=true (put TLS in front and keep the UI token secret)');
   for (const k of ['name', 'network']) if (cfg.sandbox?.egress?.[k] !== undefined && !/^[a-z0-9][a-z0-9_.-]{0,40}$/i.test(String(cfg.sandbox.egress[k]))) e.push(`sandbox.egress.${k} must be a simple docker name (letters, digits, - _ .)`);
+  if (cfg.ui?.previewPort !== undefined && cfg.ui.previewPort !== 0 && (!Number.isInteger(cfg.ui.previewPort) || cfg.ui.previewPort < 1024 || cfg.ui.previewPort > 65535 || cfg.ui.previewPort === cfg.ui.port)) e.push('ui.previewPort must be a whole number from 1024 to 65535, different from ui.port (or 0 to switch previews off)');
   const seen = new Set();
   for (const p of cfg.projects ?? []) {
     if (!ID.test(p.id ?? '')) e.push(`project id "${p.id}" must match ${ID}`);

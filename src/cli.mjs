@@ -130,6 +130,7 @@ WantedBy=default.target
       console.log(`Agent Factory is running\n  UI:  http://${cfg.ui.host}:${cfg.ui.port}/#token=${token}\n  ${cfg.projects.length} project(s), agent: ${cfg.agent.kind}${engine.paused() ? '\n  (paused: STOP file present)' : ''}`);
       if (!flags['no-loop']) engine.loop();
     });
+    engine.startPreviewGateway({ host: cfg.ui.host, port: cfg.ui.previewPort }).then((g) => { if (g) console.log(`  Previews: http://localhost:${g.port}/  (each project at http://<project>.localhost:${g.port}/)`); }).catch((e) => console.warn(`  Previews are off: ${e.code === 'EADDRINUSE' ? `port ${cfg.ui.previewPort} is in use (set ui.previewPort)` : e.message}`));
     const bye = () => { engine.halt(); server.closeAllConnections(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
     process.on('SIGINT', bye); process.on('SIGTERM', bye);
     return;

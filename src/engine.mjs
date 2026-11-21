@@ -141,7 +141,7 @@ export class Engine {
     this.nextAt = Date.now() + 1000;
     this.timer = setTimeout(cycle, 1000);
   }
-  halt() { clearTimeout(this.timer); this.stopAllLivePreviews?.().catch(() => {}); }
+  halt() { clearTimeout(this.timer); this.stopAllLivePreviews?.().catch(() => {}); if (this.previewGateway) { clearInterval(this.previewGateway.timer); this.previewGateway.server.closeAllConnections?.(); this.previewGateway.server.close(); this.previewGateway = null; } }
 
   // ---- live activity: runs publish phase events; we keep a ring buffer and the set of runs in flight
   _event(e) {
