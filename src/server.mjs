@@ -121,6 +121,11 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/(approve|reject|reopen)$/, async (m, b) => engine.setDesignStatus(m[1], m[2], { approve: 'approved', reject: 'rejected', reopen: 'proposed' }[m[3]], b.version)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/publish$/, async (m, b) => engine.publishAssets(m[1], m[2], b)],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/files$/, async (m, _b, url) => ({ files: engine.designAssets(m[1], m[2], Number(url.searchParams.get('version')) || undefined) })],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/designs\/in-use$/, async (m) => engine.designContextFor(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/archive$/, async (m) => engine.archiveDesign(m[1], m[2])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/restore$/, async (m) => engine.restoreDesign(m[1], m[2])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/meta$/, async (m, b) => engine.updateDesign(m[1], m[2], b)],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/versions\/(\d{1,3})\/delete$/, async (m) => engine.deleteDesignVersion(m[1], m[2], m[3])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/delete$/, async (m) => engine.deleteDesign(m[1], m[2])],
     // The mockup is shown in a frame, and a frame cannot send the bearer token: so the UI asks for a short-lived, unguessable address and the frame loads that.
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/designs\/([a-f0-9]{8})\/view$/, async (m, b) => { const html = engine.designHtml(m[1], m[2], Number.isInteger(b.version) ? b.version : undefined); for (const [k, v] of previews) if (v.exp < Date.now()) previews.delete(k); const t = crypto.randomBytes(18).toString('hex'); previews.set(t, { html, exp: Date.now() + 5 * 60_000 }); return { path: `/preview/${t}` }; }],

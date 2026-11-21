@@ -121,3 +121,42 @@ test('assets: you can start a set by hand when the designer produced nothing', a
   await callOp(e, 'edit_design', { project: 'a', design: d.id, files: [{ name: 'mine', svg: '<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg>' }] });
   const after = e.getDesign('a', d.id); assert.equal(after.status, 'proposed'); assert.deepEqual(after.versions[0].files, ['mine']);
 });
+
+test('areas: approving a design retires the older approved one in the same area; restore never puts it back in use', () => {
+  const p = dir(); const mk = (title, area) => { const d = ds.createDesign(p, { title, area, request: 'A screen with a list of things to do' }); ds.addVersion(p, d.id, { html: PAGE.replace('Home', title) }); return d; };
+  const a = mk('Login v1', 'Login screen'); const b = mk('Login v2', ' login SCREEN '); const c = mk('Settings', 'Settings'); assert.equal(a.area, 'Login screen');
+  ds.setStatus(p, a.id, 'approved'); ds.setStatus(p, c.id, 'approved'); const out = ds.setStatus(p, b.id, 'approved'); assert.deepEqual(out.retired, [a.id]);
+  const after = ds.getDesign(p, a.id); assert.equal(after.status, 'archived'); assert.equal(after.supersededBy, b.id); assert.equal(after.approvedVersion, undefined);
+  assert.equal(ds.getDesign(p, c.id).status, 'approved', 'a different area is untouched'); assert.match(ds.designContext(p), /Login v2/); assert.doesNotMatch(ds.designContext(p), /Login v1/);
+  const back = ds.restoreDesign(p, a.id); assert.equal(back.status, 'proposed'); assert.doesNotMatch(ds.designContext(p), /Login v1/); assert.throws(() => ds.restoreDesign(p, c.id), /archived or rejected/);
+});
+
+test('archive keeps everything and removes it from use; metadata can be renamed; versions can be deleted unless in use', () => {
+  const p = dir(); const d = ds.createDesign(p, { title: 'Home', request: 'A home screen with a queue of tickets' }); for (const t of ['one', 'two', 'three']) ds.addVersion(p, d.id, { html: PAGE.replace('Home', t) });
+  ds.setStatus(p, d.id, 'approved', 2); assert.throws(() => ds.deleteVersion(p, d.id, 2), /in use/); assert.throws(() => ds.deleteVersion(p, d.id, 9), /No such version/);
+  const v = ds.deleteVersion(p, d.id, 1); assert.deepEqual(v.versions.map((x) => x.n), [2, 3]); assert.ok(!fs.existsSync(path.join(p, 'designs', d.id, 'v1.html')));
+  assert.match(ds.readHtml(p, d.id, 3), /three/); const next = ds.addVersion(p, d.id, { html: PAGE.replace('Home', 'four') }); assert.deepEqual(next.versions.map((x) => x.n), [2, 3, 4]);
+  assert.equal(ds.getDesign(p, d.id).status, 'approved', 'a newer version waits; the approved one stays in use'); assert.match(ds.designContext(p), /Home|two/); assert.doesNotMatch(ds.designContext(p), /four/);
+  ds.setStatus(p, d.id, 'archived'); const arch = ds.getDesign(p, d.id); assert.equal(arch.status, 'archived'); assert.equal(arch.archivedFrom, 'approved'); assert.equal(ds.designContext(p), ''); assert.equal(arch.versions.length, 3, 'history kept');
+  assert.equal(ds.updateMeta(p, d.id, { title: 'Home page', area: 'Home' }).area, 'Home'); assert.equal(ds.updateMeta(p, d.id, { area: '' }).area, undefined); assert.throws(() => ds.updateMeta(p, d.id, { title: ' ' }), /title/);
+  const solo = ds.createDesign(p, { title: 'Solo', request: 'Only one version here for testing' }); ds.addVersion(p, solo.id, { html: PAGE }); assert.throws(() => ds.deleteVersion(p, solo.id, 1), /only version/);
+});
+
+test('the builder is told about at most six approved designs, and the rest are reported as over the limit', () => {
+  const p = dir(); for (let i = 0; i < 8; i++) { const d = ds.createDesign(p, { title: `Design ${i}`, request: 'A screen with a list of things to do' }); ds.addVersion(p, d.id, { html: PAGE.replace('Home', `Design ${i}`) }); ds.setStatus(p, d.id, 'approved'); }
+  const u = ds.inUse(p); assert.equal(u.designs.length, 8); assert.equal(u.told, 6); assert.equal(u.overLimit, 2); assert.equal((ds.designContext(p).match(/^#### /gm) ?? []).length, 6);
+});
+
+test('organising designs over MCP: area, archive, restore, in-use view, version delete', async () => {
+  let n = 0; const e = boot(async (_s, ws) => { n++; fs.writeFileSync(path.join(ws.dir, '.factory-design', 'design.html'), PAGE.replace('Home', `Draft ${n}`)); return { out: 'ok', code: 0 }; });
+  const a = await callOp(e, 'create_design', { project: 'a', title: 'Login A', area: 'Login', request: 'A login screen with email and password fields' }); await settle(e, a.id);
+  const b = await callOp(e, 'create_design', { project: 'a', title: 'Login B', area: 'Login', request: 'A different take on the login screen with a magic link' }); await settle(e, b.id);
+  await callOp(e, 'approve_design', { project: 'a', design: a.id }); const r = await callOp(e, 'approve_design', { project: 'a', design: b.id }); assert.deepEqual(r.retired, [a.id]);
+  const use = await callOp(e, 'designs_in_use', { project: 'a' }); assert.deepEqual(use.designs.map((d) => d.title), ['Login B']); assert.match(use.text, /Login B|Draft/); assert.equal(use.overLimit, 0);
+  assert.equal((await callOp(e, 'list_designs', { project: 'a' })).inUse.told, 1);
+  await callOp(e, 'archive_design', { project: 'a', design: b.id }); assert.equal((await callOp(e, 'designs_in_use', { project: 'a' })).designs.length, 0); assert.equal(e.getDesign('a', b.id).status, 'archived');
+  await callOp(e, 'restore_design', { project: 'a', design: b.id }); assert.equal(e.getDesign('a', b.id).status, 'proposed');
+  await callOp(e, 'update_design', { project: 'a', design: b.id, title: 'Login B (magic link)', area: 'Login' }); assert.equal(e.getDesign('a', b.id).title, 'Login B (magic link)');
+  await callOp(e, 'revise_design', { project: 'a', design: b.id, feedback: 'Bigger button' }); await settle(e, b.id); assert.equal(e.getDesign('a', b.id).versions.length, 2);
+  await callOp(e, 'delete_design_version', { project: 'a', design: b.id, version: 1 }); assert.deepEqual(e.getDesign('a', b.id).versions.map((v) => v.n), [2]);
+});

@@ -10,15 +10,17 @@ const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
 export const designMethods = {
   _designDir(id) { return this._packDir(id); },
-  designs(id) { const dir = this._designDir(id); return { designs: ds.listDesigns(dir).map((d) => ({ ...d, working: this.designJobs?.has(`${id}:${d.id}`) ?? false })) }; },
+  designs(id) { const dir = this._designDir(id); return { designs: ds.listDesigns(dir).map((d) => ({ ...d, working: this.designJobs?.has(`${id}:${d.id}`) ?? false })), inUse: ds.inUse(dir) }; },
+  // Exactly what the builder is told about designs on its next ticket.
+  designContextFor(id) { const dir = this._designDir(id); return { ...ds.inUse(dir), text: ds.designContext(dir) }; },
   getDesign(id, did) { const dir = this._designDir(id); return { ...ds.getDesign(dir, did), working: this.designJobs?.has(`${id}:${did}`) ?? false }; },
   designAssets(id, did, version) { return ds.readAssets(this._designDir(id), did, version); },
   designHtml(id, did, version) { return ds.readHtml(this._designDir(id), did, version); },
   _materializeDesigns(id, wsDir) { try { ds.materializeDesigns(this._designDir(id), wsDir); } catch { /* context is a helper, never a blocker */ } },
   _designContext(id) { try { return ds.designContext(this._designDir(id)); } catch { return ''; } },
 
-  startDesign(id, { title, request, kind } = {}) {
-    const dir = this._designDir(id); const d = ds.createDesign(dir, { title, request, kind });
+  startDesign(id, { title, request, kind, area } = {}) {
+    const dir = this._designDir(id); const d = ds.createDesign(dir, { title, request, kind, area });
     this._runDesign(id, d.id, { request: d.request, kind: d.kind }); this._audit({ what: 'design', project: id, design: d.id, action: 'requested' }); return this.getDesign(id, d.id);
   },
   // Feedback from you becomes the next version. The previous version is shown to the designer so it changes what you asked for and keeps the rest.
@@ -39,8 +41,13 @@ export const designMethods = {
     const d = ds.addVersion(dir, did, { html, by: 'you', rationale: note || 'Edited by hand.' }); this._audit({ what: 'design', project: id, design: did, action: 'edited' }); return this.getDesign(id, did);
   },
   setDesignStatus(id, did, status, version) {
-    const dir = this._designDir(id); const d = ds.setStatus(dir, did, status, version); this._audit({ what: 'design', project: id, design: did, action: status, version: d.approvedVersion ?? null }); return this.getDesign(id, did);
+    const dir = this._designDir(id); const d = ds.setStatus(dir, did, status, version); this._audit({ what: 'design', project: id, design: did, action: status, version: d.approvedVersion ?? null, ...(d.retired?.length ? { retired: d.retired } : {}) });
+    return { ...this.getDesign(id, did), ...(d.retired?.length ? { retired: d.retired } : {}) };
   },
+  archiveDesign(id, did) { const dir = this._designDir(id); if (this.designJobs?.has(`${id}:${did}`)) throw bad('The designer is still working on this one', 409); ds.setStatus(dir, did, 'archived'); this._audit({ what: 'design', project: id, design: did, action: 'archived' }); return this.getDesign(id, did); },
+  restoreDesign(id, did) { const dir = this._designDir(id); ds.restoreDesign(dir, did); this._audit({ what: 'design', project: id, design: did, action: 'restored' }); return this.getDesign(id, did); },
+  updateDesign(id, did, meta = {}) { const dir = this._designDir(id); ds.updateMeta(dir, did, meta); return this.getDesign(id, did); },
+  deleteDesignVersion(id, did, n) { const dir = this._designDir(id); if (this.designJobs?.has(`${id}:${did}`)) throw bad('The designer is still working on this one', 409); ds.deleteVersion(dir, did, Number(n)); this._audit({ what: 'design', project: id, design: did, action: 'version-deleted', version: Number(n) }); return this.getDesign(id, did); },
   deleteDesign(id, did) { const dir = this._designDir(id); const r = ds.removeDesign(dir, did); this._audit({ what: 'design', project: id, design: did, action: 'deleted' }); return r; },
 
   _runDesign(id, did, { request, feedback, previous, kind }) {
