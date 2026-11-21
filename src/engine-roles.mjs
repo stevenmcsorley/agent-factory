@@ -10,6 +10,8 @@ import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
 import { getPrompt } from './prompts.mjs';
 import { validateAgentPatch, readCodexModels } from './settings.mjs';
 import { parseUsageLimit } from './agentlimit.mjs';
+import { needsTests, testerPrompt, snapshot, restore, dropSnapshot, forbiddenChanges, hashes } from './tester.mjs';
+import { run } from './util.mjs';
 import { reviewPrompt, parseVerdict, changeDiff, copyWorkspace, combineReviews } from './review.mjs';
 import * as sk from './skills.mjs';
 import * as pk from './pack.mjs';
@@ -21,6 +23,7 @@ export const ROLE_INFO = {
   builder: { label: 'Builder', blurb: 'Writes the change for each ticket. Always on.', toggle: false },
   reviewer: { label: 'Reviewer', blurb: 'A second agent reads each change before its pull request opens and asks for fixes. Costs one extra agent run per attempt.', toggle: true },
   security: { label: 'Security reviewer', blurb: 'A second reviewer that looks only for security problems (injection, missing access checks, secrets, insecure defaults). Runs with the reviewer or on its own.', toggle: true },
+  tester: { label: 'Tester', blurb: 'When the builder changes source code but adds no tests, a second agent writes them. It may only add or change test files, the whole test command must still pass, and if not, everything it did is undone.', toggle: true },
   designer: { label: 'Designer', blurb: 'Drafts design mockups for you to review, edit and approve. Approved designs become what the builder follows.', toggle: false },
   fixer: { label: 'Fixer', blurb: 'Handles follow-up work: CI failures and review comments on an open pull request.', toggle: false },
   planner: { label: 'Planner', blurb: 'Turns a project brief into epics and tickets.', toggle: false },
@@ -81,6 +84,26 @@ export const roleMethods = {
         } finally { copy.destroy(); }
       }
       return combineReviews(results);
+    };
+  },
+
+  // The tester hook. Undefined when the role is off. Everything it does is measured against a snapshot of the builder's change, and undone on any breach.
+  _tester(p, sandbox, log) {
+    if (!this._roleOn(p, 'tester')) return undefined;
+    return async ({ ws, ticket, files, rerun }) => {
+      const snap = await snapshot(ws); const before = await hashes(ws, snap.files);
+      try {
+        const diff = await changeDiff(ws.dir); const prompt = testerPrompt({ rules: getPrompt('tester-rules', {}, this._promptDirs()), skills: this._skillsText('tester', p.id), ticket, files, diff });
+        const r = await this._agentFor('tester', log).run(sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+        const undo = async (summary) => { await restore(ws, snap); return { status: 'reverted', summary, files: [] }; };
+        if (r.timedOut) return await undo('it timed out');
+        if (parseUsageLimit(r.out)) return await undo('it hit its usage limit');
+        const bad = await forbiddenChanges(ws, snap, before); if (bad.length) return await undo(`it changed non-test files: ${bad.slice(0, 3).join(', ')}`);
+        const added = (await run('git', ['status', '--porcelain'], { cwd: ws.dir })).out.split('\n').filter(Boolean).map((l) => l.replace(/^\s*\S+\s+/, '').trim()).filter((f) => !snap.files.has(f) || before.get(f) === undefined);
+        if (!added.length) return await undo('it added no tests');
+        if (!(await rerun())) return await undo('the test command failed with its tests');
+        return { status: 'added', files: added, summary: String(r.out ?? '').trim().slice(0, 300) };
+      } finally { dropSnapshot(snap); }
     };
   },
 

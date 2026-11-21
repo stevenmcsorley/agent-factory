@@ -4,7 +4,7 @@ Written after a long real run: 17 tickets taken from "the projects page looks ba
 
 | # | Gap | What it cost | Status |
 |---|-----|--------------|--------|
-| 1 | The factory cannot see UI breakage | Typecheck, tests and build passed every PR; a card with its description drawn above its name, a 20px sideways scroll and white text on a light panel were all found by hand in a browser, 17 times | **Built** (`src/visual.mjs`, `scripts/visual-runner.mjs`, `Dockerfile.visual`; see AUTOPILOT.md). Node dev servers and static sites; no mock-data support for pages that need a backend |
+| 1 | The factory cannot see UI breakage | Typecheck, tests and build passed every PR; a card with its description drawn above its name, a 20px sideways scroll and white text on a light panel were all found by hand in a browser, 17 times | **Built** (`src/visual.mjs`, `scripts/visual-runner.mjs`, `Dockerfile.visual`; see AUTOPILOT.md). Node dev servers and static sites; Node, Python (Flask/Django/FastAPI via `Dockerfile.visual-python`) and static sites; no mock-data support for pages that need a backend |
 | 2 | Nothing watches what happens after a merge | Two deploys failed on a test the factory never ran; the factory did not notice | **Built** (`src/deploywatch.mjs`, Inbox) |
 | 3 | The test command covers one folder of a monorepo | A ticket touching `backend/` would pass a `cd frontend && npm test` check and look verified | **Built** (`src/coverage.mjs`, PR note) |
 | 4 | "Only these files may change" is not enforced | The agent changed one extra file; the gate said OK | **Built** (`src/allowlist.mjs`, an `allowed-files` block in the ticket; see AUTOPILOT.md) |

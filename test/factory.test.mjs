@@ -172,3 +172,10 @@ test('spec-writer: it only tries once per ticket, and without the role nothing c
   const [r1] = await tick(a.deps); assert.equal(r1.status, 'needs-info', 'already drafted once and still vague: parked'); assert.equal(calls, 0);
   const b = setup('echo hi > b.txt', 'test -f b.txt'); b.deps.config.gate = {}; withBody(b.tpath, 'fix it'); const [r2] = await tick(b.deps); assert.equal(r2.status, 'needs-info');
 });
+
+test('tester: source without tests triggers it once; its result is recorded, and a failing hook never blocks', async () => {
+  const a = setup('echo hi > b.txt', 'test -f b.txt'); let calls = 0; a.deps.config.tester = async ({ files, rerun }) => { calls++; assert.deepEqual(files, ['c.js']); assert.equal(await rerun(), true); return { status: 'added', files: ['c.test.js'], summary: 'ok' }; };
+  const [r] = await tick({ ...a.deps, agent: agents.shell({ command: 'echo hi > b.txt; echo x > c.js' }) }); assert.equal(r.status, 'ok'); assert.equal(calls, 1); assert.equal(r.tests.status, 'added'); assert.ok(r.phases.some((p) => p.name === 'tests'));
+  const b = setup('echo hi > b.txt', 'test -f b.txt'); b.deps.config.tester = async () => { throw new Error('boom'); }; assert.equal((await tick({ ...b.deps, agent: agents.shell({ command: 'echo hi > b.txt; echo x > c.js' }) }))[0].status, 'ok');
+  const c = setup('echo hi > b.txt', 'test -f b.txt'); c.deps.config.tester = async () => { throw new Error('never'); }; const [r3] = await tick(c.deps); assert.equal(r3.status, 'ok', 'a .txt change needs no tests, so it is not called'); assert.equal(r3.tests, undefined);
+});

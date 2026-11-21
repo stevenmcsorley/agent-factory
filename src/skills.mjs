@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const ROLE_NAMES = ['builder', 'reviewer', 'security', 'designer', 'fixer', 'planner', 'spec-writer', 'skill-writer'];
+export const ROLE_NAMES = ['builder', 'reviewer', 'security', 'tester', 'designer', 'fixer', 'planner', 'spec-writer', 'skill-writer'];
 const NAME = /^[a-z0-9][a-z0-9-]{0,40}$/;
 const LIMITS = { body: 20_000, description: 240, perSkillInPrompt: 4_000, totalInPrompt: 12_000 };
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
@@ -45,7 +45,7 @@ export const BUILTIN = {
     '- Check the requirement line by line against the ticket; passing tests do not mean every requirement is met.',
     '- Words like "should", "probably" and "seems to" mean you have not verified. Run it, or say plainly what you could not run.',
     '- In your final summary, state what you ran and what it showed, including anything that failed or that you could not check.'].join('\n') },
-  'test-writing': { source: 'Original', description: 'Writing tests that catch real mistakes', roles: ['builder'], body: [
+  'test-writing': { source: 'Original', description: 'Writing tests that catch real mistakes', roles: ['builder', 'tester'], body: [
     'Follow the test setup the repository already has; do not introduce a second test framework.',
     '- Test behaviour a user or caller can observe, not private details.',
     '- One reason to fail per test; name it after what should happen.',

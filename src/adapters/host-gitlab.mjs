@@ -35,6 +35,13 @@ export function gitlabHost({ baseUrl = 'https://gitlab.com', repo, token, allowe
         const comments = notes.filter((n) => !n.system && allowedAuthors.includes(n.author?.username) && !n.body.includes(MARKER)).map((n) => ({ id: `n${n.id}`, author: n.author.username, body: n.body, raw: n.body }));
         return { failedChecks, pending, comments };
       },
+      // Autonomous mode only. The MR opens as "Draft: ...", which GitLab refuses to merge: drop the prefix, then squash-merge and delete the branch. A rule that needs a human approval makes GitLab refuse, and that is reported, never forced.
+      async merge(pr) {
+        const mr = await call('GET', `/projects/${pid}/merge_requests/${pr.number}`);
+        if (/^(draft|wip):/i.test(mr.title)) await call('PUT', `/projects/${pid}/merge_requests/${pr.number}`, { title: mr.title.replace(/^(draft|wip):\s*/i, '') });
+        await call('PUT', `/projects/${pid}/merge_requests/${pr.number}/merge`, { squash: true, should_remove_source_branch: true, sha: mr.sha });
+        return { merged: true };
+      },
       async comment(pr, text) { await call('POST', `/projects/${pid}/merge_requests/${pr.number}/notes`, { body: `${text}\n\n${MARKER}` }); },
       async label(pr, name) { await call('PUT', `/projects/${pid}/merge_requests/${pr.number}`, { add_labels: name }); },
     },

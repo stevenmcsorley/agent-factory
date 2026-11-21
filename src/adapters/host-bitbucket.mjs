@@ -35,6 +35,13 @@ export function bitbucketHost({ repo, username, token, allowedAuthors = [], fetc
           .map((c) => ({ id: `c${c.id}`, author: c.user.nickname ?? c.user.display_name, body: c.inline ? `${c.inline.path}:${c.inline.to ?? ''} — ${c.content.raw}` : c.content.raw, raw: c.content.raw }));
         return { failedChecks, pending, comments };
       },
+      // Autonomous mode only. Drop the "[Draft]" title prefix, then squash-merge and close the source branch. A branch restriction that needs a human approval makes Bitbucket refuse; that is reported, never forced.
+      async merge(pr) {
+        const p = await call('GET', `/repositories/${repo}/pullrequests/${pr.number}`);
+        if (/^\[draft\]/i.test(p.title)) await call('PUT', `/repositories/${repo}/pullrequests/${pr.number}`, { title: p.title.replace(/^\[draft\]\s*/i, '') });
+        await call('POST', `/repositories/${repo}/pullrequests/${pr.number}/merge`, { type: 'pullrequest', merge_strategy: 'squash', close_source_branch: true });
+        return { merged: true };
+      },
       async comment(pr, text) { await call('POST', `/repositories/${repo}/pullrequests/${pr.number}/comments`, { content: { raw: `${text}\n\n${MARKER}` } }); },
       async label() { /* Bitbucket pull requests have no labels; the preceding comment carries the message */ },
     },

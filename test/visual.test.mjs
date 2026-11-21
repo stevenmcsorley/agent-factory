@@ -79,3 +79,8 @@ test('a change that removes problems from the baseline says so', () => {
   const base = evaluate(bad, null); const fixed = evaluate({ ok: true, pages: [page({ tapTargets: [{ el: 'button.b', w: 30, h: 30, text: 'b' }] })] }, base.keys);
   assert.equal(fixed.status, 'pass'); assert.equal(fixed.counts.resolved, 1); assert.equal(fixed.counts.existing, 1); assert.match(fixed.summary, /1 already on the base branch, 1 fixed by this change/);
 });
+
+test('preview image: an optional container image name, validated', () => {
+  assert.equal(normalizePreview({ command: 'x', port: 3000, image: 'agent-factory-visual-python:latest' }).image, 'agent-factory-visual-python:latest'); assert.equal(normalizePreview({ command: 'x', port: 3000 }).image, undefined);
+  assert.throws(() => normalizePreview({ command: 'x', port: 3000, image: 'bad image; rm' }), /image name/);
+});

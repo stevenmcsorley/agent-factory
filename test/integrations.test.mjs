@@ -252,3 +252,17 @@ test('API: catalog lists every tracker and host without leaking functions; sourc
   assert.equal((await call('/api/sources/signup-info', { baseUrl: 'http://169.254.169.254' })).status, 400);
   s2.closeAllConnections(); s2.close();
 });
+
+test('autonomous merge on GitLab and Bitbucket: drop the Draft prefix, squash, delete the branch; a refusal is an error, never forced', async () => {
+  const calls = []; let refuse = false;
+  const gl = (title) => async (url, o) => { calls.push([o.method, new URL(url).pathname.replace('/api/v4', ''), o.body ? JSON.parse(o.body) : null]); if (refuse && /\/merge$/.test(url)) return { ok: false, status: 405, text: async () => 'Method Not Allowed' }; return { ok: true, status: 200, json: async () => ({ title, sha: 'abc123' }), text: async () => '' }; };
+  const g = gitlabHost({ repo: 'grp/app', token: 't', fetchImpl: gl('Draft: Add x') }); assert.deepEqual(await g.pr.merge({ number: 7 }), { merged: true });
+  assert.deepEqual(calls.map((c) => `${c[0]} ${c[1]}`), ['GET /projects/grp%2Fapp/merge_requests/7', 'PUT /projects/grp%2Fapp/merge_requests/7', 'PUT /projects/grp%2Fapp/merge_requests/7/merge']);
+  assert.equal(calls[1][2].title, 'Add x'); assert.deepEqual(calls[2][2], { squash: true, should_remove_source_branch: true, sha: 'abc123' });
+  calls.length = 0; await gitlabHost({ repo: 'grp/app', token: 't', fetchImpl: gl('Add x') }).pr.merge({ number: 7 }); assert.equal(calls.length, 2, 'no title change when it is not a draft');
+  refuse = true; await assert.rejects(gitlabHost({ repo: 'grp/app', token: 't', fetchImpl: gl('Add x') }).pr.merge({ number: 7 }), /405/);
+  calls.length = 0; const bb = (title) => async (url, o) => { calls.push([o.method, new URL(url).pathname.replace('/2.0', ''), o.body ? JSON.parse(o.body) : null]); return { ok: true, status: 200, json: async () => ({ title }), text: async () => '' }; };
+  await bitbucketHost({ repo: 'w/app', username: 'u', token: 't', fetchImpl: bb('[Draft] Add x') }).pr.merge({ number: 3 });
+  assert.deepEqual(calls.map((c) => `${c[0]} ${c[1]}`), ['GET /repositories/w/app/pullrequests/3', 'PUT /repositories/w/app/pullrequests/3', 'POST /repositories/w/app/pullrequests/3/merge']);
+  assert.equal(calls[1][2].title, 'Add x'); assert.equal(calls[2][2].merge_strategy, 'squash'); assert.equal(calls[2][2].close_source_branch, true);
+});

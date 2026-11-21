@@ -1,0 +1,10 @@
+# Visual-check image for Python projects (Django, Flask, FastAPI...): the same as Dockerfile.visual plus Python, pip and venv.
+# Build: docker build -f Dockerfile.visual-python -t agent-factory-visual-python:latest .
+# Use it on a project with preview.image = "agent-factory-visual-python:latest" and put the pip steps in preview.install,
+# for example: python3 -m venv /tmp/venv && /tmp/venv/bin/pip install -r requirements.txt   (and start with /tmp/venv/bin/python manage.py runserver 127.0.0.1:8000)
+FROM node:22-bookworm
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip python3-venv python3-dev build-essential libpq-dev && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/pw && cd /opt/pw && npm init -y >/dev/null && npm install playwright@1.49.1 && npx playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/pw /opt/pw-browsers && npm cache clean --force
+WORKDIR /work

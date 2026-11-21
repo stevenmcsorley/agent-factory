@@ -15,6 +15,7 @@ import { coverageGap } from './coverage.mjs';
 import { feedbackFromReview } from './review.mjs';
 import { parseAllowedFiles, outsideAllowlist, overlaps } from './allowlist.mjs';
 import { visualFeedback } from './visual.mjs';
+import { needsTests } from './tester.mjs';
 
 export const SPEC_MARK = '<!-- agent-factory:spec-writer -->';
 
@@ -33,7 +34,8 @@ function provenanceNote(rec) {
   const cov = rec.coverage ? `- **Not covered by that command:** ${rec.coverage.uncovered.map((f) => `\`${f}\``).join(', ')}${rec.coverage.total > rec.coverage.uncovered.length ? ` and ${rec.coverage.total - rec.coverage.uncovered.length} more` : ''} (it only runs in ${rec.coverage.scopes.map((x) => `\`${x}/\``).join(', ')}). Review those by hand.` : null;
   const rvw = rec.review ? `- **Reviewer agent:** ${rec.review.verdict === 'approve' ? 'approved' : rec.review.verdict === 'changes' ? `asked for changes (${rec.review.findings.filter((f) => f.severity !== 'minor').length} blocking), not resolved` : 'gave no usable verdict'}${rec.review.summary ? `: ${rec.review.summary}` : ''}` : null;
   const vis = rec.visual ? `- **Visual check:** ${rec.visual.status === 'pass' ? 'no new problems' : rec.visual.status === 'error' ? `could not run (${rec.visual.summary})` : `${rec.visual.summary}`}${rec.visual.status === 'fail' || rec.visual.status === 'warn' ? `: ${rec.visual.findings.slice(0, 4).map((f) => `${f.route} @${f.widths.join('/')}px ${f.detail}`).join('; ')}` : ''}` : null;
-  const bits = [rvw, vis, rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
+  const tst = rec.tests ? `- **Tests:** ${rec.tests.status === 'added' ? `the tester agent added ${rec.tests.files.length} test file${rec.tests.files.length === 1 ? '' : 's'}: ${rec.tests.files.slice(0, 5).map((f) => `\`${f}\``).join(', ')}` : `the tester agent's work was undone (${rec.tests.summary})`}` : null;
+  const bits = [tst, rvw, vis, rec.briefRev ? `- Built from brief revision \`${rec.briefRev}\`` : null, rec.verifyCmd ? `- \`${rec.verifyCmd}\` passed on the working tree committed as \`${String(rec.commit ?? 'this branch').slice(0, 10)}\`` : rec.status === 'ok' ? '- No verify command was available: this change was not machine-checked' : null, cov].filter(Boolean);
   return bits.length ? `\n\n### Provenance\n${bits.join('\n')}\n- If this branch changes after this point, the result above no longer applies to it.` : '';
 }
 // A short, honest note for the PR and the ticket about the quality gate on the change.
@@ -152,6 +154,15 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
         run.note('verifyTail', tail(v.out));
         if (v.code !== 0) { rec.status = 'verify-failed'; feedback = v.out.slice(-3000); continue; }
         const gap = coverageGap(cfg.verify, rec.changed); if (gap) run.note('coverage', gap); else delete rec.coverage;   // files this command does not exercise: named on the PR, never a block
+      }
+      // Optional tester: source changed but no tests came with it, so a second agent adds them (test files only, must pass, otherwise undone). Once per ticket.
+      if (config.tester && cfg.verify && !rec.tests) {
+        const need = needsTests(status);
+        if (need) {
+          run.phase('tests', 'a test engineer adds tests');
+          let tr; try { tr = await config.tester({ ws, ticket: t, files: need, rerun: async () => (await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image })).code === 0 }); } catch (e) { tr = { status: 'error', summary: String(e.message ?? e).slice(0, 200), files: [] }; }
+          run.note('tests', tr); const after = await vcs.diffStat(ws); run.note('changed', changedFiles(after));
+        }
       }
       // Quality gate on the CHANGED lines only ("clean as you code"): one chance to fix its own change, then secrets stop the PR and anything else is flagged on it.
       if (cfg.qualityGate !== false) {

@@ -110,6 +110,7 @@ export class Engine {
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._designContext?.(p.id), this._planContext(p, t), this._partsContext(p, t).text, this._skillsText('builder', p.id)].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
       clarify: this._clarifier(p, sb, log),
+      tester: this._tester(p, sb, log),
       visual: this._visualHook(p, sb),
       setHolds: (list) => { (this.holds ??= new Map()).set(p.id, list); },
       openChanges: async () => { const prs = await host.listAgentPrs(); const runs = readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && Array.isArray(r.changed)); return prs.map((pr) => ({ pr: pr.number, files: runs.filter((r) => Number(/(\d+)$/.exec(String(r.pr))?.[1]) === pr.number).flatMap((r) => r.changed.map((f) => String(f).replace(/^\S+\s+/, ''))) })).filter((o) => o.files.length); },

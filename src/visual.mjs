@@ -14,7 +14,7 @@ export const VISUAL_IMAGE = 'agent-factory-visual:latest';
 export function normalizePreview(input) {
   if (input === null || input === undefined || input === false) return null;
   if (typeof input !== 'object' || Array.isArray(input)) throw bad('preview must be an object like { command, port, routes }');
-  const known = ['command', 'port', 'routes', 'install', 'readyPath', 'startTimeoutSec', 'enabled']; const unknown = Object.keys(input).filter((k) => !known.includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" is not a preview setting. Settings: ${known.join(', ')}`);
+  const known = ['command', 'port', 'routes', 'install', 'readyPath', 'startTimeoutSec', 'enabled', 'image']; const unknown = Object.keys(input).filter((k) => !known.includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" is not a preview setting. Settings: ${known.join(', ')}`);
   const line = (v, name, max) => { const s = String(v ?? '').trim(); if (/[\r\n\0]/.test(s)) throw bad(`${name} must be one line (join steps with &&)`); if (s.length > max) throw bad(`${name} is too long (${max} characters at most)`); return s; };
   const command = line(input.command, 'command', 300); if (!command) throw bad('command is required: how to start the app, e.g. "npm run dev -- --port 4173 --host 127.0.0.1"');
   const port = Number(input.port); if (!Number.isInteger(port) || port < 1024 || port > 65535) throw bad('port must be a whole number from 1024 to 65535: the port the app listens on');
@@ -25,6 +25,7 @@ export function normalizePreview(input) {
   const install = line(input.install, 'install', 300); if (install) out.install = install;
   const ready = line(input.readyPath, 'readyPath', 100); if (ready) { if (!ready.startsWith('/')) throw bad('readyPath must start with /'); out.readyPath = ready; }
   if (input.startTimeoutSec !== undefined && input.startTimeoutSec !== '') { const t = Number(input.startTimeoutSec); if (!Number.isInteger(t) || t < 10 || t > 600) throw bad('startTimeoutSec must be 10 to 600'); out.startTimeoutSec = t; }
+  const image = line(input.image, 'image', 200); if (image) { if (!/^[a-z0-9][a-z0-9._\/:@-]{0,199}$/i.test(image)) throw bad('That does not look like a container image name'); out.image = image; }
   if (input.enabled !== undefined) out.enabled = !!input.enabled;
   return out;
 }

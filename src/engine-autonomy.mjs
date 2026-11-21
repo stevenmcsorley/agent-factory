@@ -24,7 +24,7 @@ export const autonomyMethods = {
       if (!this.cfg.autonomy?.allow) throw bad('Autonomous merging is switched off for the whole factory. Turn it on in Settings (or set_autonomy_allowed) first.');
       if (next.requireReviewer && !this._roleOn(p, 'reviewer')) throw bad('Autonomous mode needs the reviewer agent on for this project (set_project_roles), or set requireReviewer to false.');
       if (next.requireChecks && !(p.config?.verify || p.profile?.verify)) throw bad('Autonomous mode needs a test command for this project, so every change is machine-checked. Set one on the Code tab, or set requireChecks to false.');
-      if (!['github', 'local'].includes(hostKind(p))) throw bad(`Autonomous merging works with GitHub and the local forge so far, not ${hostKind(p)}.`);
+      if (!['github', 'local', 'gitlab', 'bitbucket'].includes(hostKind(p))) throw bad(`Autonomous merging works with GitHub, GitLab, Bitbucket and the local forge, not ${hostKind(p)} (a plain git remote has no pull requests to merge).`);
     }
     const before = p.autonomy ?? null; if (next) p.autonomy = next; else delete p.autonomy;
     this._persist(); this._audit({ what: 'autonomy', project: id, from: before, to: p.autonomy ?? null }); return this.autonomyStatus(id);
