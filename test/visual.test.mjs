@@ -61,3 +61,15 @@ test('autonomy: new visual problems, or a check that could not run, hold the mer
   assert.equal(mergeVerdict({ ...base, run: { ...base.run, visual: { status: 'pass' } } }).ok, true); assert.equal(mergeVerdict({ ...base, run: { ...base.run, visual: { status: 'warn' } } }).ok, true);
   assert.match(mergeVerdict({ ...base, run: { ...base.run, visual: { status: 'fail' } } }).blockers.join(), /visual check found/); assert.match(mergeVerdict({ ...base, run: { ...base.run, visual: { status: 'error' } } }).blockers.join(), /could not run/);
 });
+
+import { Engine } from '../src/engine.mjs';
+import { withDefaults } from '../src/config.mjs';
+import { callOp } from '../src/ops.mjs';
+test('switching the check on or off keeps the baseline; changing the app set-up discards it', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vb-'));
+  const e = new Engine(withDefaults({ stateDir: path.join(root, 'state'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [{ id: 'a', repo: 'me/a', base: 'main', tickets: { kind: 'file', path: path.join(root, 't.json') } }] }), { configPath: path.join(root, 'c.json'), factories: {} });
+  const pv = { command: 'npm run dev', port: 4173, routes: ['/'], enabled: false }; await callOp(e, 'set_preview', { project: 'a', preview: pv });
+  const f = path.join(e._visualDir('a'), 'baseline.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify({ at: new Date().toISOString(), keys: [], findings: [], counts: {}, shots: [] }));
+  await callOp(e, 'set_preview', { project: 'a', preview: { ...pv, enabled: true } }); assert.ok(fs.existsSync(f), 'on/off keeps it');
+  await callOp(e, 'set_preview', { project: 'a', preview: { ...pv, enabled: true, routes: ['/', '/x'] } }); assert.ok(!fs.existsSync(f), 'a different app set-up discards it');
+});

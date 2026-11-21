@@ -16,7 +16,8 @@ export const visualMethods = {
   setPreview(id, input) {
     const p = this.project(id); const before = p.preview ?? null; const next = normalizePreview(input);
     if (next) p.preview = next; else delete p.preview;
-    if (JSON.stringify(before) !== JSON.stringify(next)) fs.rmSync(path.join(this._visualDir(id), 'baseline.json'), { force: true });   // a different app set-up means a different baseline
+    const same = (x) => JSON.stringify({ ...(x ?? {}), enabled: undefined });   // switching the check on or off does not change what the app is, so it keeps its baseline
+    if (same(before) !== same(next)) fs.rmSync(path.join(this._visualDir(id), 'baseline.json'), { force: true });   // a different app set-up means a different baseline
     this._persist(); this._audit({ what: 'preview', project: id, from: before, to: next }); return this.getPreview(id);
   },
   // Runs the check on the base branch and keeps the result as the baseline: what is ALREADY wrong, so later changes are only judged on what they add.
