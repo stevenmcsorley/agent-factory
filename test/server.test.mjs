@@ -142,3 +142,27 @@ test('API: activity, metrics and run detail endpoints', async () => {
   assert.equal((await call('/api/runs/deadbeef')).status, 404); assert.equal((await call('/api/runs/not-hex!')).status, 404);
   close();
 });
+
+test('a new project can carry a repo analysis well past 64 KB, but ordinary calls stay small', async () => {
+  const { call, close } = await boot();
+  const big = { note: 'x'.repeat(200 * 1024) };
+  const ok = await call('/api/projects', { method: 'POST', body: { id: 'big', repo: 'me/big', profile: big } });
+  assert.notEqual(ok.status, 413, 'the add-project call must accept a large analysis');
+  const small = await call('/api/runs/anything', { method: 'POST', body: big });
+  assert.equal(small.status === 413 || small.status === 404, true);
+  const tooBig = await call('/api/projects', { method: 'POST', body: { id: 'huge', repo: 'me/huge', profile: { note: 'x'.repeat(5 * 1024 * 1024) } } });
+  assert.equal(tooBig.status, 413);
+  close();
+});
+
+test('MCP: a file attached to a project (base64) lands in its source material, and is listed for the agent', async () => {
+  const { call, close, e } = await boot();
+  const rpc = (name, args) => call('/mcp', { method: 'POST', body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } } }).then((r) => r.json());
+  const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+  const r = await rpc('add_source', { project: 'app', kind: 'design', title: 'Home page', filename: 'home.png', dataBase64: png.toString('base64') });
+  assert.equal(r.result.isError, undefined, JSON.stringify(r));
+  const pack = e.getPack('app'); assert.equal(pack.sources.length, 1); assert.equal(pack.sources[0].type, 'image/png');
+  const md = await rpc('add_source', { project: 'app', kind: 'prd', title: 'PRD', filename: 'prd.md', dataBase64: Buffer.from('# PRD\nBooking flow').toString('base64') });
+  assert.equal(md.result.isError, undefined); assert.equal(e.getPack('app').sources.length, 2);
+  close();
+});

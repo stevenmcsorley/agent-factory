@@ -506,8 +506,8 @@ export class Engine {
   // Brief, sources and (optionally) a plan request supplied when a project is created or added.
   async _seedPack(id, { brief, stack, decisions, sources, plan } = {}) {
     if (!brief && !stack && !decisions && !sources?.length) return {};
-    this.setPack(id, { brief, stack, decisions }); for (const s of sources ?? []) this.addSource(id, s);
-    const out = { pack: pk.completeness(pk.loadPack(this._packDir(id))) };
+    this.setPack(id, { brief, stack, decisions }); const failed = []; for (const s of (sources ?? []).slice(0, 10)) { try { this.addSource(id, s); } catch (e) { failed.push(`${s?.title ?? s?.filename ?? 'a source'}: ${e.message}`); } }
+    const out = { pack: pk.completeness(pk.loadPack(this._packDir(id))), ...(failed.length ? { sourcesFailed: failed } : {}) };
     if (plan) { try { out.planning = this.startPlanning(id); } catch (e) { out.planningError = e.message; } }
     return out;
   }

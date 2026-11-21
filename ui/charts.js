@@ -1,3 +1,4 @@
+import { qrPath } from './qr.js';
 import { s, h, anim } from './lib.js';
 
 // Dependency-free SVG/DOM visuals. Colours come from CSS classes so both themes work. No inline style attributes (strict CSP):
@@ -107,10 +108,12 @@ export function bars(days, { height = 170 } = {}) {
   wrap.append(svg); return wrap;
 }
 
-// A decorative-but-deterministic barcode derived from the run id, like the one on a real work-order traveler.
-export function barcode(id) {
-  const svg = s('svg', { viewBox: '0 0 220 38', height: 38, width: 220, class: 'barcode', role: 'img', 'aria-label': `Work order ${id}` });
-  let x = 4; const seq = `A${id}A`;
-  for (const c of seq) { const v = parseInt(c, 16); const bits = Number.isNaN(v) ? 9 : v; for (let b = 3; b >= 0; b--) { const w = (bits >> b) & 1 ? 3 : 1.5; svg.append(s('rect', { x, y: 0, width: w, height: 38 })); x += w + 2.2; } x += 2; }
-  svg.setAttribute('viewBox', `0 0 ${Math.ceil(x + 2)} 38`); svg.setAttribute('width', String(Math.ceil(x + 2))); return svg;
+// A real, scannable QR code for a finished run: it opens the pull request when there is one, otherwise it carries the run's repo, ticket and status as text.
+// Always dark on white with a quiet zone, whatever the theme, because scanners need the contrast.
+export function scanCode(run, link) {
+  const text = link || `agent-factory work order ${run.id} | ${run.repo ?? 'repo unknown'} | ticket #${run.ticket ?? '?'} | ${run.status ?? 'unknown'}`;
+  const { d, size } = qrPath(text, 'L');
+  const svg = s('svg', { viewBox: `0 0 ${size} ${size}`, class: 'scancode', role: 'img', 'aria-label': link ? 'QR code: opens the pull request' : 'QR code: run details' });
+  svg.append(s('rect', { width: size, height: size, rx: 1.5, fill: '#fff' }), s('path', { d, fill: '#111' }));
+  return svg;
 }

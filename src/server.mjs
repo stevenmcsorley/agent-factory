@@ -16,6 +16,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const UI = path.join(here, '..', 'ui');
 const TYPES = { '.woff2': 'font/woff2', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 const MAX_BODY = 64 * 1024;
+// Most calls are small. A new project carries the repo analysis (about 100 KB for a mid-sized repo) and can carry files; MCP calls can carry an attached file.
+const bodyLimit = (p) => (/\/pack\/sources$/.test(p) || /^\/mcp(-code)?$/.test(p) ? 12 * 1024 * 1024 : /^\/api\/projects(\/new)?$/.test(p) ? 4 * 1024 * 1024 : MAX_BODY);
 
 const same = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -138,13 +140,13 @@ export function createServer(engine, { token, allowedHosts }) {
       if (write && req.headers.origin && new URL(req.headers.origin).host !== host) return send(res, 403, { error: 'Cross-origin write refused' });
       if (url.pathname === '/mcp' || url.pathname === '/mcp-code') {
         if (req.method !== 'POST') return send(res, 405, { error: 'POST JSON-RPC to this endpoint' }, { Allow: 'POST' });
-        const body = await readJson(req);
+        const body = await readJson(req, bodyLimit(url.pathname));
         const out = Array.isArray(body) ? (await Promise.all(body.map((m) => handleRpc(engine, m, { code: url.pathname === '/mcp-code' })))).filter(Boolean) : await handleRpc(engine, body, { code: url.pathname === '/mcp-code' });
         return out === null || (Array.isArray(out) && !out.length) ? (res.writeHead(202, { 'Cache-Control': 'no-store' }), res.end()) : send(res, 200, out);
       }
       for (const [method, re, fn] of routes) {
         const m = re.exec(url.pathname);
-        if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req, /\/pack\/sources$/.test(url.pathname) ? 12 * 1024 * 1024 : MAX_BODY) : {}, url) ?? {});
+        if (m && method === req.method) return send(res, 200, await fn(m, ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req, bodyLimit(url.pathname)) : {}, url) ?? {});
       }
       send(res, 404, { error: 'No such endpoint' });
     } catch (e) {

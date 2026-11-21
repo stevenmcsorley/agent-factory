@@ -8,6 +8,35 @@ const KIND = { prd: 'PRD', research: 'Research', design: 'Design', reference: 'R
 const b64 = (buf) => { let s = ''; const bytes = new Uint8Array(buf); for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
+// ================================================================== ATTACHMENTS (new-project wizard)
+// Files and links picked before a project exists. They are held in the browser and sent to the project's source material the moment it is created.
+export const ACCEPT = '.md,.txt,.json,.csv,.html,.pdf,.png,.jpg,.jpeg,.gif,.webp,.svg';
+export const MAX_FILE = 5 * 1024 * 1024;
+export function attachments(list, repaint) {
+  const pickFiles = (files) => { for (const f of files) { if (f.size > MAX_FILE) { toast(`${f.name} is over 5 MB`, 'bad'); continue; } if (list.length >= 10) { toast('Ten attachments at most; add more later in the Brief tab', 'bad'); break; } list.push({ file: f, kind: /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name) ? 'design' : /\.(pdf|md|txt|docx?)$/i.test(f.name) ? 'prd' : 'reference' }); } repaint(); };
+  const input = h('input', { type: 'file', multiple: true, accept: ACCEPT, class: 'sr-only', 'aria-label': 'Attach files', onchange: () => { pickFiles([...input.files]); input.value = ''; } });
+  const link = h('input', { placeholder: 'Or paste a link: Figma, Notion, a Google Doc…', 'aria-label': 'Link' });
+  const addLink = () => { const v = link.value.trim(); if (!v) return; try { const u = new URL(v); if (!/^https?:$/.test(u.protocol)) throw new Error('x'); } catch { toast('That is not a valid link (include https://)', 'bad'); return; } list.push({ url: v, kind: 'reference' }); link.value = ''; repaint(); };
+  link.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addLink(); } });
+  const drop = h('label', { class: 'dropzone' }, icon('plus', 14), ' Drop files here or choose them ', h('small', { class: 'muted' }, 'PDF, Markdown, images, text, JSON, CSV · 5 MB each'), input);
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); }); drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); pickFiles([...(e.dataTransfer?.files ?? [])]); });
+  return h('div', { class: 'attach' }, drop,
+    h('div', { class: 'row nowrap gap-t' }, link, h('button', { class: 'btn', type: 'button', onclick: addLink }, 'Add link')),
+    list.length ? h('ul', { class: 'attach-list' }, list.map((a, i) => h('li', {}, h('span', { class: 'mono small' }, a.file ? `${a.file.name} · ${size(a.file.size)}` : a.url),
+      h('select', { 'aria-label': 'Kind', onchange: (e) => { a.kind = e.target.value; } }, Object.entries(KIND).map(([v, l]) => h('option', { value: v, selected: v === a.kind }, l))),
+      h('button', { class: 'btn small ghost', type: 'button', 'aria-label': `Remove ${a.file?.name ?? a.url}`, onclick: () => { list.splice(i, 1); repaint(); } }, 'Remove')))) : null);
+}
+// Send queued attachments to a project that now exists. Returns the ones that failed, so the caller can say so instead of silently dropping them.
+export async function uploadAttachments(list, id) {
+  const failed = [];
+  for (const a of list) {
+    try { const body = a.file ? { kind: a.kind, title: a.file.name, filename: a.file.name, dataBase64: b64(await a.file.arrayBuffer()) } : { kind: a.kind, url: a.url };
+      await api(`/projects/${id}/pack/sources`, { method: 'POST', body }); } catch (e) { failed.push(`${a.file?.name ?? a.url}: ${e.message}`); }
+  }
+  list.length = 0; return failed;
+}
+
 // ================================================================== BRIEF
 // A URL other tools can POST alerts to; each alert becomes a ticket (with the same clarity check, de-duplication and a rate limit).
 function hookCard(id) {

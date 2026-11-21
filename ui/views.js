@@ -1,10 +1,10 @@
 import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, STATES, session, keyed, persist } from './lib.js';
 export { act };
 import { codeTab, openCode } from './code.js';
-import { briefTab, planTab } from './pack.js';
+import { briefTab, planTab, attachments, uploadAttachments } from './pack.js';
 import { trackerTab, ticketPage } from './tracker.js';
 import { prRowsLocal, prPage, publishCard } from './forge.js';
-import { createLine, odometer, miniBars, bars, barcode, stationGlyph } from './charts.js';
+import { createLine, odometer, miniBars, bars, scanCode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
 const since = (iso) => h('span', { class: 'since', 'data-since': iso }, dur(Date.now() - new Date(iso)));
@@ -290,7 +290,7 @@ export const runPage = {
     const link = run.prLink ?? (typeof run.pr === 'string' ? run.pr : null);
     const reached = run.phases.map((p) => p.name); const maxMs = Math.max(1, ...run.phases.map((p) => p.ms ?? 0));
     return [h('a', { class: 'back', href: `#/project/${run.project}` }, icon('arrow', 12, 'flip'), run.project),
-      h('div', { class: 'wo-head' }, h('div', {}, h('span', { class: 'wo-id' }, `Work order ${woId(run.id)}`), h('h1', {}, run.title ?? woId(run.id)), h('p', { class: 'sub mono small' }, `${run.round ? `Feedback round ${run.round} · ` : ''}${new Date(run.started).toLocaleString()}`), barcode(run.id), h('div', { class: 'row gap-t' }, link ? ext(link, [icon('pr', 13), ' Open pull request'], 'btn primary') : null)),
+      h('div', { class: 'wo-head' }, h('div', {}, h('span', { class: 'wo-id' }, `Work order ${woId(run.id)}`), h('h1', {}, run.title ?? woId(run.id)), h('p', { class: 'sub mono small' }, `${run.round ? `Feedback round ${run.round} · ` : ''}${new Date(run.started).toLocaleString()}`), h('div', { class: 'scan' }, scanCode(run, link), h('div', { class: 'small' }, h('b', {}, link ? 'Scan to open the pull request' : 'Scan for the run details'), h('div', { class: 'muted mono' }, [run.repo, run.ticket != null ? `ticket #${run.ticket}` : null, run.status].filter(Boolean).join(' · ')), run.commit ? h('div', { class: 'muted mono' }, `commit ${String(run.commit).slice(0, 10)}`) : null)), h('div', { class: 'row gap-t' }, link ? ext(link, [icon('pr', 13), ' Open pull request'], 'btn primary') : null)),
         h('div', { class: `rubber ${verdict[0]}` }, verdict[1], h('small', {}, verdict[2]))),
       h('div', { class: 'stats' }, stat('Duration', dur(ms)), stat('Attempts', run.attempts ?? run.round ?? '–'), stat('Files changed', run.changed?.length ?? 0), stat('Tokens', run.tokens ? num(run.tokens.input + run.tokens.output) : '–'), stat('Cost', run.costUsd ? `$${run.costUsd.toFixed(3)}` : '–')),
       card('reg', h('div', { class: 'card-h' }, h('h2', {}, 'Route sheet')), h('ol', { class: 'route' }, STAGES.map(([k, label], i) => { const ph = run.phases.find((p) => p.name === k); const last = reached.at(-1) === k && !ok;
@@ -359,7 +359,7 @@ export const health = {
 // ---- add / create project
 // The wizard is driven by /api/catalog, so a new tracker or code host appears here automatically once it is registered on the server.
 let npMode = 'create';   // the Studio's "New project" lands on the brief-first form; "Connect an existing repo" sets sessionStorage np=existing
-const wiz = { host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '', analysis: null, verify: '' };
+const wiz = { files: [], host: { kind: 'github', fields: {}, token: '' }, repo: '', hostCheck: null, source: { kind: 'github', fields: {}, token: '', pick: '' }, srcCheck: null, signup: null, id: '', base: '', analysis: null, verify: '' };
 const slugId = (r) => (r.split(/[?#]/)[0].replace(/\/+$/, '').replace(/\.git$/i, '').split(/[/:]/).pop() || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '');
 
 export const newProject = {
@@ -407,7 +407,7 @@ export const newProject = {
           ...(wiz.host.kind !== 'github' ? { host: { kind: wiz.host.kind, ...wiz.host.fields }, hostSecret: wiz.host.token || undefined } : {}),
           source: { kind: wiz.source.kind, fields: wiz.source.fields, ...(sd.pick ? { pick: wiz.source.pick } : {}) }, ...(wiz.source.token ? { secret: wiz.source.token } : {}),
           ...(wiz.analysis?.profile ? { profile: wiz.analysis.profile, ...(wiz.verify.trim() && wiz.verify.trim() !== wiz.analysis.profile.verify ? { verify: wiz.verify.trim() } : {}) } : {}) };
-        const r = await api('/projects', { method: 'POST', body }); wiz.host.token = wiz.source.token = ''; wiz.analysis = null; wiz.verify = ''; location.hash = `#/project/${r.id}`; }, 'Project added') }, icon('plus', 15), 'Add project');
+        const r = await api('/projects', { method: 'POST', body }); wiz.host.token = wiz.source.token = ''; wiz.analysis = null; wiz.verify = ''; const failed = await uploadAttachments(wiz.files, r.id); if (failed.length) toast(`Project added. Not attached: ${failed.join('; ')}`, 'bad'); location.hash = `#/project/${r.id}`; }, 'Project added') }, icon('plus', 15), 'Add project');
       return h('div', { class: 'wiz' },
         card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, '1'), h('div', {}, h('h2', {}, 'Where does your code live?'), h('p', { class: 'muted small' }, 'The factory pushes a branch and opens a draft pull request here. It never merges.'))),
           h('div', { class: 'opts' }, catalog.hosts.map(hostCard)), h('div', { class: 'fields' }, hd.fields.map((f) => fieldRow(f, wiz.host))),
@@ -419,6 +419,7 @@ export const newProject = {
           wiz.srcCheck ? (wiz.srcCheck.error ? check(false, wiz.srcCheck.error) : check(true, `Connected as ${wiz.srcCheck.user.name}`)) : null,
           wiz.srcCheck?.projects?.length && sd.pick ? h('div', {}, h('label', {}, `${sd.pick.label} *`), h('select', { onchange: (e) => { wiz.source.pick = e.target.value; paint(); } }, wiz.srcCheck.projects.map((p) => h('option', { value: String(p.id), selected: String(p.id) === wiz.source.pick }, p.name)))) : null,
           sd.kind === 'github' ? h('p', { class: 'muted small' }, 'Issues in the repository itself. Label one ', h('code', {}, 'agent-ready'), ' (or queue one from the prompt bar).') : h('p', { class: 'muted small' }, 'Tokens are stored in an owner-only file on this machine, never in the config, and are checked before anything is saved.')),
+        card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, '+'), h('div', {}, h('h2', {}, 'Anything the agent should read? (optional)'), h('p', { class: 'muted small' }, 'A PRD, designs, screenshots, notes or links. The agent gets the relevant parts with every ticket, and you can add more later in the Brief tab.'))), attachments(wiz.files, paint)),
         card('step', h('div', { class: 'step-h' }, h('span', { class: 'sn' }, '3'), h('div', {}, h('h2', {}, 'Name it'))), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Name in the factory'), name), h('div', {}, h('label', {}, 'Base branch'), base)),
           h('div', { class: 'row gap-t' }, add, !ready ? h('span', { class: 'muted small' }, 'Check access (step 1) and test the connection (step 2) first.') : null)));
     };
@@ -432,8 +433,8 @@ export const newProject = {
       const submit = act(async () => {
         const name = f.name.value.trim(); const brief = {}; for (const k of ['goal', 'users', 'scope', 'nonGoals', 'success', 'constraints']) if (bf[k].value.trim()) brief[k] = bf[k].value.trim();
         const hasBrief = brief.goal && brief.scope; if (!hasBrief && !f.spec.value.trim()) throw new Error('Describe the project: fill in at least Goal and In scope, or use the quick start box');
-        const body = { id: slugId(name), name, host: f.where.value, ...(f.verify.value.trim() ? { verify: f.verify.value.trim() } : {}), description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, target: target.value, ...(hasBrief ? { brief, stack: bf.stack.value.trim() || undefined, plan: plan.checked } : { spec: f.spec.value.trim() }) };
-        const r = await api('/projects/new', { method: 'POST', body }); projTab = hasBrief ? (plan.checked ? 'plan' : 'brief') : 'board'; location.hash = `#/project/${r.project.id}`; }, 'Project created');
+        const body = { id: slugId(name), name, host: f.where.value, ...(f.verify.value.trim() ? { verify: f.verify.value.trim() } : {}), description: f.desc.value, visibility: f.vis.value, template: f.tpl.value, target: target.value, ...(hasBrief ? { brief, stack: bf.stack.value.trim() || undefined, plan: plan.checked && !wiz.files.length } : { spec: f.spec.value.trim() }) };   // with attachments, planning starts after they are uploaded so the planner can read them
+        const r = await api('/projects/new', { method: 'POST', body }); if (wiz.files.length) { const failed = await uploadAttachments(wiz.files, r.project.id); if (failed.length) toast(`Created. Not attached: ${failed.join('; ')}`, 'bad'); if (hasBrief && plan.checked) await api(`/projects/${r.project.id}/plan`, { method: 'POST', body: {} }).catch((e) => toast(`Created, but planning did not start: ${e.message}`, 'bad')); } projTab = hasBrief ? (plan.checked ? 'plan' : 'brief') : 'board'; location.hash = `#/project/${r.project.id}`; }, 'Project created');
       return [
         step('1', 'The basics', 'Where the code lives, and what to call it.', h('label', {}, 'Where should the code live?'), f.where, h('div', { class: 'note info' }, 'On this machine needs no account: you review and merge here, then publish to GitHub or any git remote when ready. A GitHub repository is created from the starter template. For GitLab or Bitbucket, create the empty repo there and use “Existing repo”.'),
           h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Repository name'), f.name), h('div', {}, h('label', {}, 'Description'), f.desc)), h('label', {}, 'Test command'), f.verify, h('p', { class: 'small muted' }, 'A brand-new repository has nothing to detect, so without this the factory cannot check its own work and says so on every PR.'), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Starter template'), f.tpl), h('div', {}, h('label', {}, 'Visibility'), f.vis))),
@@ -442,9 +443,10 @@ export const newProject = {
           h('label', {}, 'In scope *'), ta('scope', 5, 'The features and behaviour that must exist. A bullet list works well.'), h('div', { class: 'two' }, h('div', {}, h('label', {}, 'Out of scope'), ta('nonGoals', 3, 'What we are deliberately NOT building.')), h('div', {}, h('label', {}, 'Done means'), ta('success', 3, 'How we will know it works: concrete, checkable criteria.'))),
           h('label', {}, 'Constraints'), ta('constraints', 2, 'Performance, security, compliance, deadlines, things that must not change.')),
         step('3', 'How to build it', 'Conventions the agent must follow.', h('label', {}, 'Stack and conventions'), ta('stack', 3, 'e.g. TypeScript strict, Fastify, Vitest, one module per feature, no default exports.'),
-          h('p', { class: 'muted small' }, 'Have a PRD, designs or research? Create the project, then attach them in the Brief tab (files, links or pasted text).')),
-        step('4', 'Target', 'Where is this going? You can change it later, and a human always approves a go-live.', h('label', {}, 'What are we aiming for?'), target),
-        step('5', 'Plan and start', 'The agent turns the brief into epics and small tickets. Nothing is built until you approve the plan.',
+          h('p', { class: 'muted small' }, 'Conventions apply to every change the agent makes.')),
+        step('4', 'Material for the agent', 'PRDs, designs, screenshots, research, notes or links (optional). The planner and every ticket get the relevant parts. You can add more later in the Brief tab, or over MCP.', attachments(wiz.files, paint)),
+        step('5', 'Target', 'Where is this going? You can change it later, and a human always approves a go-live.', h('label', {}, 'What are we aiming for?'), target),
+        step('6', 'Plan and start', 'The agent turns the brief into epics and small tickets. Nothing is built until you approve the plan.',
           h('label', { class: 'check' }, plan, ' Draft a delivery plan from the brief as soon as the project is created (recommended)'),
           h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: submit }, icon('spark', 15), 'Create project'), h('span', { class: 'muted small' }, `Creates ${who.login || 'your'}/<name> on GitHub and scaffolds the template.`)),
           h('details', { class: 'quick' }, h('summary', {}, 'Just want to start fast? Use a one-box description instead'), h('p', { class: 'muted small' }, 'Skips the brief and plan: your description becomes the first ticket and the factory starts on it straight away.'), f.spec, hint)),
