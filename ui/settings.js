@@ -95,14 +95,15 @@ function historyCard(s) {
 }
 
 function rolesCard(r, s, ctx) {
-  const known = s.models.length > 0; const rows = Object.entries(r.roles).map(([k, v]) => {
+  const known = s.models.length > 0; const shown = Object.entries(r.roles).filter(([, v]) => v.toggle || s.agent.acceptsModel);   // an agent with no model setting has nothing to configure on the always-on roles
+  const rows = shown.map(([k, v]) => {
     const model = known ? h('select', { 'aria-label': `${v.label} model` }, [h('option', { value: '' }, `Same as the default (${r.default.model ?? 'Codex default'})`), ...s.models.map((m) => h('option', { value: m.slug, selected: m.slug === v.agent.model }, m.name))]) : h('input', { value: v.agent.model ?? '', placeholder: 'same as the default', 'aria-label': `${v.label} model` });
     const eff = h('select', { 'aria-label': `${v.label} reasoning effort` }, [['', 'default'], ...['minimal', 'low', 'medium', 'high', 'xhigh'].map((e) => [e, e])].map(([x, l]) => h('option', { value: x, selected: (v.agent.reasoningEffort ?? '') === x }, l)));
-    const on = h('input', { type: 'checkbox', id: `role-${k}`, 'aria-label': `${v.label} on` }); on.checked = v.enabled; on.disabled = !v.toggle;
+    const on = h('input', { type: 'checkbox', id: `role-${k}`, 'aria-label': `${v.label} on` }); on.checked = v.enabled; on.disabled = !v.toggle; if (!v.toggle) on.hidden = true;
     const save = h('button', { class: 'btn small', onclick: async () => { try { await api('/roles', { method: 'POST', body: { roles: { [k]: { ...(v.toggle ? { enabled: on.checked } : {}), ...(s.agent.acceptsModel ? { agent: { model: model.value.trim() || null, ...(s.agent.acceptsEffort ? { reasoningEffort: eff.value || null } : {}) } } : {}) } } } }); toast(`${v.label} saved`, 'ok'); ctx.rerender(); } catch (e) { toast(e.message, 'bad'); } } }, 'Save');
-    return h('div', { class: 'rolerow' }, h('div', {}, h('label', { class: 'check', for: `role-${k}` }, on, h('b', {}, ` ${v.label}`)), h('small', { class: 'help muted' }, v.blurb)), s.agent.acceptsModel ? model : h('span', { class: 'muted small' }, 'n/a'), s.agent.acceptsEffort ? eff : h('span', {}), save);
+    return h('div', { class: 'rolerow' }, h('div', {}, h('label', { class: 'check', for: `role-${k}` }, on, h('b', {}, `${v.toggle ? ' ' : ''}${v.label}`), v.toggle ? null : h('span', { class: 'muted small' }, ' · always on')), h('small', { class: 'help muted' }, v.blurb)), s.agent.acceptsModel ? model : null, s.agent.acceptsEffort ? eff : null, save);
   });
-  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agent roles')), h('p', { class: 'muted small' }, 'The same agent can do different jobs, each with its own model and effort: a cheaper one to review, a stronger one to design. Roles you leave alone use the default above. The reviewer can also be switched per project, on its Autopilot tab.'), h('div', { class: 'roles' }, rows),
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agent roles')), h('p', { class: 'muted small' }, 'The same agent can do different jobs, each with its own model and effort: a cheaper one to review, a stronger one to design. Roles you leave alone use the default above. The reviewer can also be switched per project, on its Autopilot tab.'), h('div', { class: 'roles' }, rows), s.agent.acceptsModel ? null : h('p', { class: 'muted small' }, 'The other roles (builder, designer, fixer, planner, skill writer) are always on and use the agent above.'),
     h('p', { class: 'muted small' }, h('a', { href: '#/skills' }, 'Edit the skills each role receives')));
 }
 

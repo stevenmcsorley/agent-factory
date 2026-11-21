@@ -1,4 +1,4 @@
-import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, STATES, session, keyed, persist } from './lib.js';
+import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, CORE_STAGES, OPTIONAL_STAGES, STATES, session, keyed, persist } from './lib.js';
 export { act };
 import { codeTab, openCode } from './code.js';
 import { briefTab, planTab, attachments, uploadAttachments } from './pack.js';
@@ -24,9 +24,9 @@ const woId = (id) => `WO-${String(id).toUpperCase()}`;
 
 // ---- live pipeline (used on a run page while the run is in flight)
 export function pipeline(run, { active = false } = {}) {
-  const order = STAGES.map(([k]) => k); const reached = run.phases.map((p) => p.name);
+  const reached = run.phases.map((p) => p.name); const stages = STAGES.filter(([k]) => !OPTIONAL_STAGES.includes(k) || reached.includes(k)); const order = stages.map(([k]) => k);
   const cur = active ? run.phase : reached.at(-1); const ci = order.indexOf(cur);
-  return h('ol', { class: 'pipe' }, STAGES.map(([k, label], i) => { const state = active ? (i < ci ? 'done' : i === ci ? 'active' : 'todo') : (reached.includes(k) ? 'done' : 'todo');
+  return h('ol', { class: 'pipe' }, stages.map(([k, label], i) => { const state = active ? (i < ci ? 'done' : i === ci ? 'active' : 'todo') : (reached.includes(k) ? 'done' : 'todo');
     return h('li', { class: `stage ${state}` }, h('span', { class: 'node' }, state === 'done' ? icon('check', 13) : i + 1), h('span', { class: 'lbl' }, label)); }));
 }
 
@@ -46,7 +46,7 @@ export function intake(projects, rerender) {
 
 // The line card lives for the whole page visit and is updated in place (see persist()).
 function lineCard(state0) {
-  const L = createLine(STAGES);
+  const L = createLine(CORE_STAGES);
   const stamp = h('span', { class: 'stamp' }); const follow = h('a', { class: 'btn small', href: '#/', hidden: true }, 'Follow', icon('arrow', 12));
   const el = h('section', { class: 'card line-card reg' }, h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg));
   el.__update = (st) => {
@@ -85,7 +85,7 @@ export const overview = {
       stable(h('section', { class: 'spec' },
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),
-        h('div', {}, h('span', { class: 'eyebrow' }, 'Median time to PR'), h('div', { class: 'num' }, t.runs ? dur(t.p50Ms) : '–'), h('div', { class: 'foot' }, t.runs ? `mean ${dur(t.avgMs)}` : 'no runs yet')),
+        h('div', {}, h('span', { class: 'eyebrow' }, 'Median time to PR'), h('div', { class: 'num dur' }, t.runs ? dur(t.p50Ms) : '–'), h('div', { class: 'foot' }, t.runs ? `mean ${dur(t.avgMs)}` : 'no runs yet')),
         h('a', { class: 'spec-link', href: '#/inbox', title: 'Open your inbox' }, h('span', { class: 'eyebrow' }, 'Waiting on you'), h('div', { class: `num ${attention ? 'red' : ''}` }, odometer(inReview, 1), h('small', {}, 'to review')), h('div', { class: 'foot' }, attention ? `${attention} stuck or need info` : 'nothing stuck', ' ', h('b', { class: 'go' }, inReview + attention ? 'Open inbox →' : ''))),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Capacity today'), h('div', { class: 'num' }, left == null ? '∞' : odometer(left, 1), left == null ? null : h('small', {}, `of ${cap}`)), cap ? h('div', { class: 'cap' }, Array.from({ length: ticks }, (_, i) => h('i', { class: i < usedTicks ? 'on' : '' }))) : null, h('div', { class: 'foot' }, st.today.maxCostUsd ? `$${st.today.costUsd} of $${st.today.maxCostUsd}` : 'subscription: no cost reported'))),
         'spec', [shipped, t, left, inReview, attention, st.today.costUsd]),
@@ -259,7 +259,7 @@ export const project = {
           m ? h('span', { class: 'muted small mono' }, `${m.ok}/${m.runs} shipped${m.avgMs ? ` · avg ${dur(m.avgMs)}` : ''}`) : null)),
         h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { projTab = 'new'; ctx.rerender(); } }, icon('plus', 12), 'New ticket'), h('button', { class: 'btn', onclick: act(() => api(`/projects/${id}/${p.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), p.paused ? 'Cell resumed' : 'Cell paused', ctx.rerender) }, icon(p.paused ? 'play' : 'pause', 12), p.paused ? 'Resume' : 'Pause'),
           h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Remove ${id} from the factory? The repository itself is untouched.`)) { await act(() => api(`/projects/${id}`, { method: 'DELETE' }), 'Removed')(); location.hash = '#/projects'; } } }, 'Remove'))),
-      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; openPrNo = null; ctx.rerender(); } }, t))), d.tab === 'board' ? planBanner(p, (t) => { projTab = t; ctx.rerender(); }) : null, d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null, body]; },
+      h('div', { class: 'tabs', role: 'tablist' }, tabs.map(([k, t]) => h('button', { role: 'tab', 'aria-selected': String(d.tab === k), class: d.tab === k ? 'on' : '', onclick: () => { projTab = k; openPrNo = null; ctx.rerender(); } }, t))), d.tab === 'board' ? planBanner(p, (t) => { projTab = t; ctx.rerender(); }) : null, body, d.tab === 'board' ? healthCard(p.profile, { job: d.job, onReanalyze: act(() => api(`/projects/${id}/analyze`, { method: 'POST', body: {} }), 'Analysis started', ctx.rerender), onInspect: (sub) => { openCode(sub); projTab = 'code'; ctx.rerender(); } }) : null]; },
 };
 
 function board(tickets, openTicket) {
