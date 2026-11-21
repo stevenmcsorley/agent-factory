@@ -13,7 +13,7 @@ import { makeIgnore } from './ignore.mjs';
 import { getPrompt } from './prompts.mjs';
 import { coverageGap } from './coverage.mjs';
 import { feedbackFromReview } from './review.mjs';
-import { parseAllowedFiles, outsideAllowlist } from './allowlist.mjs';
+import { parseAllowedFiles, outsideAllowlist, overlaps } from './allowlist.mjs';
 
 export function buildPrompt(t, extra = '', profile = '', context = '', rules = getPrompt('task-rules')) {
   return [
@@ -50,7 +50,14 @@ export async function tick({ tickets, sandbox, agent, vcs, config, stateDir }) {
   // Do not start more work than review can absorb: once this many agent PRs are waiting for a human, stop claiming until some are merged or closed.
   if (config.maxOpenReviews) { const waiting = (await tickets.listAgentTickets()).filter((x) => x.state !== 'CLOSED' && (x.labels ?? []).includes('agent-review')).length; if (waiting >= config.maxOpenReviews) return [{ status: 'review-backlog', open: waiting, cap: config.maxOpenReviews }]; }
   const polled = await tickets.poll(); for (const t of polled) config.recordEvent?.({ ticket: t.id, event: 'ready' });    // everything waiting, not just what this tick will start
-  const queue = polled.slice(0, config.maxConcurrent ?? 1);
+  // A ticket that declares its files (allowed-files) waits while an open PR changes any of them: two changes to the same files would only conflict.
+  let ready = polled; config.setHolds?.([]);
+  if (config.openChanges && polled.some((t) => parseAllowedFiles(t.body))) {
+    const open = await config.openChanges().catch(() => []); const holds = [];
+    ready = polled.filter((t) => { const allow = parseAllowedFiles(t.body); if (!allow) return true; for (const o of open) { const hit = overlaps(allow, o.files); if (hit.length) { holds.push({ ticket: t.id, reason: `waiting for PR #${o.pr}, which changes the same files (${hit.slice(0, 3).join(', ')})` }); return false; } } return true; });
+    config.setHolds?.(holds);
+  }
+  const queue = ready.slice(0, config.maxConcurrent ?? 1);
   const runs = await Promise.all(queue.map((t) => processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases })));
   return [...recovered.map((r) => ({ status: `recovered-${r.action}`, ticket: r.ticket })), ...runs];
 }

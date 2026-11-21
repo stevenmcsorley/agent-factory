@@ -27,7 +27,7 @@ export const scheduleMethods = {
     }
     return due.sort((a, b) => (a.schedule?.priority ?? 5) - (b.schedule?.priority ?? 5));
   },
-  waiting(id) { const p = this.project(id); const d = this._due(p); return { project: id, waiting: !d.allowed, reasons: d.reasons, schedule: p.schedule ?? null, usedTodayMs: usedToday(readRuns(this.cfg.stateDir), id) }; },
+  waiting(id) { const p = this.project(id); const d = this._due(p); return { project: id, waiting: !d.allowed, reasons: d.reasons, heldTickets: this.holds?.get(id) ?? [], schedule: p.schedule ?? null, usedTodayMs: usedToday(readRuns(this.cfg.stateDir), id) }; },
   setSchedule(id, input) {
     const p = this.project(id); const before = p.schedule ?? null; const next = normalizeSchedule(input);
     if (next) p.schedule = next; else delete p.schedule;

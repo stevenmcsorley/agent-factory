@@ -34,3 +34,5 @@ A ticket can include a fenced block listing the only files that may change:
     ```
 
 A change touching anything else is refused: the agent gets one chance to put the extra files back, and if it does not, nothing is pushed.
+
+A ticket that declares `allowed-files` also **waits while an open pull request changes any of those files**, so two changes to the same files do not collide. It goes as soon as that PR is merged or closed; the reason is shown on the project's Autopilot tab. Tickets without the block are never held.

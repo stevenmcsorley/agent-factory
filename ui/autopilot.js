@@ -17,6 +17,7 @@ function waitingCard(w) {
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('clock', 17), 'Right now')),
     reasons.length ? h('div', {}, h('p', {}, 'Ready tickets are not being picked up, because:'), h('ul', { class: 'reasons' }, reasons.map((r) => h('li', {}, h('b', {}, r.reason), r.nextAt ? h('span', { class: 'muted small' }, ` · resumes ${new Date(r.nextAt).toLocaleString()}`) : null))))
       : h('p', {}, h('span', { class: 'pill2 solid' }, 'clear'), ' Nothing is holding this project back. Ready tickets are taken on the next cycle.'),
+    w.heldTickets?.length ? h('div', {}, h('p', {}, 'Tickets held so they do not collide with an open pull request:'), h('ul', { class: 'reasons' }, w.heldTickets.map((t) => h('li', {}, h('b', {}, `#${t.ticket}`), h('span', { class: 'muted small' }, ` ${t.reason}`))))) : null,
     w.schedule?.hoursPerDay ? h('p', { class: 'muted small' }, `Agent time used today: ${hours(w.usedTodayMs)} of ${w.schedule.hoursPerDay} h.`) : null);
 }
 

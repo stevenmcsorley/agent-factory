@@ -8,7 +8,7 @@ Written after a long real run: 17 tickets taken from "the projects page looks ba
 | 2 | Nothing watches what happens after a merge | Two deploys failed on a test the factory never ran; the factory did not notice | **Built** (`src/deploywatch.mjs`, Inbox) |
 | 3 | The test command covers one folder of a monorepo | A ticket touching `backend/` would pass a `cd frontend && npm test` check and look verified | **Built** (`src/coverage.mjs`, PR note) |
 | 4 | "Only these files may change" is not enforced | The agent changed one extra file; the gate said OK | **Built** (`src/allowlist.mjs`, an `allowed-files` block in the ticket; see AUTOPILOT.md) |
-| 5 | Tickets that touch the same files are not sequenced | Ordering and rebasing were done by hand | **Not built** (design below) |
+| 5 | Tickets that touch the same files are not sequenced | Ordering and rebasing were done by hand | **Partly built**: a ticket with an `allowed-files` block waits while an open PR changes any of those files, and the reason shows on the Autopilot tab. Tickets that do not declare files are not held, and there is no automatic rebase |
 | 6 | The factory stops silently at limits | The daily run cap was hit and a ticket just sat there | Mostly built: `why_waiting` and the Autopilot tab list every reason per project with when it resumes. Not yet shown on each ticket, and no notifications |
 
 ## Built

@@ -138,3 +138,15 @@ test('allowed-files parsing: comments, junk and path escapes are dropped', () =>
   assert.deepEqual(outsideAllowlist(['src/a/b.js', 'docs/x.md', 'abs.js'], ['src/**', 'abs.js']), ['docs/x.md']);
   assert.deepEqual(outsideAllowlist(['lib/x.js', 'libs/y.js'], ['lib/']), ['libs/y.js']);
 });
+
+test('overlap: a ticket that declares files waits for an open PR touching them, and goes when that PR is gone', async () => {
+  const { deps, tpath } = setup('echo hi > b.txt', 'test -f b.txt'); withBody(tpath, 'Make b.txt say hi.\n\n```allowed-files\nb.txt\n```\n');
+  let open = [{ pr: 9, files: ['b.txt'] }]; let holds = [];
+  deps.config.openChanges = async () => open; deps.config.setHolds = (h) => { holds = h; };
+  assert.deepEqual(await tick(deps), []); assert.match(holds[0].reason, /waiting for PR #9.*b\.txt/); assert.equal(JSON.parse(fs.readFileSync(tpath))[0].labels[0], 'agent-ready');
+  open = [{ pr: 9, files: ['docs/x.md'] }]; assert.equal((await tick(deps))[0].status, 'ok'); assert.deepEqual(holds, []);
+});
+test('overlap: tickets without a declared file list are never held', async () => {
+  const { deps } = setup('echo hi > b.txt', 'test -f b.txt'); let asked = false; deps.config.openChanges = async () => { asked = true; return [{ pr: 9, files: ['b.txt'] }]; };
+  assert.equal((await tick(deps))[0].status, 'ok'); assert.equal(asked, false, 'no look-up when nothing declares files');
+});

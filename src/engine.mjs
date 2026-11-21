@@ -23,7 +23,7 @@ import { agents, codexExecArgs } from './adapters/agents.mjs';
 import { LIMIT_FIELDS, LIMIT_DEFAULTS, MODEL_AGENTS, EFFORT_AGENTS, readCodexModels, validateAgentPatch, validateLimitsPatch, parseCodexHeader } from './settings.mjs';
 import { gitVcs } from './adapters/vcs.mjs';
 import { startEgress } from './egress.mjs';
-import { spentToday, runsToday } from './budget.mjs';
+import { spentToday, runsToday, readRuns } from './budget.mjs';
 import { validateConfig, saveConfig } from './config.mjs';
 import { stateOf } from './ops.mjs';
 import { normalizeRepo } from './repoRef.mjs';
@@ -107,6 +107,8 @@ export class Engine {
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._designContext?.(p.id), this._planContext(p, t), this._partsContext(p, t).text, this._skillsText('builder', p.id)].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
+      setHolds: (list) => { (this.holds ??= new Map()).set(p.id, list); },
+      openChanges: async () => { const prs = await host.listAgentPrs(); const runs = readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && Array.isArray(r.changed)); return prs.map((pr) => ({ pr: pr.number, files: runs.filter((r) => Number(/(\d+)$/.exec(String(r.pr))?.[1]) === pr.number).flatMap((r) => r.changed.map((f) => String(f).replace(/^\S+\s+/, ''))) })).filter((o) => o.files.length); },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); this._materializeDesigns(p.id, wsDir); },
       recordEvent: (ev) => this.recordEvent(p.id, ev.ticket, ev.event),
       briefRev: () => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); return pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions) ? pk.revision(pack) : undefined; },

@@ -17,3 +17,6 @@ export function outsideAllowlist(files, patterns) {
   const res = patterns.map(globToRegExp);
   return files.filter((f) => !res.some((re) => re.test(f)));
 }
+
+// Do a ticket's declared files and the files an open PR changes overlap? Used to hold the ticket until that PR is merged or closed, so the two do not collide.
+export function overlaps(patterns, files) { const res = patterns.map(globToRegExp); return files.filter((f) => res.some((re) => re.test(f))); }
