@@ -60,6 +60,7 @@ export function resolveRepo(t, config) {
 async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir, leases }) {
   const run = startRun({ ticket: t.id, title: t.title, repo: t.repo ?? config.repo, attempts: 0, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
   const rec = run.rec;
+  if (agent?.name) run.note('agent', { name: agent.name, ...(agent.info ?? {}) });   // which agent and model was asked for, so a run can be traced back to it
   const branch = `agent/${t.id}-${slug(t.title)}`;
   let ws;
   const target = resolveRepo(t, config);

@@ -173,9 +173,18 @@ Vague requests are refused with advice (`create_ticket` runs the clarity check),
 
 `npm run init` writes `agent-factory.json`; you rarely need to edit it. Projects can be added from the UI or the CLI (`node src/cli.mjs add owner/repo`).
 
+### Settings page: choose the model, change the guardrails
+
+Open **Settings** in the UI (`#/settings`) to change, without editing the file or restarting:
+
+- **Model and reasoning effort** for the agent. The list comes from the models your Codex login can use (Codex's own cache), and the effort choices change with the model. Leave the model unpinned and Codex picks its own default, which can change when Codex updates; pin one to make runs repeatable. **Check what a run will use** sends one tiny prompt through the same container and login and shows what Codex reports (model, effort, version). Every run record also stores which agent and model it was asked for.
+- **Limits:** runs per day, attempts per ticket, time limit per run, projects in parallel, daily budget. Each is range-checked, and each change is saved to the config file and listed under *Recent changes*.
+
+Changes apply from the next run; a run in progress keeps what it started with. The agent type, sandbox, network allowlist and projects are deliberately not editable here (they are security boundaries). Settings are a human action only (UI and REST: `GET/POST /api/settings`, `POST /api/settings/probe`): they are not an MCP operation, so an agent cannot raise its own limits.
+
 ```jsonc
 {
-  "agent":   { "kind": "codexContainer", "codexHome": "~/.agent-factory/codex" },   // or "claudeContainer"
+  "agent":   { "kind": "codexContainer", "codexHome": "~/.agent-factory/codex", "model": "gpt-6.2-sol", "reasoningEffort": "medium" },   // or "claudeContainer"; model and effort are optional
   "limits":  { "maxRunsPerDay": 20, "dailyBudgetUsd": 5, "maxAttempts": 2, "timeoutMs": 900000 },
   "projects": [
     { "id": "my-app", "repo": "me/my-app", "base": "main",

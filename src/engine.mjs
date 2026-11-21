@@ -18,7 +18,8 @@ import { flowMetrics } from './flow.mjs';
 import { buildHost, identifyHost, publicHosts, hostKind, HOSTS, validateHost } from './hosts.mjs';
 import { initForge, forgeDir } from './adapters/host-local.mjs';
 import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
-import { agents } from './adapters/agents.mjs';
+import { agents, codexExecArgs } from './adapters/agents.mjs';
+import { LIMIT_FIELDS, LIMIT_DEFAULTS, MODEL_AGENTS, EFFORT_AGENTS, readCodexModels, validateAgentPatch, validateLimitsPatch, parseCodexHeader } from './settings.mjs';
 import { gitVcs } from './adapters/vcs.mjs';
 import { startEgress } from './egress.mjs';
 import { spentToday, runsToday } from './budget.mjs';
@@ -268,6 +269,54 @@ export class Engine {
     if (verify !== undefined) { const v = String(verify ?? '').trim(); if (/[\r\n\0]/.test(v)) throw bad('The test command must be one line (join steps with &&)'); if (v.length > 500) throw bad('The test command is too long (500 characters at most)'); if (v) cfg.verify = v; else delete cfg.verify; }
     if (image !== undefined) { const i = String(image ?? '').trim(); if (i && !/^[a-z0-9][a-z0-9._\/:@-]{0,199}$/i.test(i)) throw bad('That does not look like a container image name (for example python:3.12-bookworm)'); if (i) cfg.image = i; else delete cfg.image; }
     if (Object.keys(cfg).length) p.config = cfg; else delete p.config; this._persist(); return { verify: p.config?.verify ?? null, image: p.config?.image ?? null };
+  }
+  // ---- settings: the agent's model and reasoning effort, and a few guardrail limits. Applied from the next run; no restart.
+  // Human actions only (UI and REST): these are deliberately NOT agent operations, so an agent cannot widen its own limits.
+  settings() {
+    const a = this.cfg.agent; const l = this.cfg.limits;
+    const models = a.kind === 'codexContainer' ? readCodexModels(a.codexHome) : [];
+    const limits = Object.fromEntries(Object.keys(LIMIT_FIELDS).map((k) => [k, l[k] ?? LIMIT_DEFAULTS[k] ?? null]));
+    return { agent: { kind: a.kind, model: a.model ?? null, reasoningEffort: a.reasoningEffort ?? null, acceptsModel: MODEL_AGENTS.includes(a.kind), acceptsEffort: EFFORT_AGENTS.includes(a.kind), codexHome: a.codexHome ?? null, image: this.cfg.sandbox.agentImage },
+      models, limits, limitFields: LIMIT_FIELDS, limitDefaults: LIMIT_DEFAULTS, probe: this._readProbe(), probing: !!this._probing, history: this._settingsHistory(8) };
+  }
+  setSettings(patch = {}) {
+    const bad = (m) => Object.assign(new Error(m), { status: 400 });
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw bad('Send an object like { agent: { model }, limits: { maxRunsPerDay } }');
+    const unknown = Object.keys(patch).filter((k) => !['agent', 'limits'].includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" cannot be changed here`);
+    const a = this.cfg.agent; const models = a.kind === 'codexContainer' ? readCodexModels(a.codexHome) : [];
+    const ag = validateAgentPatch(patch.agent ?? {}, { kind: a.kind, models, current: { model: a.model ?? null } }); const lim = validateLimitsPatch(patch.limits ?? {});
+    const errors = [...ag.errors, ...lim.errors]; if (errors.length) throw bad(errors.join('. '));
+    const before = { agent: { model: a.model ?? null, reasoningEffort: a.reasoningEffort ?? null }, limits: this.settings().limits };
+    for (const [k, v] of Object.entries(ag.value)) { if (v === null) delete a[k]; else a[k] = v; }
+    for (const [k, v] of Object.entries(lim.value)) { if (v === null) delete this.cfg.limits[k]; else this.cfg.limits[k] = v; }
+    const after = { agent: { model: a.model ?? null, reasoningEffort: a.reasoningEffort ?? null }, limits: this.settings().limits };
+    const changes = {};
+    for (const group of ['agent', 'limits']) for (const k of Object.keys(after[group])) if (before[group][k] !== after[group][k]) (changes[group] ??= {})[k] = { from: before[group][k], to: after[group][k] };
+    if (Object.keys(changes).length) { this._persist(); this._audit({ what: 'settings', changes }); }
+    return { ...this.settings(), changed: Object.keys(changes).length > 0, appliesTo: 'the next run' };
+  }
+  _audit(entry) { try { fs.appendFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n'); } catch { /* never block a change on its log */ } }
+  _settingsHistory(n) { try { return fs.readFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.what === 'settings').slice(-n).reverse(); } catch { return []; } }
+  _readProbe() { try { return JSON.parse(fs.readFileSync(path.join(this.cfg.stateDir, 'agent-probe.json'), 'utf8')); } catch { return null; } }
+  // Ask the agent container itself what it would use, with one tiny prompt: the only reliable answer when no model is pinned, because
+  // Codex then picks its own default. Costs one small request on the subscription, so it only runs when the operator asks.
+  async probeAgent() {
+    const a = this.cfg.agent; const bad = (m, status = 400) => Object.assign(new Error(m), { status });
+    if (a.kind !== 'codexContainer') throw bad('Checking the model is only available for the Codex agent');
+    if (!a.codexHome || !fs.existsSync(path.join(a.codexHome, 'auth.json'))) throw bad('The Codex login is missing (agent.codexHome/auth.json)');
+    if (this._probing) throw bad('A check is already running', 409);
+    this._probing = true; const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-probe-'));
+    try {
+      const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}) });
+      if (sb.kind !== 'docker') throw bad('Checking the model needs the docker sandbox');
+      const r = await sb.exec({ dir }, 'codex', codexExecArgs({ model: a.model, reasoningEffort: a.reasoningEffort, prompt: 'Reply with the single word ok and nothing else.', probe: true }),
+        { timeoutMs: 120_000, image: this.cfg.sandbox.agentImage, mounts: [`${path.resolve(a.codexHome)}:/home/node/.codex`], env: { HOME: '/home/node' } });
+      const info = parseCodexHeader(r.out);
+      const result = { ok: r.code === 0 && !!info.model, ...info, configuredModel: a.model ?? null, configuredEffort: a.reasoningEffort ?? null, at: new Date().toISOString(),
+        error: r.code === 0 && info.model ? null : String(r.out ?? '').split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 300) || 'The check did not return a model' };
+      try { fs.writeFileSync(path.join(this.cfg.stateDir, 'agent-probe.json'), JSON.stringify(result)); } catch { /* shown once even if it cannot be saved */ }
+      return result;
+    } finally { this._probing = false; fs.rmSync(dir, { recursive: true, force: true }); }
   }
   // ---- the local forge: review, merge and publish. Human actions only (UI, REST, CLI): none of these is an agent operation.
   _forge(p) { const a = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); if (!a.forge) throw Object.assign(new Error('This project does not use the local forge'), { status: 400 }); return a; }

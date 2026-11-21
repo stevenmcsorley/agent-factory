@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateSource } from './sources.mjs';
 import { validateHost, hostKind } from './hosts.mjs';
+import { MODEL_RE, EFFORTS } from './settings.mjs';
 export { AGENT_LABELS } from './labels.mjs';
 
 
@@ -38,6 +39,8 @@ export function validateConfig(cfg) {
   if (!['claude', 'claudeContainer', 'codex', 'codexContainer', 'shell'].includes(cfg.agent?.kind)) e.push(`agent.kind "${cfg.agent?.kind}" is not supported`);
   if (cfg.agent?.kind === 'codexContainer' && !cfg.agent.codexHome) e.push('agent.codexHome is required for codexContainer (a dedicated login directory, never ~/.codex)');
   if (['claude', 'codex'].includes(cfg.agent?.kind)) e.push(`agent.kind "${cfg.agent.kind}" runs on the host without isolation; use ${cfg.agent.kind}Container (set agent.allowHostAgent=true to override)`.replace(/.*/, (m) => (cfg.agent.allowHostAgent ? '' : m)));
+  if (cfg.agent?.model != null && !MODEL_RE.test(String(cfg.agent.model))) e.push(`agent.model "${cfg.agent.model}" is not a valid model id`);
+  if (cfg.agent?.reasoningEffort != null && !EFFORTS.includes(cfg.agent.reasoningEffort)) e.push(`agent.reasoningEffort must be one of ${EFFORTS.join(', ')}`);
   if (cfg.ui.host && !['127.0.0.1', 'localhost', '::1'].includes(cfg.ui.host) && !cfg.ui.allowRemote) e.push('ui.host must be loopback unless ui.allowRemote=true (put TLS in front and keep the UI token secret)');
   const seen = new Set();
   for (const p of cfg.projects ?? []) {

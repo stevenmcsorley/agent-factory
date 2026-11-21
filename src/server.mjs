@@ -81,6 +81,9 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/control\/(pause|resume)$/, async (m) => { m[1] === 'pause' ? engine.pause() : engine.resume(); return engine.status(); }],
     // Long jobs run in the background; the UI watches `busy` in /api/status.
     ['POST', /^\/api\/control\/(tick|feedback)$/, async (m) => { if (engine.busy) throw fail(409, 'The factory is already running'); (m[1] === 'tick' ? engine.tickAll() : engine.feedbackAll()).catch((e) => console.error(e.message)); return { started: m[1] }; }],
+    ['GET', /^\/api\/settings$/, async () => engine.settings()],
+    ['POST', /^\/api\/settings$/, async (_m, b) => engine.setSettings(b)],
+    ['POST', /^\/api\/settings\/probe$/, async () => engine.probeAgent()],
     ['GET', /^\/api\/projects$/, async () => engine.cfg.projects],
     ['POST', /^\/api\/projects$/, async (_m, b) => engine.addProject(b)],
     ['POST', /^\/api\/projects\/new$/, async (_m, b) => engine.createProject(b)],

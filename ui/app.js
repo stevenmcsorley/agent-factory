@@ -4,10 +4,11 @@ import { library } from './library.js';
 import { portfolio } from './portfolio.js';
 import { scenarios } from './scenarios.js';
 import { studio } from './studio.js';
+import { settings } from './settings.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^new$/, newProject, 'studio']];
-const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['studio', '#/studio', 'Studio'], ['inbox', '#/inbox', 'Inbox'], ['library', '#/library', 'Library'], ['scenarios', '#/scenarios', 'Scenarios'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^new$/, newProject, 'studio']];
+const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['studio', '#/studio', 'Studio'], ['inbox', '#/inbox', 'Inbox'], ['library', '#/library', 'Library'], ['scenarios', '#/scenarios', 'Scenarios'], ['runs', '#/runs', 'Orders'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health'], ['settings', '#/settings', 'Settings']];
 let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';
 let theme = null; try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
@@ -40,7 +41,7 @@ function drawHeader(nav) {
       st ? h('button', { class: 'btn small', disabled: st.busy || st.paused, onclick: act(() => api('/control/tick', { method: 'POST', body: {} }), 'Checking for work…', () => refresh(true)) }, icon('play', 11), 'Run') : null,
       st ? h('button', { class: 'btn small', onclick: act(() => api(`/control/${st.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), st.paused ? 'Line resumed' : 'Line paused', () => refresh(true)) }, icon(st.paused ? 'play' : 'pause', 11), st.paused ? 'Resume' : 'Pause') : null,
       h('button', { class: 'btn small ghost', onclick: toggleTheme, 'aria-label': 'Toggle light/dark theme', title: 'Toggle theme' }, icon(isLight() ? 'moon' : 'sun', 13)),
-      h('button', { class: 'btn small ghost', onclick: openPalette, 'aria-label': 'Command palette' }, icon('search', 12), h('kbd', {}, 'Ctrl K')))), st?.demo ? h('div', { class: 'demo-strip' }, 'Demo: sample data in a throwaway folder. Pull requests, tickets, the plan and the code analysis are real; the agent runs and history are pre-recorded. No agent will run.') : null);
+      h('button', { class: 'btn small ghost', onclick: openPalette, 'aria-label': 'Command palette' }, icon('search', 12), h('kbd', {}, 'Ctrl K')))), st?.demo ? h('div', { class: 'demo-strip' }, 'Demo: sample data in a throwaway folder. Pull requests, tickets, the plan and the code analysis are real; the agent runs and history are pre-recorded. No agent will run.') : '');
   document.title = st?.active ? `(${st.active}) Agent Factory` : 'Agent Factory';
 }
 
