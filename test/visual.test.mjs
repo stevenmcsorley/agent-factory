@@ -73,3 +73,9 @@ test('switching the check on or off keeps the baseline; changing the app set-up 
   await callOp(e, 'set_preview', { project: 'a', preview: { ...pv, enabled: true } }); assert.ok(fs.existsSync(f), 'on/off keeps it');
   await callOp(e, 'set_preview', { project: 'a', preview: { ...pv, enabled: true, routes: ['/', '/x'] } }); assert.ok(!fs.existsSync(f), 'a different app set-up discards it');
 });
+
+test('a change that removes problems from the baseline says so', () => {
+  const bad = { ok: true, pages: [page({ tapTargets: [{ el: 'button.a', w: 30, h: 30, text: 'a' }, { el: 'button.b', w: 30, h: 30, text: 'b' }] })] };
+  const base = evaluate(bad, null); const fixed = evaluate({ ok: true, pages: [page({ tapTargets: [{ el: 'button.b', w: 30, h: 30, text: 'b' }] })] }, base.keys);
+  assert.equal(fixed.status, 'pass'); assert.equal(fixed.counts.resolved, 1); assert.equal(fixed.counts.existing, 1); assert.match(fixed.summary, /1 already on the base branch, 1 fixed by this change/);
+});

@@ -68,9 +68,9 @@ export function findingsOf(report) {
 // baseline: array of finding keys that were already present on the base branch.
 export function evaluate(report, baseline = null) {
   if (!report?.ok) return { status: 'error', summary: report?.error ?? 'The visual check could not run', findings: [], counts: { fail: 0, warn: 0, existing: 0 }, pages: 0 };
-  const all = findingsOf(report); const known = new Set(baseline ?? []); const fresh = all.filter((x) => !known.has(x.key)); const existing = all.length - fresh.length;
+  const all = findingsOf(report); const known = new Set(baseline ?? []); const now = new Set(all.map((x) => x.key)); const resolved = baseline ? baseline.filter((k) => !now.has(k)).length : 0; /* on the base branch, gone with this change */ const fresh = all.filter((x) => !known.has(x.key)); const existing = all.length - fresh.length;
   const fail = fresh.filter((x) => x.severity === 'fail').length, warn = fresh.length - fail; const status = fail ? 'fail' : warn ? 'warn' : 'pass';
-  return { status, summary: status === 'pass' ? `No new visual problems${existing ? ` (${existing} already on the base branch)` : ''}` : `${fail} new problem${fail === 1 ? '' : 's'}${warn ? `, ${warn} to look at` : ''}${existing ? `; ${existing} already on the base branch` : ''}`,
-    findings: fresh.slice(0, 25).map(({ key, ...rest }) => rest), keys: all.map((x) => x.key), counts: { fail, warn, existing }, pages: report.pages.length, shots: report.shots ?? [] };
+  return { status, summary: status === 'pass' ? `No new visual problems${existing || resolved ? ` (${[existing ? `${existing} already on the base branch` : '', resolved ? `${resolved} fixed by this change` : ''].filter(Boolean).join(', ')})` : ''}` : `${fail} new problem${fail === 1 ? '' : 's'}${warn ? `, ${warn} to look at` : ''}${existing ? `; ${existing} already on the base branch` : ''}`,
+    findings: fresh.slice(0, 25).map(({ key, ...rest }) => rest), keys: all.map((x) => x.key), counts: { fail, warn, existing, resolved }, pages: report.pages.length, shots: report.shots ?? [] };
 }
 export const visualFeedback = (v) => `The visual check (the app loaded at phone, tablet and desktop width) found problems your change introduced:\n${v.findings.filter((f) => f.severity === 'fail').slice(0, 8).map((f) => `- ${f.route} at ${f.widths.join('/')}px: ${f.detail}`).join('\n')}\nFix these without changing what the ticket asked for.`;
