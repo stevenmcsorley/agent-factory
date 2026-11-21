@@ -1,3 +1,4 @@
+import { parseUsageLimit } from './agentlimit.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { slug } from './util.mjs';
@@ -104,6 +105,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       if (r.tokens) rec.tokens = { input: (rec.tokens?.input ?? 0) + r.tokens.input, output: (rec.tokens?.output ?? 0) + r.tokens.output };
       run.note('agentSummary', tail(r.out));
       if (r.timedOut) { rec.status = 'timeout'; break; }
+      const limit = parseUsageLimit(r.out); if (limit) { rec.status = 'rate-limited'; rec.error = limit.message; rec.retryAt = limit.retryAt ?? undefined; break; }   // the agent ran out of plan, not ideas: no PR for half a change
       const question = parseNeedsInfo(r.out); if (question) { rec.status = 'needs-info'; rec.question = question; break; } // the agent judged the ticket genuinely open-ended: no changes, a specific question
       if (!(await vcs.diffStat(ws))) { rec.status = 'no-change'; feedback = 'You made no changes.'; continue; }
       const status = await vcs.diffStat(ws); run.note('changed', changedFiles(status));
@@ -147,6 +149,9 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     } else if (rec.status === 'needs-info') {
       await tickets.comment(t.id, `agent-factory needs a little more information before it can build this:\n\n${rec.question}\n\nAnswer in the Agent Factory inbox and press Requeue (or edit the ticket and re-add the \`agent-ready\` label).`);
       await tickets.label(t.id, ['agent-needs-info'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'parked' });
+    } else if (rec.status === 'rate-limited') {
+      await tickets.comment(t.id, `agent-factory stopped: the agent hit its usage limit${rec.retryAt ? ` (it says to try again ${rec.retryAt})` : ''}, so nothing was built and no pull request was opened. Press Requeue in the Agent Factory inbox once the limit has reset.`);
+      await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'parked' });
     } else {
       await tickets.comment(t.id, `agent-factory gave up: ${rec.status}${rec.error ? ` (${rec.error})` : ''} after ${rec.attempts} attempt(s).`);
       await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, event: 'failed' });

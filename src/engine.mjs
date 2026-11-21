@@ -154,7 +154,7 @@ export class Engine {
   _observeClosed(project, list) { const idx = this._evIndex(); for (const t of list ?? []) if (t.state === 'CLOSED') { const last = idx.get(`${project}\u0000${t.id}`); if (last && last !== 'closed') this.recordEvent(project, t.id, 'closed'); } }
   flow({ days = 30, project } = {}) { return flowMetrics({ runs: this.runs({ limit: 100000 }).filter((r) => r.finished), events: this.lifecycleEvents(), days, project }); }
   metrics({ days = 14 } = {}) {
-    const NEUTRAL = new Set(['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued', 'repo-not-allowed']);
+    const NEUTRAL = new Set(['needs-info', 'stopped', 'budget-exhausted', 'rate-limited', 'recovered-requeued', 'repo-not-allowed']);
     const all = this.runs({ limit: 100000 }).filter((r) => r.finished);
     const day = (d) => d.toISOString().slice(0, 10);
     const series = []; for (let i = days - 1; i >= 0; i--) series.push({ date: day(new Date(Date.now() - i * 86400000)), ok: 0, failed: 0, neutral: 0 });
@@ -188,7 +188,7 @@ export class Engine {
   status() {
     const runs = this.runs({ limit: 1000 });
     const per = Object.fromEntries(this.cfg.projects.map((p) => [p.id, { project: p.id, repo: p.repo, paused: !!p.paused, runs: 0, ok: 0, failed: 0, lastRun: null }]));
-    for (const r of runs) { const s = per[r.project]; if (!s) continue; s.runs++; if (r.status === 'ok') s.ok++; else if (!['needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued'].includes(r.status)) s.failed++; s.lastRun ??= r; }
+    for (const r of runs) { const s = per[r.project]; if (!s) continue; s.runs++; if (r.status === 'ok') s.ok++; else if (!['needs-info', 'stopped', 'budget-exhausted', 'rate-limited', 'recovered-requeued'].includes(r.status)) s.failed++; s.lastRun ??= r; }
     const l = this.cfg.limits;
     return { demo: !!this.demo, paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, nextAt: this.nextAt ? new Date(this.nextAt).toISOString() : null, pollMs: this.pollMs ?? null, agent: this.cfg.agent.kind,
       today: { runs: runsToday(this.cfg.stateDir), maxRuns: l.maxRunsPerDay ?? null, costUsd: Number(spentToday(this.cfg.stateDir).toFixed(4)), maxCostUsd: l.dailyBudgetUsd ?? null },
