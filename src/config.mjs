@@ -11,7 +11,8 @@ export const EGRESS_DEFAULTS = {
   claudeContainer: ['api.anthropic.com'],
   codexContainer: ['chatgpt.com', 'auth.openai.com', 'api.openai.com'],
 };
-export const PACKAGE_HOSTS = ['registry.npmjs.org'];
+// Package registries the sandbox may reach so a project's test command can install its dependencies: npm for Node, PyPI (index + file host) for Python.
+export const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
 
 export const DEFAULTS = {
   stateDir: 'state',

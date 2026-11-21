@@ -100,10 +100,19 @@ import { execFileSync } from 'node:child_process';
 test('verifyScopes reads the folders a test command runs in', () => {
   assert.deepEqual(verifyScopes('cd frontend && npm ci --legacy-peer-deps && npx tsc -b && npm test && npx vite build'), ['frontend']);
   assert.deepEqual(verifyScopes('npm --prefix web test'), ['web']); assert.deepEqual(verifyScopes('make -C api test'), ['api']);
-  assert.deepEqual(verifyScopes('cd api && npm test; cd ../web && npm test').sort(), ['api']);                 // a parent-relative folder is not a scope we can name
+  assert.deepEqual(verifyScopes('cd api && npm test; cd ../web && npm test'), []);                 // walking back out of a folder: several places, so no claim
   assert.deepEqual(verifyScopes('npm test'), []); assert.deepEqual(verifyScopes(''), []); assert.deepEqual(verifyScopes(undefined), []);
   assert.deepEqual(verifyScopes('cd $HOME && npm test'), []); assert.deepEqual(verifyScopes('cd /abs/path && x'), []);
 });
+
+test('a command that walks back out of a folder claims nothing (it ran things from the repo root too)', () => {
+  const real = 'cd frontend && npm ci && npx vitest run && cd ../mcp && npm test && cd .. && pip install -r requirements.txt && python manage.py test';
+  assert.deepEqual(verifyScopes(real), []); assert.equal(coverageGap(real, ['core/settings.py', 'Makefile']), null);
+  assert.deepEqual(verifyScopes('cd frontend && npm test; cd - && make'), []); assert.deepEqual(verifyScopes('pushd web && npm test; popd; pytest'), []);
+  assert.deepEqual(verifyScopes('cd frontend && npm test'), ['frontend']);            // unchanged: a plain single-folder command still names its folder
+  assert.deepEqual(verifyScopes('cd ../x && npm test'), []);                           // a parent-relative start was already ignored
+  assert.deepEqual(verifyScopes('cd frontend && cd mcp && npm test').sort(), ['frontend', 'mcp']);
+})
 
 test('coverageGap names changed code outside the folders the command runs in, and ignores docs', () => {
   const cmd = 'cd frontend && npm test';

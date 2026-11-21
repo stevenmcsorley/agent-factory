@@ -9,6 +9,9 @@ const NOT_CODE = /(^|\/)(docs?|\.github|\.vscode|\.idea)\/|\.(md|mdx|txt|rst)$|(
 // The folders a command runs in: `cd X`, `--prefix X`, `-C X`, `--workspace X`/`-w X` style folder arguments.
 export function verifyScopes(cmd) {
   const scopes = new Set(); const text = String(cmd ?? '');
+  // A command that walks back out of a folder (`cd ..`, `cd ../x`, `cd -`, `popd`) runs things in several places, including the repo root. We cannot
+  // tell which later step runs where, so say nothing rather than claim the tests only cover one folder (seen on a real command: `cd frontend && ... && cd .. && python manage.py test`).
+  if (/(?:^|[;&|(]\s*|&&\s*)(?:cd\s+(?:\.\.|-)(?:\/|\s|$|;|&)|popd\b)/.test(text)) return [];
   for (const re of [new RegExp(String.raw`(?:^|[;&|(]\s*|&&\s*)cd\s+${DIR}`, 'g'), new RegExp(String.raw`--prefix[= ]\s*${DIR}`, 'g'), new RegExp(String.raw`(?:^|\s)-C\s+${DIR}`, 'g')])
     for (const m of text.matchAll(re)) { const d = m[1].replace(/\/+$/, ''); if (d && d !== '.' && !d.startsWith('..') && !d.startsWith('/') && !d.startsWith('$')) scopes.add(d); }
   return [...scopes];

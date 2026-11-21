@@ -10,7 +10,8 @@ const good = () => withDefaults({ agent: { kind: 'codexContainer', codexHome: '/
 
 test('defaults fill in sandbox, limits, ui and the agent-specific egress allowlist', () => {
   const c = good();
-  assert.deepEqual(c.sandbox.egress.allow, [...EGRESS_DEFAULTS.codexContainer, 'registry.npmjs.org']);
+  assert.deepEqual(c.sandbox.egress.allow, [...EGRESS_DEFAULTS.codexContainer, 'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org']);
+  assert.ok(!c.sandbox.egress.allow.includes('github.com'), 'package registries only: no code hosts and no wildcard');
   assert.equal(c.ui.host, '127.0.0.1'); assert.equal(c.limits.maxRunsPerDay, 20);
   assert.deepEqual(validateConfig(c), []);
 });
