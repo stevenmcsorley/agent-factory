@@ -20,8 +20,8 @@ export function readUsage(stateDir) {
   try { return fs.readFileSync(file(stateDir), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; }
 }
 
-const zero = () => ({ calls: 0, fresh: 0, cached: 0, output: 0, ms: 0, weighted: 0, estimated: 0 });
-const add = (a, e) => { a.calls++; a.fresh += e.fresh; a.cached += e.cached; a.output += e.output; a.ms += e.ms ?? 0; a.weighted += e.weighted; if (e.estimated) a.estimated++; return a; };
+const zero = () => ({ calls: 0, fresh: 0, cached: 0, output: 0, steps: 0, ms: 0, weighted: 0, estimated: 0 });
+const add = (a, e) => { a.calls++; a.fresh += e.fresh; a.cached += e.cached; a.output += e.output; a.steps += e.steps ?? 0; a.ms += e.ms ?? 0; a.weighted += e.weighted; if (e.estimated) a.estimated++; return a; };
 
 // entries: usage log lines. legacy: older runs that recorded only the builder's input/output (no cached split), included for runs the log does not cover.
 export function summarize({ entries, runs = [], days = 14, project, now = Date.now() }) {
@@ -35,6 +35,6 @@ export function summarize({ entries, runs = [], days = 14, project, now = Date.n
   const totals = all.reduce(add, zero()); const dayOf = (e) => String(e.at).slice(0, 10); const byDay = new Map(); for (const e of all) add(byDay.get(dayOf(e)) ?? byDay.set(dayOf(e), zero()).get(dayOf(e)), e);
   const perRun = new Map(); for (const e of all) if (e.run) add(perRun.get(e.run) ?? perRun.set(e.run, { ...zero(), run: e.run, project: e.project, ticket: e.ticket ?? null }).get(e.run), e);
   const share = (rows) => rows.map((r) => ({ ...r, share: totals.weighted ? r.weighted / totals.weighted : 0 }));
-  return { days, totals: { ...totals, cachedShare: totals.fresh + totals.cached ? totals.cached / (totals.fresh + totals.cached) : 0, avgInputPerCall: totals.calls ? Math.round((totals.fresh + totals.cached) / totals.calls) : 0 },
+  return { days, totals: { ...totals, cachedShare: totals.fresh + totals.cached ? totals.cached / (totals.fresh + totals.cached) : 0, avgInputPerCall: totals.calls ? Math.round((totals.fresh + totals.cached) / totals.calls) : 0, avgStepsPerCall: totals.steps && totals.calls ? Math.round(totals.steps / totals.calls) : null, avgInputPerStep: totals.steps ? Math.round((totals.fresh + totals.cached) / totals.steps) : null },
     byRole: share(by('role')), byProject: share(by('project')), byDay: [...byDay.entries()].sort().map(([day, v]) => ({ day, ...v })), topRuns: [...perRun.values()].sort((a, b) => b.weighted - a.weighted).slice(0, 8), weights: WEIGHTS, legacyRuns: all.filter((e) => e.estimated).length };
 }

@@ -19,7 +19,7 @@ test('fresh, cached and output: input INCLUDES the cached part, unless a source 
 
 test('the agent adapters read cached tokens: Codex turn.completed, and Claude (cache reads are folded into input)', () => {
   const c = parseCodexJsonl({ out: [JSON.stringify({ type: 'thread.started' }), JSON.stringify({ type: 'item.completed', item: { text: 'done' } }), JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 5000, cached_input_tokens: 4200, output_tokens: 80, reasoning_output_tokens: 20 } })].join('\n') });
-  assert.deepEqual(c.tokens, { input: 5000, output: 80, cached: 4200, reasoning: 20 }); assert.equal(c.out, 'done');
+  assert.deepEqual(c.tokens, { input: 5000, output: 80, cached: 4200, reasoning: 20, steps: 0 }); assert.equal(c.out, 'done');
   const k = parseClaudeJson({ out: JSON.stringify({ result: 'ok', total_cost_usd: 0.1, usage: { input_tokens: 10, cache_read_input_tokens: 700, cache_creation_input_tokens: 90, output_tokens: 30 } }) });
   assert.deepEqual(k.tokens, { input: 800, cached: 700, output: 30 });
 });
@@ -44,4 +44,11 @@ test('every agent call, whatever the role, is logged with its project and run; t
   const rows = readUsage(cfg.stateDir); assert.equal(rows.length, 3); assert.deepEqual(rows.map((r) => r.role), ['reviewer', 'builder', 'designer']); assert.equal(rows[0].run, 'abc12345'); assert.equal(rows[2].ref, 'design zz'); assert.equal(rows[0].cached, 800);
   const rep = await callOp(e, 'usage_report', { days: 7 }); assert.equal(rep.totals.calls, 3); assert.equal(rep.totals.fresh, 600); assert.equal(rep.totals.cached, 2400);
   recordRun(cfg.stateDir, { id: 'abc12345', project: 'a', ticket: 4, status: 'ok', finished: new Date().toISOString() }); const run = e.getRun('abc12345'); assert.deepEqual(run.usage.map((u) => u.role).sort(), ['builder', 'reviewer']); assert.equal(run.usage[0].cached, 800);
+});
+
+test('steps: commands, edits and searches are counted (messages and reasoning are not), so context per step can be worked out', () => {
+  const ev = (type, item) => JSON.stringify({ type, item });
+  const out = [ev('item.completed', { type: 'reasoning', text: 'hm' }), ev('item.completed', { type: 'command_execution', command: 'ls' }), ev('item.completed', { type: 'file_change', changes: [] }), ev('item.completed', { type: 'command_execution', command: 'npm test' }), ev('item.completed', { type: 'agent_message', text: 'done' }), JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 300000, cached_input_tokens: 270000, output_tokens: 900 } })].join('\n');
+  const r = parseCodexJsonl({ out }); assert.equal(r.tokens.steps, 3); assert.equal(r.out, 'done');
+  const s = summarize({ entries: [{ at: new Date().toISOString(), role: 'builder', project: 'a', input: 300000, cached: 270000, output: 900, steps: 3 }], days: 7 }); assert.equal(s.totals.avgStepsPerCall, 3); assert.equal(s.totals.avgInputPerStep, 100000);
 });

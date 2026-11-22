@@ -99,9 +99,11 @@ export function briefMarkdown(pack) {
 const words = (s) => new Set(String(s).toLowerCase().match(/[a-z][a-z0-9]{3,}/g) ?? []);
 // The context handed to the agent with a ticket: the brief, conventions and decisions (always), an index of the sources, and excerpts of the two
 // sources that look most relevant to THIS ticket. Bounded so it never swamps the ticket itself.
-export function renderContext(pack, dir, ticket, { max = 9000 } = {}) {
-  const has = BRIEF_FIELDS.some(([k]) => (pack.brief[k] ?? '').trim()) || pack.stack || pack.decisions || pack.sources.length; if (!has) return '';
-  const parts = [];
+// Context for a ticket, in TWO parts so the prompt can put what is the same for every ticket first (a provider caches a repeated beginning) and what depends on this ticket last.
+// fixed: brief, conventions, decisions and the source index. perTicket: the excerpts of the sources most relevant to THIS ticket.
+export function renderContextParts(pack, dir, ticket, { max = 9000 } = {}) {
+  const has = BRIEF_FIELDS.some(([k]) => (pack.brief[k] ?? '').trim()) || pack.stack || pack.decisions || pack.sources.length; if (!has) return { fixed: '', perTicket: '' };
+  const parts = []; const excerpts = [];
   const brief = briefMarkdown(pack).replace('# Project brief\n\n', ''); if (brief.trim()) parts.push(`### Project brief\n${brief.trim()}`);
   if (pack.stack) parts.push(`### Stack and conventions (follow these)\n${pack.stack}`);
   if (pack.decisions) parts.push(`### Decisions already made (do not reopen)\n${pack.decisions}`);
@@ -109,10 +111,11 @@ export function renderContext(pack, dir, ticket, { max = 9000 } = {}) {
     const want = words(`${ticket?.title ?? ''} ${ticket?.body ?? ''}`);
     const scored = pack.sources.map((s) => { const t = sourceText(dir, s); const hay = words(`${s.title} ${t ?? ''}`); let n = 0; for (const w of want) if (hay.has(w)) n++; return { s, t, n }; }).sort((a, b) => b.n - a.n);
     parts.push(`### Source material (reference data, files are in .factory-context/sources/)\n${pack.sources.map((s) => `- [${s.kind}] ${s.title}${s.url ? ` <${s.url}>` : ''}${s.file ? ` (.factory-context/sources/${s.file})` : ''}`).join('\n')}`);
-    for (const { s, t, n } of scored.slice(0, 2)) if (t && n > 0) parts.push(`#### Excerpt: ${s.title}\n${t.trim().slice(0, 3000)}`);
+    for (const { s, t, n } of scored.slice(0, 2)) if (t && n > 0) excerpts.push(`#### Excerpt: ${s.title}\n${t.trim().slice(0, 3000)}`);
   }
-  const text = parts.join('\n\n'); return text.length > max ? `${text.slice(0, max)}\n…(truncated; read .factory-context/ for the rest)` : text;
+  const fixed = parts.join('\n\n'); return { fixed: fixed.length > max ? `${fixed.slice(0, max)}\n…(truncated; read .factory-context/ for the rest)` : fixed, perTicket: excerpts.join('\n\n') };
 }
+export function renderContext(pack, dir, ticket, opts = {}) { const { fixed, perTicket } = renderContextParts(pack, dir, ticket, opts); return [fixed, perTicket].filter(Boolean).join('\n\n'); }
 // Keep the context folder out of git status/commits, whoever wrote into it.
 export function excludeContext(wsDir) { try { const ex = path.join(wsDir, '.git', 'info', 'exclude'); fs.mkdirSync(path.dirname(ex), { recursive: true }); if (!fs.existsSync(ex) || !fs.readFileSync(ex, 'utf8').includes('.factory-context/')) fs.appendFileSync(ex, '\n.factory-context/\n'); } catch { /* not a git checkout */ } }
 // Put the pack where the sandboxed agent can read it, without it ever being committed (ignored via .git/info/exclude).

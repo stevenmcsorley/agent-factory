@@ -118,6 +118,30 @@ function autonomyCard(a, ctx) {
         h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: (e) => { if (!ack.checked) { toast('Tick the box first', 'bad'); return; } return set({ allow: true }, 'Allowed. Now choose which projects use it.')(e); } }, 'Allow autonomous merging'))));
 }
 
+// Setups: a named bundle of models, effort and which optional agents are on. One click to apply, and new projects start with the default one.
+let pickedSetup = null;
+function setupCard(d, ctx) {
+  const sel = h('select', { 'aria-label': 'Setup' }); const byName = new Map(d.presets.map((p) => [p.name, p]));
+  pickedSetup = byName.has(pickedSetup) ? pickedSetup : (d.active && byName.has(d.active) ? d.active : (byName.has('standard') ? 'standard' : d.presets[0]?.name));
+  for (const p of d.presets) sel.append(h('option', { value: p.name, selected: p.name === pickedSetup }, `${p.label ?? p.name}${p.builtin ? '' : ' (yours)'}${d.active === p.name ? ' · applied' : ''}${d.newProject === p.name ? ' · new projects' : ''}`));
+  const detail = h('div', { class: 'setup-detail' }); const all = h('input', { type: 'checkbox', id: 'su-all' }); const dflt = h('input', { type: 'checkbox', id: 'su-default' });
+  const show = () => { const p = byName.get(sel.value); pickedSetup = sel.value; dflt.checked = d.newProject === p.name || !d.newProject;
+    const roles = Object.entries(p.roles ?? {}).map(([r, v]) => `${r}: ${[v.model, v.reasoningEffort].filter(Boolean).join(' · ') || 'default'}`); const opt = Object.entries(p.projectRoles ?? {}).map(([r, v]) => `${r} ${v ? 'on' : 'off'}`);
+    detail.replaceChildren(...[h('p', {}, p.description), p.evidence ? h('p', { class: 'muted small' }, `Why: ${p.evidence}`) : null, h('dl', { class: 'kv' }, h('dt', {}, 'Default model / effort'), h('dd', {}, p.agent ? [p.agent.model ?? 'unchanged', p.agent.reasoningEffort ?? 'unchanged'].join(' · ') : 'unchanged'), h('dt', {}, 'Per-role models'), h('dd', {}, roles.length ? roles.join('; ') : 'none (every role uses the default)'), h('dt', {}, 'Optional agents per project'), h('dd', {}, opt.length ? opt.join(', ') : 'unchanged')),
+      p.builtin ? null : h('button', { class: 'btn small danger', onclick: async () => { if (confirm(`Delete the setup "${p.label ?? p.name}"?`)) { try { await api(`/setups/${p.name}/delete`, { method: 'POST', body: {} }); toast('Deleted', 'ok'); ctx.rerender(); } catch (e) { toast(e.message, 'bad'); } } } }, 'Delete this setup')].filter(Boolean)); };
+  sel.addEventListener('change', show); show();
+  const name = h('input', { placeholder: 'name for the current setup, e.g. economy', maxlength: 31, 'aria-label': 'Name' });
+  const run = (fn, done) => async (e) => { e.currentTarget.disabled = true; try { await fn(); toast(done, 'ok'); ctx.rerender(); } catch (err) { toast(err.message, 'bad'); e.currentTarget.disabled = false; } };
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agent setup'), d.active ? h('span', { class: 'stamp ok' }, `applied: ${byName.get(d.active)?.label ?? d.active}`) : h('span', { class: 'stamp' }, 'custom')),
+    h('p', { class: 'muted small' }, 'A setup is a ready-made choice of models, effort and which optional agents (reviewer, security reviewer, tester, spec writer) are on. Pick one instead of setting each by hand; the assistant that drives your factory can do the same over MCP. Autonomous merging is never part of a setup.'),
+    h('div', { class: 'sfield' }, h('label', {}, 'Setup'), sel), detail,
+    h('label', { class: 'check', for: 'su-all' }, all, ' Also switch its optional agents on or off for ALL existing projects'), h('label', { class: 'check', for: 'su-default' }, dflt, ' Every new project starts with this setup'),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: run(() => api(`/setups/${sel.value}/apply`, { method: 'POST', body: { ...(all.checked ? { projects: 'all' } : {}), makeDefault: dflt.checked } }), 'Applied') }, icon('check', 13), 'Apply'),
+      d.newProject ? h('button', { class: 'btn ghost', onclick: run(() => api('/setups/default', { method: 'POST', body: { name: null } }), 'New projects no longer start with a setup') }, 'Stop applying to new projects') : null),
+    h('h3', { style: { marginTop: '22px' } }, 'Save what you have now'), h('p', { class: 'muted small' }, 'Captures the current default model and effort and each role\'s model, so you can switch back to it or share it.'),
+    h('div', { class: 'row nowrap' }, name, h('button', { class: 'btn', onclick: run(() => api('/setups', { method: 'POST', body: { name: name.value.trim(), fromCurrent: true } }), 'Saved') }, 'Save current setup')));
+}
+
 function limitCard(s, ctx) {
   const on = h('input', { type: 'checkbox', id: 'auto-resume' }); on.checked = !!s.autoResume;
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('clock', 17), 'When the plan\'s usage limit is hit'), s.autoResume ? h('span', { class: 'stamp ok' }, 'auto-resume on') : h('span', { class: 'stamp warn' }, 'auto-resume off')),
@@ -140,10 +164,10 @@ function notifyCard(n, ctx) {
 }
 
 export const settings = {
-  async load() { const [s, st, roles, au, nt] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy'), api('/notify')]); return { s, st, roles, au, nt }; },
-  draw({ s, st, roles, au, nt }, ctx) {
+  async load() { const [s, st, roles, au, nt, su] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy'), api('/notify'), api('/setups')]); return { s, st, roles, au, nt, su }; },
+  draw({ s, st, roles, au, nt, su }, ctx) {
     return [head('Settings', 'Which model builds your tickets, and the guardrails around it. Changes apply from the next run and are saved to the config file: no restart.'),
-      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), limitCard(s, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
+      setupCard(su, ctx), agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), limitCard(s, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
       h('p', { class: 'muted small' }, `Not editable here on purpose: the agent type, sandbox and network allowlist, and the projects. Those are security boundaries and live in the config file.`)];
   },
 };

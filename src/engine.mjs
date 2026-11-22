@@ -44,6 +44,7 @@ import { notifyMethods } from './engine-notify.mjs';
 import { livePreviewMethods } from './engine-livepreview.mjs';
 import { agentMethods } from './engine-agents.mjs';
 import { limitMethods } from './engine-limit.mjs';
+import { presetMethods } from './engine-presets.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -110,7 +111,8 @@ export class Engine {
     // Precedence stays: the repo's .agent-factory.json, then the project's own setting, then this detection, then root detection at run time.
     const detected = !p.config?.verify && p.profile?.verify ? { verify: p.profile.verify, ...(!p.config?.image && p.profile.image ? { image: p.profile.image } : {}) } : {};
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
-      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return [pk.renderContext(pk.loadPack(d), d, t), this._designContext?.(p.id), this._planContext(p, t), this._partsContext(p, t).text, this._skillsText('builder', p.id)].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      // Same-for-every-ticket text first (so a provider can reuse its cache of that beginning across tickets), then what depends on THIS ticket.
+      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); const c = pk.renderContextParts(pk.loadPack(d), d, t); return [c.fixed, this._designContext?.(p.id), this._skillsText('builder', p.id), c.perTicket, this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
       clarify: this._clarifier(p, sb, log),
       tester: this._tester(p, sb, log),
@@ -465,7 +467,7 @@ export class Engine {
     if (hostSecret) this.saveSecret(hostCfg.tokenEnv, hostSecret);
     if (secret && t.tokenEnv) this.saveSecret(t.tokenEnv, secret);
     if (t.kind === 'github') await this.gh.ensureLabels(repo);
-    this.cfg.projects.push(p); this._persist();
+    this.cfg.projects.push(p); this._applyNewProjectDefaults(p); this._persist();   // a new project starts with the default setup's optional roles
     return p;
   }
   // Shallow, read-only clone -> profile. Nothing is executed from the repo and nothing is persisted here.
@@ -899,4 +901,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods);

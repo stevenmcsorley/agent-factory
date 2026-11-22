@@ -18,16 +18,17 @@ export function parseClaudeJson(r) {
 
 // `codex exec --json` prints JSONL events; sum any token usage we can find. Cost is not reported (subscription).
 export function parseCodexJsonl(r) {
-  let input = 0, output = 0, cached = 0, reasoning = 0, last = '';
+  let input = 0, output = 0, cached = 0, reasoning = 0, steps = 0, last = '';
   for (const line of r.out.split('\n')) {
     try {
       const e = JSON.parse(line);
       const u = e.usage ?? e.msg?.usage ?? e.item?.usage;
       if (u) { input += u.input_tokens ?? 0; output += u.output_tokens ?? 0; cached += u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0; reasoning += u.reasoning_output_tokens ?? 0; }
+      if (e.type === 'item.completed' && e.item?.type && e.item.type !== 'agent_message' && e.item.type !== 'reasoning') steps++;   // a command run, a file change, a search: one more trip round the loop
       const t = e.item?.text ?? e.msg?.message ?? e.message; if (typeof t === 'string') last = t;
     } catch { /* non-JSON line */ }
   }
-  return { ...r, out: last || r.out, costUsd: 0, tokens: { input, output, cached, reasoning } };
+  return { ...r, out: last || r.out, costUsd: 0, tokens: { input, output, cached, reasoning, steps } };
 }
 
 const CRED_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
