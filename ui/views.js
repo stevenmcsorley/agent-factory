@@ -7,7 +7,7 @@ import { designsTab, loadDesigns } from './designs.js';
 import { autopilotTab, loadAutopilot, visualRunCard } from './autopilot.js';
 import { trackerTab, ticketPage } from './tracker.js';
 import { prRowsLocal, prPage, publishCard } from './forge.js';
-import { createLine, odometer, miniBars, bars, scanCode, stationGlyph } from './charts.js';
+import { createLine, createLine3D, odometer, miniBars, bars, scanCode, stationGlyph } from './charts.js';
 
 // Each view: load(arg) -> data (fetch everything it needs), draw(data, ctx) -> DOM nodes. The router re-draws only when data changes.
 const since = (iso) => h('span', { class: 'since', 'data-since': iso }, dur(Date.now() - new Date(iso)));
@@ -64,16 +64,17 @@ function agentBench() {
 
 // The line card lives for the whole page visit and is updated in place (see persist()).
 function lineCard(state0) {
-  const L = createLine(CORE_STAGES);
+  const L = createLine3D(CORE_STAGES);
   const stamp = h('span', { class: 'stamp' }); const follow = h('a', { class: 'btn small', href: '#/', hidden: true }, 'Follow', icon('arrow', 12));
   const bench = agentBench();
-  const el = h('section', { class: 'card line-card reg' }, h('div', { class: 'line-head' }, h('h2', {}, 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg), bench.root);
+  const el = h('section', { class: 'card line-card l3 reg' }, h('div', { class: 'line-head' }, h('h2', {}, h('i', { class: 'l3-sq', 'aria-hidden': 'true' }), 'The line'), h('div', { class: 'row' }, stamp, follow)), h('div', { class: 'stage-wrap' }, L.svg), bench.root);
   el.__update = (st) => {
     L.update(st); bench.update(st.roster ?? [], st.agents ?? []);
     stamp.className = `stamp ${st.active.length ? 'live' : st.paused ? 'warn' : ''}`;
-    stamp.replaceChildren(...(st.active.length ? [h('i', { class: 'dot' }), `${st.active.length} on the line${(st.agents ?? []).filter((a) => a.kind === 'agent').length ? ` · ${(st.agents ?? []).filter((a) => a.kind === 'agent').length} agent${(st.agents ?? []).filter((a) => a.kind === 'agent').length === 1 ? '' : 's'} working` : ''}`] : [st.paused ? 'paused' : st.nextIn != null ? `idle · next check in ${st.nextIn}s` : 'idle']));
+    stamp.replaceChildren(...(st.active.length ? [h('i', { class: 'dot' }), `${st.active.length} on the line${(st.agents ?? []).filter((a) => a.kind === 'agent').length ? ` · ${(st.agents ?? []).filter((a) => a.kind === 'agent').length} agent${(st.agents ?? []).filter((a) => a.kind === 'agent').length === 1 ? '' : 's'} working` : ''}`] : [st.paused ? 'paused' : 'idle', ...(!st.paused && st.nextIn != null ? [h('span', { class: 'l3-next', 'data-at': String(Date.now() + st.nextIn * 1000) }, ` · ${st.nextIn > 0 ? `next check in ${st.nextIn}s` : 'checking now'}`)] : [])]));
     follow.hidden = !st.active.length; if (st.active[0]) follow.href = `#/run/${st.active[0].run}`;
   };
+  const tick = setInterval(() => { if (!el.isConnected) { clearInterval(tick); return; } const n = el.querySelector('.l3-next'); if (n) { const left = Math.round((Number(n.dataset.at) - Date.now()) / 1000); n.textContent = left > 0 ? ` · next check in ${left}s` : ' · checking now'; } }, 1000);   // the countdown ticks without asking the server
   el.__update(state0); return el;
 }
 
