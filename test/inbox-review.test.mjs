@@ -148,3 +148,29 @@ test('requeueing a ticket that was closed reopens it, so the factory actually pi
   const pr = (await w.e.listPrs('app'))[0]; const r = await w.e.prAction('app', pr.number, 'rebuild', {}); assert.equal(r.requeued, true, r.requeueError ?? ''); w.e.cache.clear();
   const t = await labelsOf(w, ticket); assert.notEqual(t.state, 'CLOSED', 'reopened'); assert.ok(t.labels.includes('agent-ready'));
 });
+
+// A sandbox that checks out an EXISTING branch (what a feedback or conflict round needs) and runs commands locally.
+const branchSandbox = (w) => ({ create: async ({ cloneUrl, branch }) => { const dir = fs.mkdtempSync(path.join(w.root, 'rs-')); execFileSync('git', ['clone', '-q', '--branch', branch, cloneUrl, dir]); return { dir, cloneUrl, destroy() {} }; }, exec: async (ws, cmd, args) => { try { return { code: 0, out: execFileSync(cmd, args, { cwd: ws.dir, stdio: 'pipe' }).toString() }; } catch (e) { return { code: e.status ?? 1, out: String(e.stdout ?? '') + String(e.stderr ?? '') }; } } });
+
+test('resolve: main is merged into the conflicting branch, the agent resolves the markers, checks run, the merge commit is pushed, and the PR then merges cleanly', async () => {
+  const w = world(); await mkProject(w); const [a, b] = await twoCompeting(w); const prs = await w.e.listPrs('app');
+  await w.e.prAction('app', prs.find((x) => x.branch.startsWith(`agent/${a}-`)).number, 'merge', {}); w.e.cache.clear();
+  const pb = (await w.e.listPrs('app')).find((x) => x.branch.startsWith(`agent/${b}-`)); assert.equal((await w.e._forge(w.e.project('app')).mergeCheck(pb.number)).clean, false);
+  const { resolveConflicts } = await import('../src/resolve.mjs'); const d = w.e.deps(w.e.project('app'), 'fixer'); d.config.verify = 'test -f index.html'; d.sandbox = branchSandbox(w);
+  let prompt = ''; d.agent = { run: async (_sb, ws, p) => { prompt = p; const html = fs.readFileSync(path.join(ws.dir, 'index.html'), 'utf8'); assert.match(html, /<{7}/, 'the agent is handed real conflict markers'); write(path.join(ws.dir, 'index.html'), '<h1>First page</h1>\n<h1>Second page</h1>\n'); return { out: 'resolved', costUsd: 0 }; } };
+  const rec = await resolveConflicts(d, pb, { base: 'main', findings: 'What the reviewers found:\n- keep the shared header' }); assert.equal(rec.status, 'ok', rec.error ?? rec.status); assert.deepEqual(rec.conflicts, ['index.html']); assert.match(prompt, /index\.html/); assert.match(prompt, /keep the shared header/);
+  const c = await w.e._forge(w.e.project('app')).mergeCheck(pb.number); assert.equal(c.clean, true, 'now merges cleanly'); const m = await w.e.prAction('app', pb.number, 'merge', {}); assert.equal(m.merged, true);
+  assert.equal(bare(w.repo(), 'show', 'main:index.html'), '<h1>First page</h1>\n<h1>Second page</h1>');
+});
+
+test('resolve: an agent that leaves a conflict marker behind pushes nothing', async () => {
+  const w = world(); await mkProject(w); const [a, b] = await twoCompeting(w); const prs = await w.e.listPrs('app'); await w.e.prAction('app', prs.find((x) => x.branch.startsWith(`agent/${a}-`)).number, 'merge', {}); w.e.cache.clear();
+  const pb = (await w.e.listPrs('app')).find((x) => x.branch.startsWith(`agent/${b}-`)); const before = bare(w.repo(), 'rev-parse', pb.branch);
+  const { resolveConflicts } = await import('../src/resolve.mjs'); const d = w.e.deps(w.e.project('app'), 'fixer'); d.config.verify = false; d.config.maxAttempts = 2; d.sandbox = branchSandbox(w); d.agent = { run: async () => ({ out: 'I did nothing', costUsd: 0 }) };
+  const rec = await resolveConflicts(d, pb, { base: 'main' }); assert.equal(rec.status, 'unresolved'); assert.equal(bare(w.repo(), 'rev-parse', pb.branch), before, 'the branch is untouched');
+});
+
+test('resolve_pr: refuses a PR that already merges cleanly, and is an MCP operation (merge still is not)', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'Add greeting', { 'a.js': 'export const a = 1;\n' }); void ticket;
+  const pr = (await w.e.listPrs('app'))[0]; await assert.rejects(() => callOp(w.e, 'resolve_pr', { project: 'app', pr: pr.number }), /nothing to resolve/);
+});

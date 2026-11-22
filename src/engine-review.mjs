@@ -3,6 +3,7 @@
 import { readRuns } from './budget.mjs';
 import { hostKind } from './hosts.mjs';
 import * as pk from './pack.mjs';
+import { resolveConflicts } from './resolve.mjs';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const clip = (s, n) => String(s ?? '').slice(0, n);
@@ -42,6 +43,16 @@ export const reviewMethods = {
   },
   // What the reviewers found, as plain text a builder can act on.
   _findingsText(a) { const fs_ = a?.reviewer?.findings ?? []; if (!fs_.length) return ''; return `What the reviewers found:\n${fs_.map((f) => `- ${f.file ?? ''}${f.line ? `:${f.line}` : ''} ${f.issue}${f.fix ? ` (suggested: ${f.fix})` : ''}`.trim()).join('\n')}`; },
+  // Fix the conflicts instead of throwing the work away: merge main into the branch, have the agent resolve the conflicted files, check, push. Runs in the background; the Inbox shows the result.
+  async resolvePr(id, n) {
+    const p = this.project(id); const f = this._forge(p); const c = await f.mergeCheck(n);
+    if (c.state !== 'open') throw bad(`That pull request is ${c.state}`); if (c.clean !== false && !c.behind) throw bad('There is nothing to resolve: it already merges cleanly.');
+    if (this.busy) throw bad('The factory is busy with another run. Try again when it finishes.', 409);
+    const pr = (await this.listPrs(id)).find((x) => x.number === Number(n)); if (!pr) throw bad('That pull request is not open', 404);
+    const link = await this._ticketOfPr(p, n); const findings = this._findingsText(this._assessment(p, link?.run, Number(n))); const d = this.deps(p, 'fixer');
+    this._exclusive('resolve', async () => [await resolveConflicts(d, pr, { base: p.base ?? 'main', findings })]).catch(() => {}).finally(() => this.cache.delete(`p:${id}`));
+    this._audit({ what: 'resolve', project: id, pr: Number(n) }); return { started: true, conflicts: c.conflicts };
+  },
   // Throw the attempt away and build it again on the CURRENT main: for a change that conflicts with what has been merged since (the usual cause: it recreated a shared file).
   async rebuildPr(id, n, { reason } = {}) {
     const p = this.project(id); let extra = '';

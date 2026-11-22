@@ -382,7 +382,7 @@ export class Engine {
   prDetail(id, n) { const f = this._forge(this.project(id)); return f.diff(n).then(async (d) => { d.merge = await f.mergeCheck(n).catch(() => null); return d; }); }   // _forge throws at once for a project that is not on the local forge
   async prAction(id, n, action, body = {}) {
     const f = this._forge(this.project(id)); this.cache.delete(`p:${id}`);
-    if (action === 'merge') return this.mergePr(id, n); if (action === 'close') return this.rejectPr(id, n, body); if (action === 'rebuild') return this.rebuildPr(id, n, body); if (action === 'comment') return f.comment(n, body.text);
+    if (action === 'merge') return this.mergePr(id, n); if (action === 'close') return this.rejectPr(id, n, body); if (action === 'rebuild') return this.rebuildPr(id, n, body); if (action === 'resolve') return this.resolvePr(id, n); if (action === 'comment') return f.comment(n, body.text);
     throw Object.assign(new Error('Unknown action'), { status: 400 });
   }
   async setPublishTarget(id, { kind, repo: input, fields = {}, token }) {
