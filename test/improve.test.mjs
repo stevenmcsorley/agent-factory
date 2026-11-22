@@ -30,6 +30,13 @@ test('a job is scored from what was recorded: clean is 100, each problem costs, 
   assert.equal(scoreRun(run({ visual: { status: 'fail', summary: 'header overlaps' } })).score, 85); assert.equal(scoreRun(run({ quality: { passed: false, blockers: ['secret in code'] } })).score, 80); assert.ok(TAGS.retry.label && TAGS['fix-round'].label);
   assert.equal(scoreRun(run({ tokens: { input: 1_000_000, output: 1000 } }), { medianWeighted: 50_000 }).tags[0].id, 'expensive');
 });
+test('a retry is explained by what came right before it: failed tests, the reviewer, or the screenshots; only failed tests lead to the "run the checks" fix', () => {
+  const ph = (...names) => names.map((name) => ({ name })); const a = scoreRun(run({ attempts: 2, phases: ph('claim', 'agent', 'verify', 'agent', 'verify', 'review', 'push') })); assert.deepEqual(a.tags.map((t) => t.id), ['retry', 'retry-verify']); assert.match(a.tags[0].detail, /2 attempts: its tests failed/);
+  const b = scoreRun(run({ attempts: 2, phases: ph('agent', 'verify', 'review', 'agent', 'verify', 'review') })); assert.deepEqual(b.tags.map((t) => t.id), ['retry']); assert.match(b.tags[0].detail, /the reviewer asked for changes/);
+  assert.deepEqual(scoreRun(run({ attempts: 2, phases: ph('sandbox', 'review', 'agent', 'verify') })).tags.map((t) => t.detail), ['2 attempts'], 'a fix round that starts with a review is not a retry cause');
+  const rs = Array.from({ length: 5 }, () => run({ attempts: 2, phases: ph('agent', 'verify', 'review', 'agent') })); assert.equal(buildImprovements({ scored: scoreRuns(rs.concat(many(5)), [], { now: NOW }), now: NOW }).ideas.length, 0, 'reviewer-driven retries get no "run the checks" advice');
+  const rv = Array.from({ length: 5 }, () => run({ attempts: 2, phases: ph('agent', 'verify', 'agent', 'verify') })); assert.equal(buildImprovements({ scored: scoreRuns(rv.concat(many(5)), [], { now: NOW }), now: NOW }).ideas[0].change.skill.name, 'run-the-checks-first');
+});
 test('scoring a window: fix runs are not scored but mark their job, the provider comes from the usage log, old jobs are left out', () => {
   const a = run({ id: 'a', project: 'shop', ticket: 1 }); const fix = run({ id: 'a2', project: 'shop', ticket: 1, fixRound: 1, prNumber: 9 }); const b = run({ id: 'b', ticket: 2 }); const old = run({ id: 'old', started: ago(40) });
   const usage = [{ run: 'b', role: 'builder', via: 'openrouter' }, { run: 'b', role: 'reviewer', via: 'local' }, { run: 'a', role: 'builder', via: null }]; const s = scoreRuns([a, fix, b, old], usage, { now: NOW, days: 14 });

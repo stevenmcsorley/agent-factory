@@ -8,6 +8,7 @@ const W = (u) => (u.input - (u.cached ?? 0)) + (u.cached ?? 0) * 0.1 + (u.output
 // the problems a job can have: a plain label, how much it costs the score, and the advice that fixes it
 export const TAGS = {
   retry: { label: 'Needed more than one attempt', penalty: 10 },
+  'retry-verify': { label: 'Its first attempt failed its own tests', penalty: 0 },
   'verify-failed': { label: 'Its own tests failed', penalty: 30 },
   'review-changes': { label: 'The reviewer asked for changes', penalty: 12 },
   'finding-security': { label: 'A security problem was found', penalty: 8 },
@@ -29,11 +30,15 @@ const FINDING_RULES = [['finding-security', /secur|inject|\bxss\b|secret|credent
   ['finding-requirement', /missing|does not (implement|handle|add|include)|not implemented|never (adds|sets|handles)|requirement|acceptance|the ticket (asks|says|requires)|omits/i]];
 export function classifyFinding(f) { const text = `${f?.issue ?? ''} ${f?.fix ?? ''}`; for (const [tag, re] of FINDING_RULES) if (re.test(text)) return tag; return ['major', 'blocker', 'critical'].includes(String(f?.severity ?? '').toLowerCase()) ? 'finding-bug' : null; }
 
+// why a build was retried, read from the order of its phases: the agent runs again right after the tests failed, the reviewer asked for changes, or the visual check failed
+const RETRY_WORDS = { verify: 'its tests failed', review: 'the reviewer asked for changes', visual: 'the screenshots looked wrong' };
+export function retryCauses(phases = []) { const out = new Set(); let seen = false; let prev = null; for (const p of phases) { if (p.name === 'agent') { if (seen && prev && prev !== 'agent' && RETRY_WORDS[prev]) out.add(prev); seen = true; } prev = p.name; } return [...out]; }
+
 // One primary build run (the first run for a ticket); fix runs for the same ticket make it "fix-round". status other than ok / verify-failed (limits, factory errors) is not the agent's fault: scored 'stopped', left out of the averages.
 export function scoreRun(rec, { fixRounds = 0, medianWeighted = null } = {}) {
   const tags = []; const add = (id, detail) => { if (!tags.some((t) => t.id === id)) tags.push({ id, detail: detail ?? null }); };
   if (rec.status !== 'ok' && rec.status !== 'verify-failed') return { score: null, outcome: 'stopped', tags: [] };
-  if ((rec.attempts ?? 1) > 1) add('retry', `${rec.attempts} attempts`);
+  if ((rec.attempts ?? 1) > 1) { const why = retryCauses(rec.phases); add('retry', `${rec.attempts} attempts${why.length ? `: ${why.map((w) => RETRY_WORDS[w]).join(' and ')}` : ''}`); if (why.includes('verify')) add('retry-verify', 'a retry that followed a failed test run'); }
   if (rec.status === 'verify-failed') add('verify-failed', String(rec.verifyTail ?? '').slice(-160) || null);
   const rv = rec.review; if (rv?.verdict === 'changes') add('review-changes', String(rv.summary ?? '').slice(0, 200));
   for (const f of rv?.findings ?? []) { const t = classifyFinding(f); if (t) add(t, String(f.issue ?? '').slice(0, 200)); }
@@ -67,7 +72,7 @@ const SKILLS = {
   'finding-requirement': { name: 'cover-every-point', title: 'Cover every point of the ticket', roles: 'builder,fixer', text: 'Before you finish, re-read the ticket and tick off every point it asks for. If a point cannot be done, say so in your summary instead of leaving it out silently.' },
   'finding-bug': { name: 'check-what-else-uses-it', title: 'Check what else uses the code you change', roles: 'builder,fixer', text: 'Before changing shared code, search for everything else that uses it and make sure it still works. Prefer adding something new over changing something shared.' },
   'verify-failed': { name: 'run-the-checks-first', title: 'Run the checks before finishing', roles: 'builder,fixer', text: 'Run the project\'s test command before you finish, read any failure carefully and fix it. Keep changes small so a failure is easy to find.' },
-  retry: { name: 'run-the-checks-first', title: 'Run the checks before finishing', roles: 'builder,fixer', text: 'Run the project\'s test command before you finish, read any failure carefully and fix it. Keep changes small so a failure is easy to find.' },
+  'retry-verify': { name: 'run-the-checks-first', title: 'Run the checks before finishing', roles: 'builder,fixer', text: 'Run the project\'s test command before you finish, read any failure carefully and fix it. Keep changes small so a failure is easy to find.' },
   'visual-regression': { name: 'check-the-screens', title: 'Check the screens you touch', roles: 'builder,designer,fixer', text: 'After changing styles, think through every page that uses them at phone and desktop widths, in light and dark. A style used by several pages must not be changed in a way that breaks the others.' },
 };
 export const hashId = (s) => createHash('sha1').update(s).digest('hex').slice(0, 10);
