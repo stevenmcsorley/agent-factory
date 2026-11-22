@@ -10,6 +10,7 @@ import { sandbox as makeSandbox } from './adapters/sandbox.mjs';
 import { getPrompt } from './prompts.mjs';
 import { validateAgentPatch, readCodexModels } from './settings.mjs';
 import { parseUsageLimit } from './agentlimit.mjs';
+import { recordUsage } from './usage.mjs';
 import { needsTests, testerPrompt, snapshot, restore, dropSnapshot, forbiddenChanges, hashes } from './tester.mjs';
 import { run } from './util.mjs';
 import { reviewPrompt, parseVerdict, changeDiff, copyWorkspace, combineReviews } from './review.mjs';
@@ -59,10 +60,11 @@ export const roleMethods = {
   },
   _roleOn(p, role) { return p.roles?.[role]?.enabled ?? this.cfg.roles?.[role]?.enabled ?? false; },
   // The agent for a role: the global agent, with the role's own model and effort laid over it.
-  _agentFor(role, log) {
+  _agentFor(role, log, ctx = {}) {
     let agent = this.f.agent; if (!agent) { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; agent = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }
-    // Whichever role runs, the first sign of the plan's usage limit pauses every agent (see engine-limit.mjs).
-    return { ...agent, run: async (...args) => { const r = await agent.run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim); return r; } };
+    // The one place every agent call passes through, whichever role: the first sign of the plan's usage limit pauses every agent (engine-limit.mjs), and the tokens used are logged (usage.mjs).
+    return { ...agent, run: async (...args) => { const t0 = Date.now(); const r = await agent.run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim);
+      const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: (this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null, input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, ms: Date.now() - t0, ...(lim ? { limited: true } : {}) }); return r; } };
   },
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },
   _skillsText(role, projectId) { try { return sk.skillsFor(this.cfg.stateDir, { role, project: projectId }).text; } catch { return ''; } },
@@ -71,13 +73,13 @@ export const roleMethods = {
   // The reviewer and the security reviewer are separate passes with their own prompt, skills and model; the verdicts are combined.
   _reviewer(p, sandbox, log) {
     const passes = [['reviewer', 'reviewer-rules'], ['security', 'security-rules']].filter(([role]) => this._roleOn(p, role)); if (!passes.length) return undefined;
-    return async ({ ws, ticket, context, role: announce }) => {
+    return async ({ ws, ticket, context, role: announce, meta }) => {
       const diff = await changeDiff(ws.dir); const results = [];
       for (const [role, rules] of passes) {
         announce?.(role, role === 'security' ? 'checking for security problems' : 'reading the change'); const copy = copyWorkspace(ws);
         try {
           const prompt = reviewPrompt({ rules: getPrompt(rules, {}, this._promptDirs()), skills: this._skillsText(role, p.id), ticket, diff, context });
-          const r = await this._agentFor(role, log).run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+          const r = await this._agentFor(role, log, { project: p.id }).run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta });
           if (r.timedOut) results.push({ role, verdict: 'error', summary: `The ${role} pass timed out.`, findings: [] });
           else if (parseUsageLimit(r.out)) results.push({ role, verdict: 'error', summary: `The ${role} pass hit its usage limit.`, findings: [] });
           else results.push({ role, ...parseVerdict(r.out), ...(r.tokens ? { tokens: r.tokens } : {}) });
@@ -90,11 +92,11 @@ export const roleMethods = {
   // The tester hook. Undefined when the role is off. Everything it does is measured against a snapshot of the builder's change, and undone on any breach.
   _tester(p, sandbox, log) {
     if (!this._roleOn(p, 'tester')) return undefined;
-    return async ({ ws, ticket, files, rerun }) => {
+    return async ({ ws, ticket, files, rerun, meta }) => {
       const snap = await snapshot(ws); const before = await hashes(ws, snap.files);
       try {
         const diff = await changeDiff(ws.dir); const prompt = testerPrompt({ rules: getPrompt('tester-rules', {}, this._promptDirs()), skills: this._skillsText('tester', p.id), ticket, files, diff });
-        const r = await this._agentFor('tester', log).run(sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+        const r = await this._agentFor('tester', log, { project: p.id }).run(sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta });
         const undo = async (summary) => { await restore(ws, snap); return { status: 'reverted', summary, files: [] }; };
         if (r.timedOut) return await undo('it timed out');
         if (parseUsageLimit(r.out)) return await undo('it hit its usage limit');
@@ -110,7 +112,7 @@ export const roleMethods = {
   // The spec-writer hook: returns Markdown to append to a vague ticket, or null. Runs in an empty folder (it needs the ticket and repo summary, not the code).
   _clarifier(p, sandbox, log) {
     if (!this._roleOn(p, 'spec-writer')) return undefined;
-    return async (t, problems) => {
+    return async (t, problems, meta) => {
       // A shallow checkout so it can name real files; if the clone fails it still works from the ticket and the repo summary.
       let ws; try { const a = this._hostAdapter(p); ws = await sandbox.create({ cloneUrl: a.cloneUrl(p.repo), branch: 'spec', base: p.base, newBranch: false, gitEnv: a.gitEnv?.() ?? {}, depth: 1 }); } catch { /* fall back below */ }
       if (!ws) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-spec-')); ws = { dir, destroy: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } } }; }
@@ -118,7 +120,7 @@ export const roleMethods = {
         const ctx = (() => { try { const d = pk.packDir(this.cfg.stateDir, p.id); return pk.renderContext(pk.loadPack(d), d, t); } catch { return ''; } })();
         const prompt = [getPrompt('spec-writer-rules', {}, this._promptDirs()), this._skillsText('spec-writer', p.id) ? `\n${this._skillsText('spec-writer', p.id)}` : '', p.profile ? `\n## About the repository\n${profileSummary(p.profile)}` : '', ctx ? `\n## Project context (data)\n${ctx.slice(0, 5000)}` : '',
           `\n## The ticket (data)\nTitle: ${t.title}\n\n${String(t.body ?? '').slice(0, 3000)}`, `\n## Why it was not clear enough\n${(problems ?? []).join('; ')}`].join('\n');
-        const r = await this._agentFor('spec-writer', log).run(sandbox, ws, prompt, { timeoutMs: Math.min(this.cfg.limits.timeoutMs ?? 900_000, 300_000) });
+        const r = await this._agentFor('spec-writer', log, { project: p.id }).run(sandbox, ws, prompt, { timeoutMs: Math.min(this.cfg.limits.timeoutMs ?? 900_000, 300_000), meta });
         const out = String(r.out ?? '').trim().replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, ''); if (r.timedOut || !/^## Acceptance criteria/m.test(out)) return null;
         return out.slice(out.search(/^## Acceptance criteria/m)).slice(0, 2500);
       } finally { try { ws.destroy(); } catch { /* best effort */ } }
@@ -149,7 +151,7 @@ export const roleMethods = {
     try {
       const guide = sk.getSkill(this.cfg.stateDir, 'skill-writing').body;
       const prompt = [getPrompt('skill-writer-rules', {}, this._promptDirs()), `\n## Guidance\n${guide}`, current ? `\n## The skill to improve (keep its name)\n${sk.renderSkillFile(current)}` : '', name ? `\nName it: ${name}` : '', `\n## Request (data)\n${ask}`].join('\n');
-      const r = await this._agentFor('skill-writer').run(this._sandboxFor(), ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+      const r = await this._agentFor('skill-writer', undefined, {}).run(this._sandboxFor(), ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta: { ref: `skill ${name ?? ''}`.trim() } });
       let text = String(r.out ?? '').trim().replace(/^```(?:markdown|md)?\n/, '').replace(/\n```$/, '');
       const parsed = sk.parseSkillFile(text); if (!parsed.body) throw bad('The agent did not return a skill file');
       if (name) parsed.name = name; return sk.normalizeSkill({ ...parsed, roles: parsed.roles, projects: parsed.projects }, { name: parsed.name || name || 'new-skill' });

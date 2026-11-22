@@ -11,22 +11,23 @@ import { EFFORTS, MODEL_RE } from '../settings.mjs';
 export function parseClaudeJson(r) {
   try {
     const j = JSON.parse(r.out.trim().split('\n').filter(Boolean).pop());
-    return { ...r, out: j.result ?? r.out, costUsd: Number(j.total_cost_usd) || 0, isError: !!j.is_error };
+    const u = j.usage; const cached = Number(u?.cache_read_input_tokens) || 0;   // Claude reports cache reads separately from input_tokens: fold them in so 'input' means everything sent
+    return { ...r, out: j.result ?? r.out, costUsd: Number(j.total_cost_usd) || 0, isError: !!j.is_error, ...(u ? { tokens: { input: (Number(u.input_tokens) || 0) + cached + (Number(u.cache_creation_input_tokens) || 0), cached, output: Number(u.output_tokens) || 0 } } : {}) };
   } catch { return { ...r, costUsd: 0 }; }
 }
 
 // `codex exec --json` prints JSONL events; sum any token usage we can find. Cost is not reported (subscription).
 export function parseCodexJsonl(r) {
-  let input = 0, output = 0, last = '';
+  let input = 0, output = 0, cached = 0, reasoning = 0, last = '';
   for (const line of r.out.split('\n')) {
     try {
       const e = JSON.parse(line);
       const u = e.usage ?? e.msg?.usage ?? e.item?.usage;
-      if (u) { input += u.input_tokens ?? 0; output += u.output_tokens ?? 0; }
+      if (u) { input += u.input_tokens ?? 0; output += u.output_tokens ?? 0; cached += u.cached_input_tokens ?? u.cache_read_input_tokens ?? 0; reasoning += u.reasoning_output_tokens ?? 0; }
       const t = e.item?.text ?? e.msg?.message ?? e.message; if (typeof t === 'string') last = t;
     } catch { /* non-JSON line */ }
   }
-  return { ...r, out: last || r.out, costUsd: 0, tokens: { input, output } };
+  return { ...r, out: last || r.out, costUsd: 0, tokens: { input, output, cached, reasoning } };
 }
 
 const CRED_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];

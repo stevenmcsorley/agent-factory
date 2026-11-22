@@ -325,6 +325,7 @@ export const runPage = {
           h('div', { class: `bar-x ph-${k}` }, ph ? h('i', { style: { width: `${Math.max(3, ((ph.ms ?? 0) / maxMs) * 100)}%` } }) : null), h('span', { class: 't' }, ph ? dur(ph.ms) : '–')); }))),
       run.error ? h('div', { class: 'callout bad' }, icon('alert', 16), run.error) : null,
       visualRunCard(run),
+      run.usage?.length ? card('', h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Agent usage in this run')), h('ul', { class: 'plain' }, run.usage.map((u) => h('li', { class: 'row between' }, h('b', {}, ROLE_NAME[u.role] ?? u.role), h('span', { class: 'small mono' }, `${u.calls} call${u.calls === 1 ? '' : 's'} · ${kfmt(u.fresh)} fresh · ${kfmt(u.cached)} cached · ${kfmt(u.output)} out · ${dur(u.ms)}`)))), h('p', { class: 'muted small' }, 'Fresh is new text, cached is the conversation re-sent at each step (billed at a fraction), output is what the agent wrote.')) : null,
       run.assumptions ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'Assumptions the agent made'), h('span', { class: 'stamp warn' }, 'please check')), h('pre', { class: 'log-pre wrap' }, run.assumptions)) : null,
       run.question ? card('', h('div', { class: 'card-h' }, h('h2', {}, 'What the agent asked'), h('span', { class: 'stamp warn' }, 'needs your answer')), h('pre', { class: 'log-pre wrap' }, run.question), h('div', { class: 'row gap-t' }, h('a', { class: 'btn primary', href: '#/inbox' }, 'Answer in the inbox'))) : null,
       h('div', { class: 'cols-2' },
@@ -344,12 +345,28 @@ const stat = (l, v) => h('div', { class: 'stat' }, h('span', { class: 'eyebrow' 
 
 // ---- all work orders
 let runFilter = 'all';
+// Where the agent plan goes: tokens by role, split into fresh / cached / output. "Cost" is an estimate in fresh-input equivalents (cached counts a tenth, output six times).
+const kfmt = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+const ROLE_NAME = { builder: 'Builder', reviewer: 'Reviewer', security: 'Security reviewer', tester: 'Tester', 'spec-writer': 'Spec writer', designer: 'Designer', planner: 'Planner', fixer: 'Fixer', 'skill-writer': 'Skill writer' };
+function usageCard(u, days, onDays) {
+  if (!u || !u.totals.calls) return card('', h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Where the agent plan goes')), h('p', { class: 'muted' }, 'No agent calls recorded in this period yet. Every agent call from now on is measured here, by role.'));
+  const max = Math.max(...u.byRole.map((r) => r.weighted), 1); const t = u.totals;
+  const bar = (r) => h('div', { class: 'ubar' }, h('div', { class: 'ub-name' }, h('b', {}, ROLE_NAME[r.role] ?? r.role), h('span', { class: 'muted small' }, `${r.calls} call${r.calls === 1 ? '' : 's'}${r.estimated ? ` · ${r.estimated} older (builder total only)` : ''}`)),
+    h('div', { class: 'ub-track', title: `fresh ${kfmt(r.fresh)} · cached ${kfmt(r.cached)} · output ${kfmt(r.output)}` }, h('i', { class: 'f', style: { width: `${(r.fresh / max) * 100}%` } }), h('i', { class: 'c', style: { width: `${(r.cached * 0.1 / max) * 100}%` } }), h('i', { class: 'o', style: { width: `${(r.output * 6 / max) * 100}%` } })),
+    h('div', { class: 'ub-num' }, h('b', {}, `${Math.round(r.share * 100)}%`), h('span', { class: 'muted small' }, ` ${kfmt(r.fresh)} fresh · ${kfmt(r.cached)} cached · ${kfmt(r.output)} out`)));
+  return card('', h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Where the agent plan goes'), h('div', { class: 'segb' }, [7, 14, 30].map((d) => h('button', { type: 'button', class: d === days ? 'on' : '', 'aria-pressed': String(d === days), onclick: () => onDays(d) }, `${d} days`)))),
+    h('p', { class: 'muted small' }, `${t.calls} agent calls. Share of the estimated plan cost by role. ${Math.round(t.cachedShare * 100)}% of the text sent was cached (re-sent conversation, billed at a fraction); a typical call sent ${kfmt(t.avgInputPerCall)} tokens.${u.legacyRuns ? ` ${u.legacyRuns} older run${u.legacyRuns === 1 ? '' : 's'} only recorded the builder's total, so they count as all fresh (an over-estimate).` : ''}`),
+    h('div', { class: 'ubars' }, u.byRole.map(bar)), h('div', { class: 'legend' }, h('span', {}, h('i', { class: 'sw ub-f' }), 'fresh input'), h('span', {}, h('i', { class: 'sw ub-c' }), 'cached input (×0.1)'), h('span', {}, h('i', { class: 'sw ub-o' }), 'output (×6)')),
+    u.topRuns.length ? h('details', {}, h('summary', {}, 'Costliest runs'), h('ul', { class: 'plain' }, u.topRuns.slice(0, 6).map((r) => h('li', { class: 'row between' }, h('a', { href: `#/run/${r.run}` }, `${r.project ?? ''} ${r.ticket != null ? `#${r.ticket}` : ''} · ${r.run}`), h('span', { class: 'small mono' }, `${r.calls} call${r.calls === 1 ? '' : 's'} · ${kfmt(r.fresh + r.cached)} in · ${kfmt(r.output)} out`))))) : null,
+    u.byProject.length > 1 ? h('details', {}, h('summary', {}, 'By project'), h('ul', { class: 'plain' }, u.byProject.map((p) => h('li', { class: 'row between' }, h('b', {}, p.project), h('span', { class: 'small mono' }, `${Math.round(p.share * 100)}% · ${p.calls} calls · ${kfmt(p.fresh + p.cached)} in`))))) : null);
+}
+let usageDays = 14;
 export const runsPage = {
-  async load() { return { runs: await api('/runs?limit=300') }; },
-  draw({ runs }, ctx) {
+  async load() { const [runs, usage] = await Promise.all([api('/runs?limit=300'), api(`/usage?days=${usageDays}`).catch(() => null)]); return { runs, usage }; },
+  draw({ runs, usage }, ctx) {
     const f = { all: () => true, ok: (r) => r.status === 'ok', failed: (r) => !['ok', 'needs-info', 'stopped', 'budget-exhausted', 'recovered-requeued', 'repo-not-allowed'].includes(r.status), info: (r) => ['needs-info', 'repo-not-allowed'].includes(r.status) };
     const shown = runs.filter(f[runFilter]);
-    return [head('Work orders', 'Every agent run and feedback round, newest first.'),
+    return [head('Work orders', 'Every agent run and feedback round, newest first.'), usageCard(usage, usageDays, (d) => { usageDays = d; ctx.rerender(); }),
       h('div', { class: 'seg' }, [['all', 'All'], ['ok', 'Shipped'], ['failed', 'Failed'], ['info', 'Needed info']].map(([k, t]) => h('button', { class: runFilter === k ? 'on' : '', onclick: () => { runFilter = k; ctx.rerender(); } }, t))),
       card('', shown.length ? workOrders(shown) : empty('No work orders match', null))]; },
 };

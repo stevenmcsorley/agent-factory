@@ -52,7 +52,7 @@ export async function feedbackTick({ host, sandbox, agent, vcs, config, stateDir
       let extra = '';
       for (let a = 1; a <= (cfg.maxAttempts ?? 2); a++) {
         run.phase('agent', `attempt ${a}`);
-        const r = await agent.run(sandbox, ws, feedbackPrompt(pr, fbForPrompt) + extra, { timeoutMs: cfg.timeoutMs ?? 900_000 });
+        const r = await agent.run(sandbox, ws, feedbackPrompt(pr, fbForPrompt) + extra, { timeoutMs: cfg.timeoutMs ?? 900_000, meta: { run: rec.id, ref: `PR #${pr.number}` } });
         rec.costUsd += r.costUsd ?? 0;
         run.note('agentSummary', tail(r.out));
         if (r.timedOut) { rec.status = 'timeout'; break; }

@@ -93,7 +93,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
   // A vague ticket is not parked at once if a spec-writer is on: it drafts acceptance criteria, scope and assumptions into the ticket (once, clearly marked), and the gate looks again.
   if (config.gate !== false && !gate.ok && config.clarify && !String(t.body ?? '').includes(SPEC_MARK)) {
     try {
-      run.role('spec-writer', 'drafting acceptance criteria'); const add = await config.clarify(t, gate.problems); run.role(null);
+      run.role('spec-writer', 'drafting acceptance criteria'); const add = await config.clarify(t, gate.problems, { run: rec.id, ticket: t.id }); run.role(null);
       if (add) {
         const body = `${String(t.body ?? '').trimEnd()}\n\n${SPEC_MARK}\n_Drafted by the spec-writer agent because the ticket was too vague to start. Edit it if it is wrong._\n\n${add}`;
         try { await tickets.update?.(t.id, { body }); } catch { /* still use it for this run */ }
@@ -128,7 +128,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
     for (let a = 1; a <= (rec.blocked ? 0 : (cfg.maxAttempts ?? 2)); a++) {
       rec.attempts = a;
       run.phase('agent', `attempt ${a}`);
-      const r = await agent.run(sandbox, ws, buildPrompt(t, feedback, config.profileSummary, config.contextFor?.(t), config.promptRules?.()), { timeoutMs: cfg.timeoutMs ?? 900_000 });
+      const r = await agent.run(sandbox, ws, buildPrompt(t, feedback, config.profileSummary, config.contextFor?.(t), config.promptRules?.()), { timeoutMs: cfg.timeoutMs ?? 900_000, meta: { run: rec.id, ticket: t.id } });
       rec.costUsd += r.costUsd ?? 0;
       if (r.tokens) rec.tokens = { input: (rec.tokens?.input ?? 0) + r.tokens.input, output: (rec.tokens?.output ?? 0) + r.tokens.output };
       run.note('agentSummary', tail(r.out));
@@ -160,7 +160,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
         const need = needsTests(status);
         if (need) {
           run.phase('tests', 'a test engineer adds tests');
-          let tr; try { tr = await config.tester({ ws, ticket: t, files: need, rerun: async () => (await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image })).code === 0 }); } catch (e) { tr = { status: 'error', summary: String(e.message ?? e).slice(0, 200), files: [] }; }
+          let tr; try { tr = await config.tester({ ws, ticket: t, files: need, rerun: async () => (await sandbox.exec(ws, 'sh', ['-c', cfg.verify], { timeoutMs: cfg.timeoutMs ?? 900_000, image: cfg.image })).code === 0, meta: { run: rec.id, ticket: t.id } }); } catch (e) { tr = { status: 'error', summary: String(e.message ?? e).slice(0, 200), files: [] }; }
           run.note('tests', tr); const after = await vcs.diffStat(ws); run.note('changed', changedFiles(after));
         }
       }
@@ -187,7 +187,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       // Optional second opinion: another agent reads the change. Blocking findings go back to the builder once per attempt; on the last attempt the PR still opens, flagged.
       if (config.review) {
         run.phase('review', 'a second agent reads the change');
-        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t), role: (n, d) => run.role(n, d) }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
+        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t), role: (n, d) => run.role(n, d), meta: { run: rec.id, ticket: t.id } }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
         run.note('review', rv);
         if (rv.verdict === 'changes' && a < (cfg.maxAttempts ?? 2)) { rec.status = 'review-changes'; feedback = feedbackFromReview(rv); continue; }
       }

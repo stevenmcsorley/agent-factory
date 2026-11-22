@@ -68,7 +68,7 @@ export const designMethods = {
       const role = assets ? 'assets-rules' : 'designer-rules';
       const prompt = [getPrompt(role, {}, this._promptDirs()), this._skillsText('designer', id) ? `\n${this._skillsText('designer', id)}` : '', `\n## What to ${assets ? 'draw' : 'design'} (data)\n${request}${screens}`,
         previous ? `\n## Your previous version is in .factory-design/${assets ? 'previous/' : 'previous.html'}. Change only what this feedback asks for and keep the rest (data):\n${feedback}` : ''].join('\n');
-      const r = await d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000 });
+      const r = await d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta: { ref: `${kind === 'assets' ? 'artwork' : 'design'} ${did}` } });
       if (r.timedOut) throw bad('The designer timed out');
       const rationale = String(r.out ?? '').replace(/```[a-z]*[\s\S]*?```/gi, '').trim().slice(-1400);
       if (assets) {

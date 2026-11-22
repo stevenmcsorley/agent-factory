@@ -67,7 +67,7 @@ test('parseCodexJsonl sums tokens and keeps last message; tolerates noise', () =
     JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } }),
     JSON.stringify({ type: 'item.completed', item: { text: 'final' } })].join('\n');
   const r = parseCodexJsonl({ code: 0, out });
-  assert.equal(r.out, 'final'); assert.deepEqual(r.tokens, { input: 10, output: 5 });
+  assert.equal(r.out, 'final'); assert.deepEqual(r.tokens, { input: 10, output: 5, cached: 0, reasoning: 0 });
 });
 
 test('codexContainer guards: docker only, needs dedicated codexHome with auth.json, mounts it rw and never mounts ~/.codex by default', async () => {

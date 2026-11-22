@@ -378,3 +378,8 @@ input[type=search] { max-width: 320px; }
 @keyframes a-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .agent .a-dot { animation: none; } }
 .limit-card { border-left: 4px solid var(--amber); } .limit-card p { margin: 6px 0 12px; }
+
+/* usage bars */
+.ubars { display: grid; gap: 10px; margin: 12px 0; } .ubar { display: grid; grid-template-columns: minmax(130px, 190px) 1fr minmax(150px, 280px); gap: 12px; align-items: center; } .ub-name { display: grid; } .ub-num { font-size: 12.5px; }
+.ub-track { display: flex; height: 14px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; } .ub-track i { display: block; height: 100%; } .ub-track .f, .sw.ub-f { background: var(--orange); } .ub-track .c, .sw.ub-c { background: var(--blue); } .ub-track .o, .sw.ub-o { background: var(--amber); }
+@media (max-width: 720px) { .ubar { grid-template-columns: 1fr; gap: 4px; } }

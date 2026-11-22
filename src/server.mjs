@@ -105,6 +105,7 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m) => engine.getPreview(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m, b) => engine.setPreview(m[1], b.preview ?? null)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview\/check$/, async (m) => engine.startVisualCheck(m[1])],
+    ['GET', /^\/api\/usage$/, async (_m, _b, url) => engine.usageReport({ days: Number(url.searchParams.get('days')) || 14, project: url.searchParams.get('project') || undefined })],
     ['GET', /^\/api\/limit$/, async () => ({ limit: engine.planLimit(), autoResume: engine.autoResume() })],
     ['POST', /^\/api\/limit\/resume$/, async () => engine.clearPlanLimit()],
     ['GET', /^\/api\/notify$/, async () => engine.getNotify()],

@@ -102,7 +102,7 @@ export class Engine {
     const tickets = this.f.tickets?.(p) ?? buildTickets(p.tickets, { repo: p.repo, dir: this.projectDir(p), projectId: p.id, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec });
     const sb = this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log });
     const a = this.cfg.agent;
-    const agent = this._agentFor(role, log);
+    const agent = this._agentFor(role, log, { project: p.id });
     const vcs = this.f.vcs ?? gitVcs({ log, openPr: (args) => hostAdapter.openPr({ repo: p.repo, ...args }), gitEnv: hostAdapter.gitEnv() });
     const host = this.f.host?.(p) ?? hostAdapter.pr; // the PR/MR feedback side
     const repos = p.allowedRepos?.length ? Object.fromEntries([p.repo, ...p.allowedRepos].map((r) => [r, { base: p.repoBases?.[r] ?? p.base }])) : undefined;
@@ -157,7 +157,7 @@ export class Engine {
     if (e.type === 'end') { const a2 = this.active.get(e.run); this.active.delete(e.run); if (a2?.ticket != null) this.outcomes.set(`${a2.project}#${a2.ticket}`, { status: e.status, at: Date.now() }); }
   }
   activity() { return { active: [...this.active.values()], events: this.events.slice(-80).reverse(), agents: this.agentsNow(), roster: this.agentRoster() }; }
-  getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); return r; }
+  getRun(id) { const r = this.runs({ limit: 100000 }).find((x) => x.id === id); if (!r) throw Object.assign(new Error(`No such run: ${id}`), { status: 404 }); const usage = this.usageForRun(id); return usage.length ? { ...r, usage } : r; }
 
   // Charts and KPIs, derived from the run log. "Neutral" outcomes (gate bounces, pauses, requeues) are not failures.
   // ---- lifecycle events (ready, claimed, pr-opened, parked, failed, closed): the raw material for flow metrics. Append-only, one line each.
@@ -570,7 +570,7 @@ export class Engine {
     try {
       ws = await d.sandbox.create({ cloneUrl: d.config.cloneUrl, branch: 'plan', base: p.base, newBranch: false, gitEnv: d.config.gitEnv, depth: 1 });
       pk.materialize(pack, dir, ws.dir); this._materializeDesigns?.(id, ws.dir); onPhase?.('the agent is reading your brief and planning (a few minutes)');
-      const ask = async (prompt) => d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900000 });
+      const ask = async (prompt) => d.agent.run(d.sandbox, ws, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900000, meta: { ref: 'plan' } });
       let raw = pk.extractJson((await ask(pk.planPrompt(pack))).out);
       if (!raw) { onPhase?.('asking again for a clean plan'); raw = pk.extractJson((await ask(`${pk.planPrompt(pack)}\nYour previous answer was not valid JSON. Reply with ONLY the JSON object.`)).out); }
       const plan = pk.normalizePlan(raw, { sourceIds: pack.sources.map((x) => x.id) });

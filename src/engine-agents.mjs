@@ -1,6 +1,8 @@
 // What is every agent doing right now? One list for the factory line: runs in flight (by the agent working inside them) plus the background jobs
 // that are not runs at all (the designer, the planner, the skill writer, the visual check). Installed on Engine.prototype (see the bottom of engine.mjs).
 import * as ds from './designs.mjs';
+import { readUsage, summarize, split, weighted } from './usage.mjs';
+import { readRuns } from './budget.mjs';
 
 export const ROLE_LABEL = { 'spec-writer': 'Spec writer', builder: 'Builder', tester: 'Tester', reviewer: 'Reviewer', security: 'Security reviewer', designer: 'Designer', planner: 'Planner', fixer: 'Fixer', 'skill-writer': 'Skill writer', verify: 'Test command', visual: 'Visual check' };
 const CHECKS = new Set(['verify', 'visual']);   // run by the factory, not by an agent
@@ -11,6 +13,12 @@ const iso = (ms) => new Date(ms).toISOString();
 
 export const agentMethods = {
   _roleModel(role) { if (CHECKS.has(role)) return { model: null, effort: null }; const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; return { model: a.model ?? null, effort: a.reasoningEffort ?? null }; },
+  // Where the plan goes: tokens by role, project and day, split into fresh, cached and output (see usage.mjs).
+  usageReport({ days = 14, project } = {}) { const d = Math.max(1, Math.min(90, Number(days) || 14)); return summarize({ entries: readUsage(this.cfg.stateDir), runs: readRuns(this.cfg.stateDir), days: d, project }); },
+  // What one run cost, call by call and by role.
+  usageForRun(runId) { const rows = readUsage(this.cfg.stateDir).filter((e) => e.run === runId).map((e) => { const u = split({ input: e.input, cached: e.cached, output: e.output }); return { role: e.role, at: e.at, ms: e.ms ?? 0, ...u, weighted: weighted(u) }; });
+    const by = new Map(); for (const r of rows) { const a = by.get(r.role) ?? { role: r.role, calls: 0, fresh: 0, cached: 0, output: 0, ms: 0, weighted: 0 }; a.calls++; a.fresh += r.fresh; a.cached += r.cached; a.output += r.output; a.ms += r.ms; a.weighted += r.weighted; by.set(r.role, a); }
+    return [...by.values()].sort((a, b) => b.weighted - a.weighted); },
   agentsNow() {
     const out = [];
     for (const a of this.active.values()) {
