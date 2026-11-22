@@ -40,7 +40,8 @@ export const limitMethods = {
   // Tickets that only failed because of the limit go back in the queue (not ones that failed for a real reason).
   async requeueLimited() {
     const lastBy = new Map(); for (const r of readRuns(this.cfg.stateDir)) if (r.ticket != null) lastBy.set(`${r.project}#${r.ticket}`, r); const out = [];
-    for (const p of this.cfg.projects) { let list; try { list = await this.freshTickets(p.id); } catch { continue; }
+    const hit = new Set([...lastBy.values()].filter((r) => r.status === 'rate-limited').map((r) => r.project));   // only projects the limit actually stopped: do not walk every tracker (some are GitHub)
+    for (const p of this.cfg.projects.filter((x) => hit.has(x.id))) { let list; try { list = await this.freshTickets(p.id); } catch { continue; }
       for (const t of list) { if (t.state === 'CLOSED' || !(t.labels ?? []).includes('agent-failed')) continue; if (lastBy.get(`${p.id}#${t.id}`)?.status !== 'rate-limited') continue;
         try { await this.ticketAction(p.id, t.id, 'requeue'); out.push({ project: p.id, ticket: t.id }); } catch { /* it needs a human: leave it in the inbox */ } } }
     return out;
