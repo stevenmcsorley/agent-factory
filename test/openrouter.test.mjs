@@ -194,3 +194,10 @@ test('limits stay separate: OpenRouter running out never becomes the plan limit;
   assert.match(r2.out, /usage limit/, 'the job could not be done by either: it is reported as limited (and will be requeued)'); const lim = x.e.planLimit(); assert.ok(lim, 'there is a plan limit'); assert.match(String(lim.message), /usage limit/); assert.ok(lim.until < Date.now() + 25 * 3_600_000);
   assert.ok(!/12:00 AM|0:00 AM/.test(lim.untilText ?? '') || true);
 });
+
+test('buying credit lifts the cap: on the next refresh a key that is no longer free tier drops the old 50-a-day cap and the wait for the reset', async () => {
+  const c = clock(Date.UTC(2026, 10, 22, 12)); let free = true; const client = { models: async () => CATALOGUE, keyInfo: async () => ({ ok: true, freeTier: free, usage: 0, limit: 50, remaining: 50 }) };
+  const r = new ModelRouter({ dir: tmp(), client, now: c.now, config: () => ({}) }); await r.refresh(); r.noteFail('mid/gemma-31b:free', { kind: 'daily-limit', message: 'free-models-per-day', retryAtMs: Date.UTC(2026, 10, 23), limit: 50 });
+  assert.equal(r.budget().cap, 50); assert.equal(r.pick({}), null, 'the free allowance is used'); free = false; await r.refresh();
+  assert.equal(r.budget().cap, 1000, 'now 1000 a day'); assert.ok(r.pick({}), 'free models are usable again straight away'); assert.equal(r.status().freeUntil, null);
+});
