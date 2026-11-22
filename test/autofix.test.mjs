@@ -117,3 +117,10 @@ test('autonomous mode: a review that could not run (the reviewers hit a limit) i
   const w = world({ fixes: true }); await heldPr(w, { verdict: 'error', summary: 'The reviewer did not return a verdict in the expected format.', findings: [] }); w.e.setUnattended('app', { rounds: 2, designs: false }); const p = w.e.project('app');
   const res = await w.e.autopilot(p); assert.deepEqual(res.map((r) => r.status), ['merged']); assert.ok(w.calls.review >= 2, 'a fresh review, then another after the fix'); assert.equal(w.calls.fix, 1); assert.match(bare(w.repo(), 'show', 'main:a.js'), /\/\/ header/);
 });
+
+test('autonomous mode: a review that could not run does not use up a fix round, and is retried after a pause rather than on every pass', async () => {
+  const w = world({ fixes: true }); await heldPr(w, { verdict: 'error', summary: 'The reviewer did not return a verdict in the expected format.', findings: [] }); w.e.setUnattended('app', { rounds: 2, designs: false }); const p = w.e.project('app');
+  w.e._agentFor = () => ({ name: 'fake', run: async () => ({ out: "You've hit your usage limit. Try again at 11:59 PM.", costUsd: 0, tokens: {} }) });   // every reviewer call fails to give a verdict
+  const first = await w.e.autopilot(p); assert.deepEqual(first.map((r) => r.status), ['held']); const st = w.e._autoState(); assert.equal(st.fixRounds['app:1'] ?? 0, 0, 'no round was used up'); assert.ok(st.retryAt['app:1'] > Date.now(), 'a retry is scheduled');
+  const calls = w.calls.review; await w.e.autopilot(p); assert.equal(w.calls.review, calls, 'the next pass does not try again straight away');
+});
