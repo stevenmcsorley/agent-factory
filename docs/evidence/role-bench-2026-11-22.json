@@ -1,0 +1,82 @@
+{
+ "at": "2026-11-22",
+ "what": "Role benchmarks on Codex models, effort low, through the factory harness. security: 6 planted vulnerabilities and 3 clean changes, one request each. builder: 6 small coding tickets judged by hidden tests, one attempt each. One run per model: a signal, not a guarantee.",
+ "security": {
+  "gpt-6-luna": {
+   "cases": 9,
+   "pass": 0,
+   "caught": 6,
+   "defects": 6,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 130409,
+   "cached": 109440,
+   "output": 964,
+   "ms": 60867
+  },
+  "gpt-6.1-sol": {
+   "cases": 9,
+   "pass": 0,
+   "caught": 6,
+   "defects": 6,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 151923,
+   "cached": 129152,
+   "output": 1077,
+   "ms": 76919
+  },
+  "gpt-6.2-astra": {
+   "cases": 9,
+   "pass": 0,
+   "caught": 6,
+   "defects": 6,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 148949,
+   "cached": 125440,
+   "output": 1096,
+   "ms": 89928
+  }
+ },
+ "security_note": "hardcoded-secret was re-run with a realistic-looking key (the first key looked like a Stripe key and was blocked by GitHub push protection): gpt-6-luna, gpt-6.1-sol and gpt-6.2-astra all caught it; a key literally named \"not-a-real-key\" was approved by luna and sol, a reasonable reading.",
+ "builder": {
+  "gpt-6-luna": {
+   "cases": 6,
+   "pass": 6,
+   "caught": 0,
+   "defects": 0,
+   "falseBlocks": 0,
+   "cleans": 0,
+   "input": 466134,
+   "cached": 433408,
+   "output": 5326,
+   "ms": 171076
+  },
+  "gpt-6.1-sol": {
+   "cases": 6,
+   "pass": 6,
+   "caught": 0,
+   "defects": 0,
+   "falseBlocks": 0,
+   "cleans": 0,
+   "input": 396287,
+   "cached": 356992,
+   "output": 5985,
+   "ms": 198498
+  },
+  "gpt-6.2-astra": {
+   "cases": 6,
+   "pass": 6,
+   "caught": 0,
+   "defects": 0,
+   "falseBlocks": 0,
+   "cleans": 0,
+   "input": 405351,
+   "cached": 384128,
+   "output": 3492,
+   "ms": 168632
+  }
+ },
+ "builder_note": "All three passed all six: these small, well-specified tickets do not separate the models. The result supports starting small tickets on the cheaper model with the usual one as the step up; it does not show the cheaper model can do large or design-heavy tickets."
+}

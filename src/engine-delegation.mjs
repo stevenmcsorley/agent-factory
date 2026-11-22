@@ -45,13 +45,14 @@ export const delegationMethods = {
   // Model steps inside Codex: tiers = { role: [first model, then the next on a retry, ...] }, ending with the strongest.
   _tiers() { const t = this.cfg.agents?.tiers; return t && typeof t === 'object' ? Object.fromEntries(Object.entries(t).filter(([r, v]) => ROLE_KEYS.includes(r) && Array.isArray(v))) : {}; },
   // The models a role steps through, cheapest first: yours if you set them (an empty list = the usual model only), else the harness defaults (the usual model is always the last step), else none.
-  _ladder(role) {
+  _ladder(role, size = null) {
     const mine = this._tiers()[role]; if (mine) return { models: mine, source: mine.length ? 'you' : 'none' };
     if (this.cfg.agents?.defaultTiers === false || !/codex/i.test(String(this.cfg.agent?.kind ?? ''))) return { models: [], source: 'none' };
-    const avail = new Set(this.codexModels().map((m) => m.id)); const usual = this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent?.model; const cheap = (DEFAULT_TIERS[role]?.models ?? []).filter((m) => avail.has(m) && m !== usual);
+    const avail = new Set(this.codexModels().map((m) => m.id)); const usual = this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent?.model; const def = DEFAULT_TIERS[role] ?? {}; if (def.sizes && !def.sizes.includes(size)) return { models: [], source: 'none' };   // e.g. builders start cheaper only on small tickets
+    const cheap = (def.models ?? []).filter((m) => avail.has(m) && m !== usual);
     return cheap.length && usual ? { models: [...cheap, usual], source: 'default' } : { models: [], source: 'none' };
   },
-  _tierModel(role, attempt = 1) { const t = this._ladder(role).models; return t.length ? t[Math.min(Math.max(1, attempt), t.length) - 1] : null; },
+  _tierModel(role, attempt = 1, size = null) { const t = this._ladder(role, size).models; return t.length ? t[Math.min(Math.max(1, attempt), t.length) - 1] : null; },
   // The Codex models this login offers (from Codex's own list), so a step can be chosen by name.
   codexModels() { const home = this.cfg.agent?.codexHome; for (const f of [home && path.join(home, 'models_cache.json'), path.join(os.homedir(), '.codex', 'models_cache.json')].filter(Boolean)) { try { const d = JSON.parse(fs.readFileSync(f, 'utf8')); const list = (d.models ?? []).filter((m) => m.visibility === 'list').map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, description: m.description ?? '', context: m.context_window ?? null })); if (list.length) return list; } catch { /* try the next */ } } return []; },
   _fallbackAny() { return ROLE_KEYS.some((r) => this._fallbackCovers(r)); },
@@ -85,7 +86,7 @@ export const delegationMethods = {
       } else {
         // a role may start on an older, cheaper Codex model and step up on each retry (cfg.agents.tiers); the model that did the work is what gets recorded
         // the harness: builders step up a model on each retry; every other role steps up when its output fails the check for that role (a verdict that does not parse, an empty or token-thin answer)
-        const seq = this._ladder(role).models; const climbs = role === 'builder' || role === 'fixer'; let idx = climbs ? Math.min(Math.max(1, call.attempt), seq.length || 1) - 1 : 0; let tier = seq[idx] ?? null; let o = await onPlan(args, tier); r = o.r;
+        const seq = this._ladder(role, call.size).models; const climbs = role === 'builder' || role === 'fixer'; let idx = climbs ? Math.min(Math.max(1, call.attempt), seq.length || 1) - 1 : 0; let tier = seq[idx] ?? null; let o = await onPlan(args, tier); r = o.r;
         while (!climbs && !o.lim && seq.length && idx < seq.length - 1 && !validateOutput(role, r?.out).ok) { const bad = validateOutput(role, r?.out); this._audit({ what: 'harness', action: 'step-up', role, project: ctx.project ?? null, from: tier, to: seq[idx + 1], why: bad.why }); idx++; const prev = tier; tier = seq[idx]; o = await onPlan(args, tier); r = o.r; escalated = true; why = `${why}; ${prev} ${bad.why}, so ${tier} took over`; }
         if (tier && r) { r = { ...r, model: r.model ?? tier }; why = `${why}; model ${tier}${seq.length > 1 ? ` (step ${idx + 1} of ${seq.length})` : ''}`; }
         // the plan ran out in the middle of this call: if the free models may stand in, do the same job on them instead of failing it
@@ -101,7 +102,7 @@ export const delegationMethods = {
   agentPolicy() {
     const pol = this._policy(); const or = this._orConf(); const key = !!this._orKey(); const limited = !!this.planLimit();
     const ls = this._localState('builder', false);
-    const roles = Object.fromEntries(ROLE_KEYS.map((role) => { const eff = effectiveRoute(role, pol); const d = decide({ role, mode: pol.mode, routes: pol.routes, size: 'S', attempt: 1, orUsable: or.enabled && key, orReady: true, orRemaining: null, planLimited: limited, codexUsable: !limited, localUsable: ls.usable, localReady: ls.ready }); return [role, { route: eff.route, source: eff.source, why: eff.why ?? null, default: DEFAULT_ROUTES[role]?.route ?? 'codex', defaultWhy: DEFAULT_ROUTES[role]?.why ?? null, judge: JUDGES.has(role), first: d.provider, firstWhy: d.why, harness: HARNESS[role] ?? null, ladder: { ...this._ladder(role), evidence: DEFAULT_TIERS[role]?.evidence ?? 'none' } }]; }));
+    const roles = Object.fromEntries(ROLE_KEYS.map((role) => { const eff = effectiveRoute(role, pol); const d = decide({ role, mode: pol.mode, routes: pol.routes, size: 'S', attempt: 1, orUsable: or.enabled && key, orReady: true, orRemaining: null, planLimited: limited, codexUsable: !limited, localUsable: ls.usable, localReady: ls.ready }); return [role, { route: eff.route, source: eff.source, why: eff.why ?? null, default: DEFAULT_ROUTES[role]?.route ?? 'codex', defaultWhy: DEFAULT_ROUTES[role]?.why ?? null, judge: JUDGES.has(role), first: d.provider, firstWhy: d.why, harness: HARNESS[role] ?? null, ladder: { ...this._ladder(role, DEFAULT_TIERS[role]?.sizes?.[0] ?? null), sizes: DEFAULT_TIERS[role]?.sizes ?? null, evidence: DEFAULT_TIERS[role]?.evidence ?? 'none' } }]; }));
     return { mode: pol.mode, modes: MODES, routes: pol.routes, roles, tiers: this._tiers(), defaultTiers: this.cfg.agents?.defaultTiers !== false, openrouterReady: or.enabled && key, localEnabled: this._localConf().enabled, localReady: ls.ready, codexLimited: limited, usage: this.usageByProvider(7) };
   },
   setAgentPolicy(patch = {}) {

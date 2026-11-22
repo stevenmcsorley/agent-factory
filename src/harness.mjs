@@ -19,13 +19,13 @@ export const HARNESS = {
 // 'measured' = benchmarked here (docs/evidence), 'provisional' = a sensible start that the Improvements page will confirm or call off. An empty list means: the usual model, no steps.
 export const DEFAULT_TIERS = {
   reviewer: { models: ['gpt-6-luna'], evidence: 'measured', proof: 'docs/evidence/reviewer-codex-models-2026-11-22.json' },
-  security: { models: [], evidence: 'none' },
+  security: { models: ['gpt-6-luna'], evidence: 'measured', proof: 'docs/evidence/role-bench-2026-11-22.json' },
   tester: { models: ['gpt-6.1-sol'], evidence: 'provisional' },
   'spec-writer': { models: ['gpt-6-luna'], evidence: 'provisional' },
   'skill-writer': { models: ['gpt-6-luna'], evidence: 'provisional' },
   designer: { models: [], evidence: 'none' },
   planner: { models: [], evidence: 'none' },
-  builder: { models: [], evidence: 'none' },
+  builder: { models: ['gpt-6-luna'], sizes: ['S'], evidence: 'provisional', proof: 'docs/evidence/role-bench-2026-11-22.json' },
   fixer: { models: [], evidence: 'none' },
 };
 
