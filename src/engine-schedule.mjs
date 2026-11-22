@@ -18,7 +18,7 @@ export const scheduleMethods = {
   },
   // Projects whose turn it is: unpaused, inside their schedule, lowest priority number first. A project that finished its plan and asked to stop is paused here.
   _dueProjects(now = Date.now()) {
-    const due = []; if (this.planLimit()) return due;   // the plan's limit pauses every agent, so no project is due until it lifts
+    const due = []; if (this.planLimit() && !this._fallbackAny?.()) return due;   // the plan's limit pauses every agent, so no project is due until it lifts (unless OpenRouter is set to stand in)
     for (const p of this.cfg.projects) {
       if (p.schedule?.stopWhenDone && !p.paused) {
         try { if (pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)).plan?.status === 'complete') { p.paused = true; this._persist(); this._audit({ what: 'schedule', project: p.id, note: 'plan complete: project paused (stopWhenDone)' }); } } catch { /* best effort */ }

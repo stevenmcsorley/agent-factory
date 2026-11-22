@@ -154,8 +154,9 @@ test('engine: when the plan says it is limited, OpenRouter does the same job ins
   const builder = w.e._agentFor('builder', path.join(w.root, 'l.log'), { project: 'p' }); const r = await builder.run({ kind: 'local', exec: async (_w, cmd, args) => ({ code: 0, out: 'You have hit your usage limit. Try again at 11:59 PM.' }) }, { dir }, 'Do it', { timeoutMs: 30_000, meta: {} });
   assert.ok(w.e.planLimit(), 'the limit is noted'); assert.equal(r.out, 'free model says hello', 'but the job was done on a free model'); assert.ok(w.log.length >= 1);
   assert.equal(w.e._fallbackAny(), true); assert.doesNotThrow(() => w.e.assertAgentAvailable(), 'agents are not paused while OpenRouter can cover'); assert.equal(w.e._due({ id: 'a', schedule: null }).reasons?.some?.((x) => x.code === 'plan-limit') ?? false, false);
+  await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } }); assert.deepEqual(w.e._dueProjects().map((p) => p.id), ['app'], 'the project is still due: work carries on');
   assert.match(fs.readFileSync(path.join(w.e.cfg.stateDir, 'audit.jsonl'), 'utf8'), /"action":"fallback"/);
-  w.e.setOpenRouter({ fallback: { enabled: false } }); assert.throws(() => w.e.assertAgentAvailable(), /usage limit is reached/, 'without the fallback it pauses as before'); assert.equal(w.e._fallbackAny(), false);
+  w.e.setOpenRouter({ fallback: { enabled: false } }); assert.throws(() => w.e.assertAgentAvailable(), /usage limit is reached/, 'without the fallback it pauses as before'); assert.deepEqual(w.e._dueProjects(), [], 'and no project is due'); assert.equal(w.e._fallbackAny(), false);
 });
 
 test('engine: testing a model makes one real call and records it; a model that rate-limits is marked resting; reset clears it', async () => {
