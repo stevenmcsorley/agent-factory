@@ -23,8 +23,9 @@ export const TAGS = {
   conflicts: { label: 'Clashed with other work', penalty: 4 },
   expensive: { label: 'Used far more than a usual job', penalty: 5 },
 };
-const FINDING_RULES = [['finding-security', /secur|inject|\bxss\b|secret|credential|csrf|sanitis|sanitiz|vulnerab|inline script/i], ['finding-a11y', /accessib|alt text|\balt\b|\baria\b|aria-|contrast|\blabel|keyboard|focus ring|screen reader/i], ['finding-tests', /\btests?\b|assert|coverage|weaken|skipp?ed|test file/i],
-  ['finding-scope', /out of scope|outside (of )?the ticket|not (part of|asked|requested)|unrelated|beyond the ticket|ticket.s scope|\bscope\b|also changes|changing .* outside/i], ['finding-conventions', /convention|existing (style|pattern|class|component)|naming|inconsistent|house style|shared (class|style|stylesheet)|design token|duplicat|reuse/i],
+const FINDING_RULES = [['finding-security', /secur|inject|\bxss\b|secret|credential|csrf|sanitis|sanitiz|vulnerab|inline script/i], ['finding-a11y', /accessib|alt text|\balt\b|\baria\b|aria-|contrast|\blabel|keyboard|focus ring|screen reader/i],
+  ['finding-scope', /out of scope|outside (of )?the (ticket|request|scope)|not (part of|asked|requested)|unrelated|beyond (what|the (ticket|request))|ticket.s scope|\bscope\b|also changes|broaden|changes? .* outside/i], ['finding-tests', /\btests?\b|assert|coverage|weaken|skipp?ed|test file|suite (is |stays |would stay )?green/i],
+  ['finding-conventions', /convention|existing (style|pattern|class|component)|naming|inconsistent|house style|shared (class|style|stylesheet)|design token|duplicat|reuse|second implementation/i],
   ['finding-requirement', /missing|does not (implement|handle|add|include)|not implemented|never (adds|sets|handles)|requirement|acceptance|the ticket (asks|says|requires)|omits/i]];
 export function classifyFinding(f) { const text = `${f?.issue ?? ''} ${f?.fix ?? ''}`; for (const [tag, re] of FINDING_RULES) if (re.test(text)) return tag; return ['major', 'blocker', 'critical'].includes(String(f?.severity ?? '').toLowerCase()) ? 'finding-bug' : null; }
 
@@ -40,7 +41,7 @@ export function scoreRun(rec, { fixRounds = 0, medianWeighted = null } = {}) {
   if (rec.quality && rec.quality.passed === false) add('quality-gate', (rec.quality.blockers ?? []).slice(0, 2).join('; ').slice(0, 160) || null);
   if (fixRounds > 0) add('fix-round', `${fixRounds} fix round${fixRounds === 1 ? '' : 's'}`);
   if ((rec.conflicts ?? []).length) add('conflicts', rec.conflicts.slice(0, 3).join(', '));
-  const w = rec.tokens ? W(rec.tokens) : 0; if (medianWeighted && w > medianWeighted * 3 && w > 50_000) add('expensive', `${Math.round(w / medianWeighted)}× the usual`);
+  const w = rec.tokens ? W(rec.tokens) : 0; if (medianWeighted && w > medianWeighted * 4 && w > 80_000) add('expensive', `${Math.round(w / medianWeighted)}× the usual`);
   const cut = tags.reduce((n, t) => n + (t.id === 'retry' ? Math.min(25, TAGS.retry.penalty * ((rec.attempts ?? 2) - 1)) : (TAGS[t.id]?.penalty ?? 0)), 0);
   return { score: Math.max(0, 100 - cut), outcome: rec.status === 'ok' ? 'ok' : 'failed', tags };
 }
