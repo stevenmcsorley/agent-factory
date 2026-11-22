@@ -597,3 +597,12 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 @keyframes ln-a1 { 0%, 4% { transform: rotate(0deg); } 14% { transform: rotate(-10deg); } 26% { transform: rotate(-.3deg); } 40% { transform: rotate(2deg); } 52% { transform: rotate(-2deg); } 62% { transform: rotate(1deg); } 72% { transform: rotate(-.3deg); } 84% { transform: rotate(-10deg); } 96%, 100% { transform: rotate(0deg); } }
 @keyframes ln-a2 { 0%, 4% { transform: rotate(0deg); } 14% { transform: rotate(-12deg); } 26% { transform: rotate(29deg); } 40% { transform: rotate(31deg); } 52% { transform: rotate(27deg); } 62% { transform: rotate(30deg); } 72% { transform: rotate(29deg); } 84% { transform: rotate(-12deg); } 96%, 100% { transform: rotate(0deg); } }
 @keyframes ln-a3 { 0%, 4% { transform: rotate(0deg); } 14% { transform: rotate(10deg); } 26% { transform: rotate(-14deg); } 40% { transform: rotate(-16deg); } 52% { transform: rotate(-12deg); } 62% { transform: rotate(-15deg); } 72% { transform: rotate(-14deg); } 84% { transform: rotate(10deg); } 96%, 100% { transform: rotate(0deg); } }
+
+/* waiting, not working: every machine has a slow, faint life of its own (the robot arm sways; the others glow, glint and breathe). The working motions above override these, being more specific. */
+.lineart .ln-shimmer { opacity: .1; animation: ln-shim 3.4s linear infinite; } .lineart .ln-rollglint { opacity: .1; animation: ln-shim 2.6s linear infinite; }
+.lineart .ln-blueglow { animation: ln-idleglow 5.2s ease-in-out infinite; } .lineart .ln-lens { animation: ln-idleglow 3.8s ease-in-out -1s infinite; }
+.lineart .ln-sweep { opacity: .22; animation: ln-sweep 7s ease-in-out infinite; } .lineart .ln-glow { animation: ln-idlepulse 4.6s ease-in-out infinite; }
+.lineart .ln-chev { animation: ln-idlepulse 3.4s ease-in-out infinite; } .lineart .ln-chev1 { animation-delay: -.6s; } .lineart .ln-chev2 { animation-delay: -1.2s; }
+.lineart .ln-head { animation: ln-idlebob 5.5s ease-in-out infinite; } .lineart .ln-vlight { animation: ln-idleblink 3.2s ease-in-out infinite; } .lineart.shipping .ln-bin-glow { animation: ln-idlebin 5s ease-in-out infinite; }
+@keyframes ln-idleglow { 0%, 100% { opacity: .06; } 50% { opacity: .3; } } @keyframes ln-idlepulse { 0%, 100% { opacity: .04; } 50% { opacity: .32; } } @keyframes ln-idlebob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@keyframes ln-idleblink { 0%, 100% { opacity: .5; } 50% { opacity: 1; } } @keyframes ln-idlebin { 0%, 100% { stroke-opacity: .2; } 50% { stroke-opacity: .5; } }
