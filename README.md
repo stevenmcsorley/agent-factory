@@ -53,6 +53,7 @@ It can run **entirely on your machine**: a built-in issue tracker and a local gi
 | **A harness around every model** | The model is the swappable part. Around it sit checks that do not take its word for anything, and cheaper models start first with a stronger one stepping in when a check fails. |
 | **It improves itself, with your say-so** | Every finished job is scored. Problems that keep coming back become suggested fixes you approve, and the page measures whether they helped. |
 | **Measured, not assumed** | Usage by model, agent and project; limits and when they reset; benchmarks for the cheaper-model defaults; a panel that answers "is the harness working?". |
+| **Guardrails you can test** | Caps, allowlists, protected paths, recovery and human-only merging, enforced outside the model. `npm run drill` proves nine of them hold against a misbehaving scripted agent. |
 | **Autonomous when you say so** | One switch makes a project run unattended: reviewers on, fix rounds, conflict resolution, merging, with caps. |
 | **Drive it by prompt** | An MCP server with **144 operations**. In Code Mode the AI needs about **270 tokens** of context, not 21,000. |
 
@@ -340,6 +341,78 @@ Settings are controllable too: delegation (`set_agent_policy`), local models (`s
 ```
 
 The OpenRouter key is a secret (`OPENROUTER_API_KEY` in `state/secrets.env`, mode 600), never in the config and never returned by any API.
+
+## Guardrails
+
+A factory that works unattended needs limits it cannot talk its way past. Every guardrail below is enforced by the factory's own code, outside the model, so a confident or misbehaving agent cannot argue with it. They fall into five groups.
+
+**1. What gets in**
+
+| Guardrail | What it does |
+|---|---|
+| **Allowlisted authors** | Only tickets written by you (`allowedAuthors` and its equivalents) can queue work. Ticket text is treated as untrusted data, and only comments from trusted authors ever reach the agent. |
+| **Clarity gate** | A ticket too vague to act on gets a question and the `agent-needs-info` label, before any agent runs. |
+| **Only your repositories** | A ticket pointing at a repository you have not added is refused. |
+| **Tests required (optional)** | With `requireVerify`, a project with no test command gets no agent runs: the ticket is parked with what to do. Without it, the PR still opens and says plainly it was not machine-checked. |
+| **Ticket file allowlist** | A ticket can name the only files that may change; a change outside the list goes back to the builder. |
+
+**2. What the agent can touch**
+
+| Guardrail | What it does |
+|---|---|
+| **Sandbox** | A throwaway container (your uid, 2 GB, 2 CPU) on an internal network. The only way out is a proxy that allows the agent's own API hosts and the package registry. It receives no GitHub credentials; pushing happens on the host afterwards. |
+| **Protected paths** | Edits to CI files (`.github/` and friends) or the factory's own config reject the run and push nothing. The per-repo rules are read from the base branch, so an agent cannot rewrite its own. |
+| **Secrets and vulnerabilities** | The quality gate, run by the factory on the changed lines, blocks a new secret after one retry: no branch, no PR. |
+| **Honest tests** | Removed or weakened assertions are flagged on the PR (or blocked, if you ask). The claims check refuses a switched-off test and "I added tests" with none written. |
+| **Keys stay on the host** | Free and local model calls are made by the factory on the host, so those keys and endpoints never enter a container. |
+
+**3. How much it can do**
+
+| Guardrail | Default | What it does |
+|---|---|---|
+| `maxRunsPerDay` | 20 | Stops claiming work once the day's runs are used. |
+| `dailyBudgetUsd` | off | A spend cap when you use an API key. |
+| `maxAttempts` | 2 | Attempts per ticket, each on the next model step. |
+| `timeoutMs` | 15 minutes | A hard time limit per attempt. |
+| `maxConcurrent` | 1 | Projects building at once. |
+| `maxOpenReviews` | off | **Work stops when review cannot keep up:** no new tickets are claimed while that many agent PRs wait for a human. |
+| Autonomy caps | 20 merges a day, 2 fix rounds | In unattended mode: a ceiling on automatic merges, bounded fix rounds on reviewer findings, and a limit on fix tickets per failing pipeline. |
+| Usage limits | automatic | When Codex runs out of plan the factory notes when it returns and pauses (or hands over to the free models if you allow it); a free model that hits a limit rests and returns by itself. |
+
+**4. When something goes wrong**
+
+| Guardrail | What it does |
+|---|---|
+| **Leases and recovery** | A claim has an owner process. A run that dies is recovered: the ticket is requeued twice, then handed to a human, so a poison ticket cannot loop forever. |
+| **Fencing** | Every claim carries a token checked again before anything is pushed or written to the tracker, so a late or replaced worker cannot publish. |
+| **Bounded retries** | Retries, fix rounds and step-ups all have ceilings, and every one is logged with its reason. |
+| **Safe merging** | On the local forge, a branch that changed after it was verified, one touching protected files, or a conflicting one is refused, and a hook planted in a repository never runs. Merging builds the result as git objects and moves the branch with a compare-and-swap. |
+
+**5. You stay in charge**
+
+- **Pause** in the UI, or `touch state/STOP`, halts everything.
+- **Nothing merges on its own** unless you turn on autonomy, which still requires a passing reviewer and passing checks.
+- **Nothing is applied without a click:** designs, plans, drafted skills and the improvement loop's suggested fixes all wait for your approval.
+- **Scenarios** (ship to production, deploy) stop at each approval gate, and a dry run comes first.
+- The UI listens on `127.0.0.1` only and every API call needs the token.
+
+**Prove they hold.** `npm run drill` plays a misbehaving scripted agent against nine of them and fails loudly if any gives way:
+
+| Drill | What it shows |
+|---|---|
+| A vague ticket pauses and asks | the gate stops it before any agent runs |
+| A committed secret is blocked | the factory's gate, not the agent's word, decides |
+| The agent cannot change CI or its own rules | the run is rejected and nothing is pushed |
+| The agent cannot mark its own homework | weakened tests are flagged, or blocked if you ask |
+| A run that dies is recovered | and a poison ticket cannot loop forever |
+| A late or replaced worker cannot publish | the claim token is checked again |
+| Work stops when review cannot keep up | no new tickets while the backlog is full |
+| A project the factory cannot test gets no runs | when you require it |
+| Merging refuses unsafe branches | changed, protected-file and conflicting branches |
+
+`9/9 guardrails held` on the current code. `npm run drill:real` runs the same against your real agent (it uses your plan).
+
+**What is not guarded.** A subscription has no per-token cap: only runs per day. The egress proxy allows any path on an allowed host, so a sandboxed agent could still send data *to* its own provider. A determined prompt injection from an allowed author remains a risk, so review every PR. See the [Security model](#security-model) for the full list.
 
 ## Security model
 
