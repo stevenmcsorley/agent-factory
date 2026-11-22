@@ -595,7 +595,8 @@ export class Engine {
   // You can edit the proposed plan (retitle, reword, remove tickets, change dependencies) before launching it.
   editPlan(id, { epics, summary } = {}) {
     const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
-    if (!pack.plan) throw bad('There is no plan yet'); if (pack.plan.status !== 'proposed') throw bad('A launched plan cannot be edited');
+    // No plan yet is fine: a plan you bring yourself (from a document, another tool) is a proposed plan like any other, reviewed and launched the same way.
+    if (!pack.plan) pack.plan = { status: 'proposed', summary: '', epics: [], createdAt: new Date().toISOString() }; if (pack.plan.status !== 'proposed') throw bad('A launched plan cannot be edited');
     const next = pk.normalizePlan({ summary: summary ?? pack.plan.summary, epics }, { sourceIds: pack.sources.map((x) => x.id) }); next.createdAt = pack.plan.createdAt; pack.plan = next; pk.savePack(dir, pack); return this.getPack(id);
   }
   discardPlan(id) { const dir = this._packDir(id); const pack = pk.loadPack(dir); if (pack.plan && pack.plan.status !== 'proposed') throw Object.assign(new Error('A launched plan cannot be discarded'), { status: 400 }); pack.plan = null; pk.savePack(dir, pack); return this.getPack(id); }

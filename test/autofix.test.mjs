@@ -76,3 +76,10 @@ test('unattended over MCP: set_unattended and unattended_status are operations',
   const w = world(); await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } }); w.e.setVerify('app', { verify: 'npm test' }); w.e.setAutonomyAllowed({ allow: true });
   const r = await callOp(w.e, 'set_unattended', { project: 'app', rounds: 1, security: true }); assert.equal(r.on, true); assert.equal(r.roles.security, true); assert.equal((await callOp(w.e, 'unattended_status', { project: 'app' })).rounds, 1);
 });
+
+test('set_plan: a plan you bring yourself becomes the proposed plan, with dependencies kept, and launches like any other', async () => {
+  const w = world(); await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } });
+  const r = await callOp(w.e, 'set_plan', { project: 'app', summary: 'mine', epics: [{ id: 'site', title: 'Site', goal: 'g', tickets: [{ id: 'foundation', title: 'Shared foundation', body: 'Create index.html and styles.css with a test that checks they exist.', size: 'M', dependsOn: [] }, { id: 'shop', title: 'Shop page', body: 'Create shop.html and add one navigation item, with a test that checks the link.', size: 'M', dependsOn: ['foundation'] }] }] });
+  assert.equal(r.plan.status, 'proposed'); assert.deepEqual(r.plan.epics[0].tickets.map((t) => [t.id, t.dependsOn]), [['foundation', []], ['shop', ['foundation']]]);
+  await w.e.launchPlan('app'); const g = await w.e.getPlan('app'); assert.equal(g.progress.queued, 1, 'only the first ticket exists until it is merged'); assert.equal(g.progress.planned, 1);
+});
