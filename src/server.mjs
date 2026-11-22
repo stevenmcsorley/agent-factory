@@ -14,7 +14,7 @@ import { sandboxAvailable } from './jssandbox.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const UI = path.join(here, '..', 'ui');
-const TYPES = { '.woff2': 'font/woff2', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const TYPES = { '.woff2': 'font/woff2', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
 const MAX_BODY = 64 * 1024;
 // Most calls are small. A new project carries the repo analysis (about 100 KB for a mid-sized repo) and can carry files; MCP calls can carry an attached file.
 const bodyLimit = (p) => (/\/pack\/sources$/.test(p) || /^\/mcp(-code)?$/.test(p) ? 12 * 1024 * 1024 : /^\/api\/projects(\/new)?$/.test(p) ? 4 * 1024 * 1024 : MAX_BODY);
@@ -199,8 +199,8 @@ export function createServer(engine, { token, allowedHosts }) {
       const protectedPath = url.pathname.startsWith('/api/') || url.pathname === '/mcp' || url.pathname === '/mcp-code';
       if (!protectedPath) {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-        // Flat UI files, plus exactly one subfolder for fonts. path.basename() makes traversal impossible.
-        const name = url.pathname === '/' ? 'index.html' : url.pathname.startsWith('/fonts/') ? path.join('fonts', path.basename(url.pathname)) : path.basename(url.pathname);
+        // Flat UI files, plus exactly two subfolders (fonts and art). path.basename() makes traversal impossible.
+        const name = url.pathname === '/' ? 'index.html' : url.pathname.startsWith('/fonts/') ? path.join('fonts', path.basename(url.pathname)) : url.pathname.startsWith('/art/') ? path.join('art', path.basename(url.pathname)) : path.basename(url.pathname);
         const file = path.join(UI, name);
         if (!TYPES[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, { error: 'Not found' });
         return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)], ...(name.startsWith('fonts') ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : { 'Cache-Control': 'no-cache' }),

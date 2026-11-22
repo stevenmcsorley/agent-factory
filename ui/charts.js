@@ -1,5 +1,6 @@
 import { qrPath } from './qr.js';
 import { s, h, anim } from './lib.js';
+import { SPRITES as SP } from './linesprites.js';
 
 // Dependency-free SVG/DOM visuals. Colours come from CSS classes so both themes work. No inline style attributes (strict CSP):
 // geometry goes in SVG attributes, animation timing through the CSSOM.
@@ -119,100 +120,120 @@ export function scanCode(run, link) {
   return svg;
 }
 
-// ---- The Line, in pseudo-3D. Same contract as createLine (an svg and update({ queued, shipped, active, paused })).
-// Every machine is a tunnel the belt runs THROUGH. Each station is drawn in two layers, a back (body, dark interior) and a front (jambs, lintel, moving tools), and the parcels travel on a layer
-// between them, so a parcel really is inside the machine while the machine works on it: a stamper labels it, doors seal it in a blue chamber, a robot arm writes code onto it, a gate scans it,
-// a lift sends it up, a press straps it. CSS (see "THE LINE 3D" in style.css) runs those motions only while a run is at that station. Built once, updated in place.
+// ---- The Line. Same contract as createLine (an svg and update({ queued, shipped, active, paused })).
+// The machines are cut from the artwork the Line is based on (design/line-reference.png, see scripts/make-line-sprites.py) so they keep its photographic look; everything that moves is a
+// separate layer on top: the belt surface scrolls, the robot arm swings from its shoulder, the press head comes down, scan beams sweep, and each parcel is a real object that rides the belt
+// and is worked on at every station. Everything is laid out in the artwork's own pixel space (viewBox 1672 wide) on an exact grid: the hopper, six machines and the bin are eight evenly spaced
+// slots, and the belt legs are evenly spaced under the belt. Built once and updated in place.
+const ART = 'art/';
 export function createLine3D(stages) {
-  const W = 1200, H = 332, BY = 226, X0 = 292, DX = 128, HOP = 92, BIN = 1100;
-  const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'line-svg line3d', role: 'img' });
-  const lin = (id, stops, vertical = true, extra = {}) => s('linearGradient', { id, x1: 0, y1: extra.y1 ?? 0, x2: vertical ? 0 : 1, y2: extra.y2 ?? (vertical ? 1 : 0), ...(extra.user ? { gradientUnits: 'userSpaceOnUse' } : {}) }, ...stops.map(([o, c, a]) => s('stop', { offset: o, 'stop-color': c, ...(a != null ? { 'stop-opacity': a } : {}) })));
+  const VX = 0, VY = 128, W = 1672, H = 414, SLOT0 = 140, PITCH = (1552 - 140) / 7, BELT0 = 222, BELT1 = 1446, LANE = 394;
+  const svg = s('svg', { viewBox: `${VX} ${VY} ${W} ${H}`, class: 'line-svg lineart', role: 'img' });
+  const slotX = (i) => SLOT0 + i * PITCH; const stX = (i) => slotX(i + 1);
+  const img = (name, dx = 0, dy = 0, extra = {}) => { const b = SP[name]; return s('image', { href: `${ART}${name}.webp`, x: b[0] + dx, y: b[1] + dy, width: b[2] - b[0], height: b[3] - b[1], ...extra }); };
+  const grad = (id, stops, x2 = 0, y2 = 1) => s('linearGradient', { id, x1: 0, y1: 0, x2, y2 }, ...stops.map(([o, c, a]) => s('stop', { offset: o, 'stop-color': c, ...(a != null ? { 'stop-opacity': a } : {}) })));
+  const glyph = (key, x, y, sc = 1.9) => s('g', { transform: `translate(${x - 12 * sc} ${y - 12 * sc}) scale(${sc})`, class: `ln-glyph ic ic-${glyphKey(key)}` }, ...GLYPHS[glyphKey(key)]());
   svg.append(s('defs', {},
-    lin('l3-steel', [[0, '#8d9299'], [0.45, '#4b4f56'], [1, '#2c2e33']]), lin('l3-steel-u', [[0, '#8f949b'], [0.5, '#50545b'], [1, '#2b2d31']], true, { user: true, y1: -76, y2: 4 }), lin('l3-side', [[0, '#5b5f66'], [1, '#26282c']]), lin('l3-top', [[0, '#b4b9c0'], [1, '#757a82']]), lin('l3-dark', [[0, '#2a2c31'], [1, '#141517']]),
-    lin('l3-belt', [[0, '#4b4d52'], [1, '#202125']]), lin('l3-orange', [[0, '#ff8a4c'], [1, '#e8480c']]), lin('l3-glass', [[0, '#9fd2f0', 0.34], [0.5, '#9fd2f0', 0.1], [1, '#9fd2f0', 0.22]]),
-    lin('l3-green', [[0, '#46e6a8'], [1, '#14a068']]), lin('l3-card-f', [[0, '#d9aa6b'], [1, '#ad8148']]), lin('l3-card-t', [[0, '#ebc58a'], [1, '#cc9f60']]), lin('l3-card-s', [[0, '#ad7d43'], [1, '#8a6232']]),
-    lin('l3-beam', [[0, '#5cc8ff', 0], [0.5, '#9be5ff', 0.9], [1, '#5cc8ff', 0]], false),
-    s('radialGradient', { id: 'l3-floor', cx: 0.5, cy: 0.5, r: 0.5 }, s('stop', { offset: 0, 'stop-color': '#000', 'stop-opacity': 0.55 }), s('stop', { offset: 1, 'stop-color': '#000', 'stop-opacity': 0 })),
-    s('radialGradient', { id: 'l3-blue', cx: 0.5, cy: 0.55, r: 0.6 }, s('stop', { offset: 0, 'stop-color': '#5cc8ff', 'stop-opacity': 0.75 }), s('stop', { offset: 1, 'stop-color': '#5cc8ff', 'stop-opacity': 0 })),
-    s('pattern', { id: 'l3-haz', width: 14, height: 14, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(-45)' }, s('rect', { width: 14, height: 14, fill: '#1a1b1e' }), s('rect', { width: 7, height: 14, fill: '#f0b429' })),
-    s('clipPath', { id: 'l3-beltclip' }, s('rect', { x: 150, y: BY - 12, width: 900, height: 16 })), s('clipPath', { id: 'l3-binclip' }, s('rect', { x: 1050, y: 86, width: 106, height: 104 }))));
-  const box = (x, y, w, h, d, o = {}) => s('g', { class: `l3-box ${o.cls ?? ''}` }, s('polygon', { points: `${x + w},${y} ${x + w + d},${y - d * 0.55} ${x + w + d},${y + h - d * 0.55} ${x + w},${y + h}`, fill: `url(#${o.side ?? 'l3-side'})` }),
-    s('polygon', { points: `${x},${y} ${x + d},${y - d * 0.55} ${x + w + d},${y - d * 0.55} ${x + w},${y}`, fill: `url(#${o.top ?? 'l3-top'})` }), s('rect', { x, y, width: w, height: h, fill: `url(#${o.front ?? 'l3-steel'})` }), s('path', { d: `M${x} ${y}H${x + w}V${y + h}`, class: 'l3-edge' }));
-  const shadow = (cx, w) => s('ellipse', { cx, cy: BY + 10, rx: w, ry: 8, fill: 'url(#l3-floor)' });
-  const glyph = (key, x, y, sc = 1.45) => s('g', { transform: `translate(${x - 12 * sc} ${y}) scale(${sc})`, class: `l3-glyph ic ic-${glyphKey(key)}` }, ...GLYPHS[glyphKey(key)]());
+    grad('ln-steel', [[0, '#9aa0a8'], [0.5, '#5a5e65'], [1, '#2d2f33']]), grad('ln-orange', [[0, '#ff9a5c'], [1, '#e8480c']]), grad('ln-beam', [[0, '#7fdcff', 0], [0.5, '#c8f3ff', 0.95], [1, '#7fdcff', 0]], 1, 0),
+    grad('ln-floor', [[0, '#000', 0.55], [1, '#000', 0]]), grad('ln-inner', [[0, '#34373b'], [0.45, '#1d1f22'], [1, '#101113']]),
+    s('radialGradient', { id: 'ln-blue', cx: 0.5, cy: 0.55, r: 0.65 }, s('stop', { offset: 0, 'stop-color': '#6fd0ff', 'stop-opacity': 0.85 }), s('stop', { offset: 1, 'stop-color': '#6fd0ff', 'stop-opacity': 0 })),
+    s('radialGradient', { id: 'ln-warm', cx: 0.5, cy: 0.5, r: 0.5 }, s('stop', { offset: 0, 'stop-color': '#ffb066', 'stop-opacity': 0.95 }), s('stop', { offset: 1, 'stop-color': '#ff6a1f', 'stop-opacity': 0 })),
+    s('radialGradient', { id: 'ln-shadow', cx: 0.5, cy: 0.5, r: 0.5 }, s('stop', { offset: 0, 'stop-color': '#000', 'stop-opacity': 0.6 }), s('stop', { offset: 1, 'stop-color': '#000', 'stop-opacity': 0 })),
+    s('clipPath', { id: 'ln-belt-top' }, s('rect', { x: BELT0 + 55, y: 360, width: BELT1 - BELT0 - 110, height: 44 })), s('clipPath', { id: 'ln-belt-front' }, s('rect', { x: BELT0 + 55, y: 404, width: BELT1 - BELT0 - 110, height: 40 })),
+    s('clipPath', { id: 'ln-hopper-hole' }, s('polygon', { points: '48,254 212,254 173,338 87,338' }))));
 
-  // ---- floor and belt (legs evenly spread under the belt)
-  svg.append(s('rect', { x: 0, y: 0, width: W, height: H, class: 'l3-bg' }), shadow(600, 560));
-  for (let i = 0; i < 6; i++) { const lx = 190 + i * 164; svg.append(s('rect', { x: lx - 7, y: BY + 14, width: 14, height: 44, fill: 'url(#l3-dark)', class: 'l3-leg' }), s('rect', { x: lx - 14, y: BY + 54, width: 28, height: 7, fill: 'url(#l3-steel)' })); }
-  const slats = s('g', { class: 'l3-slats', 'clip-path': 'url(#l3-beltclip)' }); for (let x = 130; x < 1090; x += 24) slats.append(s('line', { x1: x, y1: BY - 12, x2: x - 6, y2: BY + 4, class: 'l3-slat' }));
-  svg.append(s('polygon', { points: `150,${BY - 12} 1050,${BY - 12} 1062,${BY + 4} 138,${BY + 4}`, fill: 'url(#l3-top)', opacity: 0.55 }), s('rect', { x: 138, y: BY + 4, width: 924, height: 16, fill: 'url(#l3-belt)' }), s('polygon', { points: `150,${BY - 12} 1050,${BY - 12} 1050,${BY + 4} 150,${BY + 4}`, fill: 'url(#l3-belt)' }), slats,
-    s('rect', { x: 138, y: BY + 18, width: 924, height: 3, fill: '#0c0c0e' }), s('path', { d: `M138 ${BY + 4}H1062`, class: 'l3-edge hi' }));
+  // ---- floor shadow, belt (caps, scrolling top, front, evenly spread legs)
+  svg.append(s('ellipse', { cx: 834, cy: 488, rx: 640, ry: 22, fill: 'url(#ln-shadow)' }));
+  const legs = Array.from({ length: 6 }, (_, k) => 312 + k * ((BELT1 - BELT0 - 180) / 5));
+  for (const lx of legs) svg.append(img('belt-leg', lx - 475 + 0, 0, { x: lx - 23 }));
+  svg.style.setProperty('--tw', `${SP['belt-top'][2] - SP['belt-top'][0]}px`); const scroll = s('g', { class: 'ln-scroll' }); const TW = SP['belt-top'][2] - SP['belt-top'][0]; const tiles = Math.ceil((BELT1 - BELT0 - 110) / TW) + 2;
+  for (let k = -1; k < tiles; k++) scroll.append(img('belt-top', BELT0 + 55 - SP['belt-top'][0] + k * TW, 0));
+  const front = s('g', { 'clip-path': 'url(#ln-belt-front)' }); for (let k = 0; k < tiles; k++) front.append(img('belt-front', BELT0 + 55 - SP['belt-front'][0] + k * TW, 0));
+  svg.append(front, s('g', { 'clip-path': 'url(#ln-belt-top)' }, scroll), img('belt-cap-l', BELT0 - SP['belt-cap-l'][0], 0), s('g', { transform: `translate(${BELT1 + BELT0} 0) scale(-1 1)` }, img('belt-cap-l', BELT0 - SP['belt-cap-l'][0], 0)));
+  svg.append(s('rect', { x: BELT0 + 55, y: 366, width: BELT1 - BELT0 - 110, height: 26, fill: 'url(#ln-floor)', opacity: 0.0 }));
 
-  // ---- hopper (waiting) and the shipped bin (trays stay inside it)
-  const hopTickets = Array.from({ length: 5 }, (_, i) => s('g', { class: 'l3-hop-t l-slot', transform: `translate(${58 + (i % 2) * 14 + i * 5} ${96 + i * 9})` }, s('polygon', { points: '0,0 34,0 40,-8 6,-8', fill: 'url(#l3-orange)', opacity: 0.8 }), s('rect', { width: 34, height: 12, fill: 'url(#l3-orange)' }), s('rect', { x: 5, y: 4, width: 16, height: 3, fill: '#fff', opacity: 0.7 })));
-  svg.append(shadow(HOP, 76), s('polygon', { points: '22,84 168,84 138,200 52,200', fill: 'url(#l3-steel)' }), s('polygon', { points: '168,84 184,76 154,196 138,200', fill: 'url(#l3-side)' }), s('polygon', { points: '22,84 38,76 184,76 168,84', fill: 'url(#l3-top)' }), s('polygon', { points: '40,88 164,88 140,194 56,194', fill: '#0e0f11', opacity: 0.85 }),
-    ...hopTickets, s('polygon', { points: '52,200 138,200 126,214 64,214', fill: 'url(#l3-dark)' }), s('rect', { x: 62, y: 212, width: 10, height: 20, fill: 'url(#l3-dark)' }), s('rect', { x: 118, y: 212, width: 10, height: 20, fill: 'url(#l3-dark)' }));
-  const trays = Array.from({ length: 4 }, (_, i) => s('g', { class: 'l3-tray l-slot', transform: `translate(1060 ${172 - i * 15})` }, s('polygon', { points: '0,0 80,0 88,-8 8,-8', fill: '#5ff0b6' }), s('rect', { width: 80, height: 12, rx: 2, fill: 'url(#l3-green)' }), s('rect', { x: 6, y: 4, width: 38, height: 3, fill: '#fff', opacity: 0.45 })));
-  svg.append(shadow(BIN, 70), box(1040, 76, 126, 124, 14, { front: 'l3-dark', cls: 'l3-bin' }), s('rect', { x: 1050, y: 86, width: 106, height: 104, fill: '#07130e', class: 'l3-bin-in' }), s('g', { 'clip-path': 'url(#l3-binclip)' }, ...trays), s('rect', { x: 1050, y: 86, width: 106, height: 104, class: 'l3-bin-glow' }));
+  // ---- hopper: a cut-away bin, parcels pile up from the bottom inside it
+  const HX = slotX(0) - 139.5; // artwork's hopper centre is x 139.5
+  const hopG = s('g', { transform: `translate(${HX - 0} 0)` });
+  const hopPile = s('g', { 'clip-path': 'url(#ln-hopper-hole)' });
+  hopG.append(s('polygon', { points: '44,250 216,250 176,342 84,342', fill: 'url(#ln-inner)' }), s('polygon', { points: '44,250 216,250 212,262 48,262', fill: '#000', opacity: 0.5 }), hopPile, img('hopper'));
+  svg.append(s('ellipse', { cx: slotX(0), cy: 400, rx: 120, ry: 12, fill: 'url(#ln-shadow)' }), hopG);
+  const PILE = [[108, 336], [148, 336], [128, 309], [98, 309], [158, 309]]; const pileEls = PILE.map(([x, y]) => s('g', { class: 'ln-pile', transform: `translate(${x} ${y}) scale(.5)` }, s('image', { href: `${ART}parcel.webp`, x: -38, y: -58, width: 76, height: 58 })));
+  hopPile.append(...pileEls);
 
-  // ---- the six machines, each as a back layer and a front layer (station-local coordinates: x 0 is the machine centre, y 0 the belt's front edge, the belt top at y -12)
-  const TOP = -76, OPENW = 52, OPENTOP = -46, HW = 42, D = 12;
-  const tunnelBack = () => [s('polygon', { points: `${HW},${TOP} ${HW + D},${TOP - D * 0.55} ${HW + D},${4 - D * 0.55} ${HW},4`, fill: 'url(#l3-side)' }), s('polygon', { points: `${-HW},${TOP} ${-HW + D},${TOP - D * 0.55} ${HW + D},${TOP - D * 0.55} ${HW},${TOP}`, fill: 'url(#l3-top)' }),
-    s('rect', { x: -HW, y: TOP, width: HW * 2, height: 80, fill: 'url(#l3-steel-u)' }), s('rect', { x: -OPENW / 2, y: OPENTOP, width: OPENW, height: 50, fill: '#08090b' }), s('rect', { x: -OPENW / 2, y: -12, width: OPENW, height: 16, fill: 'url(#l3-belt)' }), s('rect', { x: -OPENW / 2, y: OPENTOP, width: OPENW, height: 7, fill: '#000', opacity: 0.55 })];
-  const tunnelFront = () => [s('rect', { x: -HW, y: TOP, width: HW - OPENW / 2, height: 80, fill: 'url(#l3-steel-u)' }), s('rect', { x: OPENW / 2, y: TOP, width: HW - OPENW / 2, height: 80, fill: 'url(#l3-steel-u)' }), s('rect', { x: -HW, y: TOP, width: HW * 2, height: OPENTOP - TOP, fill: 'url(#l3-steel-u)' }),
-    s('path', { d: `M${-HW} ${TOP}H${HW}V4M${-OPENW / 2} 4V${OPENTOP}H${OPENW / 2}V4`, class: 'l3-edge' }), s('rect', { x: -OPENW / 2 - 2, y: OPENTOP, width: OPENW + 4, height: 3, fill: '#000', opacity: 0.45 })];
-  const accent = (x = -28, y = -62, w = 56) => s('rect', { x, y, width: w, height: 4, fill: 'url(#l3-orange)', class: 'l3-accent' });
-  const post = (x) => box(x, -80, 8, 84, 6);
-  const M = {
-    claim: () => ({ back: tunnelBack(), front: [s('g', { transform: 'translate(4 -46)' }, s('g', { class: 'm-stamp' }, s('rect', { x: -2.5, y: -34, width: 5, height: 32, fill: 'url(#l3-steel)' }), s('rect', { x: -12, y: -3, width: 24, height: 8, rx: 1.5, fill: 'url(#l3-orange)' }), s('rect', { x: -12, y: 4, width: 24, height: 2, fill: '#7c2a08' }))), ...tunnelFront(), accent()] }),
-    sandbox: () => ({ back: [...tunnelBack(), s('rect', { x: -OPENW / 2, y: OPENTOP, width: OPENW, height: 50, fill: 'url(#l3-blue)', class: 'm-glow' })],
-      front: [s('g', { transform: `translate(${-OPENW / 2} ${OPENTOP})` }, s('g', { class: 'm-door-l' }, s('rect', { width: OPENW / 2 + 0.5, height: 50, fill: '#6f747c', opacity: 0.4 }), s('rect', { x: 3, y: 5, width: OPENW / 2 - 6, height: 38, fill: 'url(#l3-glass)' }))),
-        s('g', { transform: `translate(${OPENW / 2} ${OPENTOP})` }, s('g', { class: 'm-door-r' }, s('rect', { x: -OPENW / 2, width: OPENW / 2, height: 50, fill: '#5d6269', opacity: 0.4 }), s('rect', { x: -OPENW / 2 + 3, y: 5, width: OPENW / 2 - 6, height: 38, fill: 'url(#l3-glass)' }))), ...tunnelFront(), accent()] }),
-    agent: () => ({ back: [s('rect', { x: -HW, y: TOP, width: HW * 2, height: 80, fill: '#0d0e10' }), s('rect', { x: -HW, y: TOP, width: HW * 2, height: 80, fill: 'url(#l3-steel-u)', opacity: 0.18 }), ...[-26, -10, 6, 22].map((x) => s('rect', { x, y: -68, width: 12, height: 3, fill: '#2c2f34' })), s('rect', { x: -HW, y: -12, width: HW * 2, height: 16, fill: 'url(#l3-belt)' })],
-      front: [post(-HW - 4), post(HW - 4), box(-HW - 4, -84, HW * 2 + 8, 8, 8, { front: 'l3-dark' }), s('rect', { x: -40, y: -34, width: 12, height: 38, fill: 'url(#l3-steel)' }), s('ellipse', { cx: -34, cy: 4, rx: 15, ry: 4, fill: 'url(#l3-dark)' }),
-        s('g', { transform: 'translate(-34 -28)' }, s('g', { class: 'm-a1' }, s('rect', { x: -5, y: -5, width: 54, height: 10, rx: 5, fill: 'url(#l3-steel)' }), s('rect', { x: 8, y: -1.5, width: 26, height: 3, fill: 'url(#l3-orange)', class: 'l3-accent' }), s('g', { transform: 'translate(44 0)' }, s('g', { class: 'm-a2' }, s('rect', { x: -4, y: -4, width: 44, height: 8, rx: 4, fill: 'url(#l3-steel)' }), s('path', { d: 'M40 -6L51 -3V-1H40ZM40 6L51 3V1H40Z', fill: '#d6dae0' }), s('circle', { r: 5.5, fill: 'url(#l3-steel)', class: 'l3-joint' }))), s('circle', { r: 7, fill: 'url(#l3-steel)', class: 'l3-joint' }))),
-        s('g', { class: 'm-spark', transform: 'translate(2 -33)' }, s('circle', { cx: -4, cy: -2, r: 2, fill: '#ffd27a' }), s('circle', { cx: 5, cy: -4, r: 1.6, fill: '#ff9a4c' }), s('circle', { cx: 1, cy: -7, r: 1.4, fill: '#fff4c9' }))] }),
-    verify: () => ({ back: [...tunnelBack(), s('circle', { cx: 0, cy: -66, r: 7, fill: '#0b0c0e' })],
-      front: [...tunnelFront(), s('circle', { cx: 0, cy: -66, r: 7, fill: '#0b0c0e' }), s('circle', { cx: 0, cy: -66, r: 3.6, class: 'l3-lens' }), s('circle', { cx: 32, cy: -62, r: 3, class: 'm-vlight' }), s('g', { transform: `translate(4 ${OPENTOP})` }, s('g', { class: 'm-scan' }, s('rect', { x: -3, y: 0, width: 6, height: 50, fill: 'url(#l3-beam)' }), s('rect', { x: -1, y: 0, width: 2, height: 50, fill: '#d9f6ff', opacity: 0.9 })))] }),
-    push: () => ({ back: [...tunnelBack(), s('g', { class: 'm-lift' }, s('rect', { x: -22, y: -6, width: 50, height: 4, rx: 1, fill: 'url(#l3-steel)' }), s('rect', { x: -22, y: -3, width: 50, height: 2, fill: '#101113' }))],
-      front: [...tunnelFront(), ...[0, 1, 2].map((i) => s('path', { d: `M-9 ${-52 - i * 7}L0 ${-58 - i * 7}L9 ${-52 - i * 7}`, class: `m-chev m-chev${i}` }))] }),
-    pr: () => ({ back: [...tunnelBack()],
-      front: [s('g', { transform: 'translate(4 -46)' }, s('g', { class: 'm-head' }, s('rect', { x: -3, y: -26, width: 6, height: 26, fill: 'url(#l3-steel)' }), s('rect', { x: -19, y: -1, width: 38, height: 9, rx: 1.5, fill: 'url(#l3-steel)' }), s('rect', { x: -19, y: 6, width: 38, height: 2.5, fill: 'url(#l3-orange)', class: 'l3-accent' }))), ...tunnelFront(), s('rect', { x: -HW, y: -78, width: HW * 2, height: 14, fill: 'url(#l3-haz)', opacity: 0.92 })] }),
+  // ---- shipped bin: frame, with the stack of green trays growing inside it
+  const BX = slotX(7) - 1544;
+  const binG = s('g', { transform: `translate(${BX} 0)` }); const trayClip = s('clipPath', { id: 'ln-trays-clip' }, s('rect', { x: 1460, y: 322, width: 176, height: 70 })); svg.firstChild.append(trayClip);
+  binG.append(s('rect', { x: 1462, y: 224, width: 166, height: 164, fill: '#070d0a' }), s('g', { 'clip-path': 'url(#ln-trays-clip)' }, img('bin-trays')), img('bin-frame'), s('rect', { x: 1440, y: 202, width: 208, height: 208, rx: 8, class: 'ln-bin-glow' }));
+  svg.append(s('ellipse', { cx: slotX(7), cy: 414, rx: 110, ry: 12, fill: 'url(#ln-shadow)' }), binG);
+  const TRAY_TOP = [324, 294, 264, 238]; // where the top of each tray in the stack starts (artwork y)
+
+  // ---- the six machines, each a sprite plus its own moving layers (artwork coordinates; the group is shifted onto its grid slot)
+  const ART_C = { claim: 385, sandbox: 580, agent: 760, verify: 952, push: 1133, pr: 1312 };
+  const lamp = (x, y, w, h) => s('rect', { x, y, width: w, height: h, rx: 2, fill: 'url(#ln-orange)', class: 'ln-glow' });
+  const MACH = {
+    claim: () => [img('claim'),
+      s('g', { 'clip-path': 'url(#ln-claim-clip)' }, s('g', { class: 'ln-shimmer' }, ...Array.from({ length: 9 }, (_, i) => s('rect', { x: 330, y: 250 + i * 10, width: 116, height: 4, fill: '#fff', opacity: 0.5 })))),
+      lamp(316, 338, 8, 30), lamp(446, 338, 8, 30),
+      ...[0, 1].map((i) => s('g', { class: `ln-slip ln-slip${i}`, transform: 'translate(385 270)' }, s('rect', { x: -12, y: -7, width: 24, height: 14, rx: 1.5, fill: '#f8f4e8', stroke: '#b9b3a2', 'stroke-width': 1 }), s('rect', { x: -8, y: -3, width: 12, height: 2, fill: '#8d887a' }), s('rect', { x: -8, y: 1, width: 8, height: 2, fill: '#8d887a' })))],
+    sandbox: () => [img('sandbox'), s('rect', { x: 532, y: 258, width: 92, height: 84, fill: 'url(#ln-blue)', class: 'ln-blueglow' }), s('rect', { x: 534, y: 258, width: 88, height: 3, fill: '#bdeaff', class: 'ln-sweep' }), lamp(639, 272, 8, 14)],
+    agent: () => [img('robot-base'), s('g', { transform: 'translate(768 326)' }, s('g', { class: 'ln-arm' }, s('image', { href: `${ART}robot-arm.webp`, x: SP['robot-arm'][0] - 768, y: SP['robot-arm'][1] - 326, width: SP['robot-arm'][2] - SP['robot-arm'][0], height: SP['robot-arm'][3] - SP['robot-arm'][1] }))),
+      s('g', { class: 'ln-sparks', transform: 'translate(817 342)' }, s('circle', { cx: -3, cy: 2, r: 3, fill: '#ffd98a' }), s('circle', { cx: 6, cy: -3, r: 2.2, fill: '#ff9a4c' }), s('circle', { cx: 1, cy: -8, r: 1.8, fill: '#fff6d6' }), s('circle', { cx: -9, cy: -5, r: 1.6, fill: '#ffb366' }))],
+    verify: () => [img('gate'), s('circle', { cx: 955, cy: 250, r: 15, fill: 'url(#ln-blue)', class: 'ln-lens' }), s('rect', { x: 909, y: 280, width: 5, height: 70, fill: '#fff', class: 'ln-glow' }), s('rect', { x: 990, y: 280, width: 5, height: 70, fill: '#fff', class: 'ln-glow' }),
+      s('g', { class: 'ln-scan' }, s('rect', { x: -9, y: 262, width: 18, height: 130, fill: 'url(#ln-beam)' }), s('rect', { x: -1, y: 262, width: 2, height: 130, fill: '#eefaff' })), s('circle', { cx: 984, cy: 249, r: 4, class: 'ln-vlight' })],
+    push: () => [img('push'), s('g', { 'clip-path': 'url(#ln-push-clip)' }, s('g', { class: 'ln-rollglint' }, ...Array.from({ length: 8 }, (_, i) => s('rect', { x: 1060, y: 250 + i * 18, width: 160, height: 3, fill: '#fff', opacity: 0.45, transform: 'skewY(-4)' })))),
+      ...[0, 1, 2].map((i) => s('path', { d: `M1118 ${296 - i * 0} l14 -9 l14 9`, class: `ln-chev ln-chev${i}`, transform: `translate(${i * 14} ${-i * 20})` })),
+      ...[0, 1].map((i) => s('g', { class: `ln-ghost ln-ghost${i}`, transform: 'translate(1110 384)' }, s('rect', { x: -9, y: -12, width: 18, height: 12, rx: 1.5, fill: '#ffb066', opacity: 0.9 }), s('rect', { x: -9, y: -12, width: 18, height: 12, rx: 1.5, fill: 'none', stroke: '#fff', 'stroke-width': 1.2, opacity: 0.8 })))],
+    pr: () => [img('press'), s('g', { class: 'ln-head' }, s('rect', { x: 1305, y: 244, width: 12, height: 40, fill: 'url(#ln-steel)' }), s('rect', { x: 1272, y: 280, width: 78, height: 17, rx: 2, fill: 'url(#ln-steel)', stroke: '#15161a', 'stroke-width': 1.2 }), s('rect', { x: 1272, y: 293, width: 78, height: 4, fill: 'url(#ln-orange)', class: 'ln-glow' }), s('rect', { x: 1272, y: 280, width: 78, height: 3, fill: '#fff', opacity: 0.35 }))],
   };
-  const stationEls = [], names = []; const backs = [], fronts = [];
-  stages.forEach(([key, name], i) => { const cx = X0 + i * DX; const m = (M[key] ?? M.claim)();
-    const bg = s('g', { class: 'l3-station', transform: `translate(${cx} ${BY})` }, s('ellipse', { cx: 8, cy: 14, rx: 50, ry: 7, fill: 'url(#l3-floor)' }), ...m.back, s('circle', { cx: 0, cy: 16, r: 4.5, class: 'l3-lamp' }), glyph(key, 0, 40 - BY));
-    const fg = s('g', { class: 'l3-station', transform: `translate(${cx} ${BY})` }, ...m.front); backs.push(bg); fronts.push(fg); stationEls.push(bg, fg);
-    const nm = s('text', { x: cx, y: BY + 82, class: 'l3-name', 'text-anchor': 'middle' }, name.toUpperCase()); names.push(nm); fronts.push(nm); });
-  svg.append(...backs);
-  const layer = s('g', { class: 'l-parts' }); svg.append(layer); svg.append(...fronts);
-  for (let i = 1; i < stages.length; i++) svg.append(s('line', { x1: X0 + i * DX - DX / 2, y1: BY + 66, x2: X0 + i * DX - DX / 2, y2: BY + 92, class: 'l3-sep' }));
-  const qText = s('text', { x: HOP, y: BY + 78, class: 'l3-big', 'text-anchor': 'middle' }, '0'), qLabel = s('text', { x: HOP, y: BY + 98, class: 'l3-label', 'text-anchor': 'middle' }, 'TICKETS WAITING');
-  const sText = s('text', { x: BIN + 14, y: BY + 78, class: 'l3-big ship', 'text-anchor': 'middle' }, '0');
-  svg.append(s('text', { x: HOP, y: 40, class: 'l3-title', 'text-anchor': 'middle' }, 'HOPPER'), qText, qLabel, s('text', { x: BIN + 14, y: 40, class: 'l3-title', 'text-anchor': 'middle' }, 'SHIPPED'), sText, s('text', { x: BIN + 14, y: BY + 98, class: 'l3-label', 'text-anchor': 'middle' }, 'PRS TODAY'));
-  const labels = s('g', { class: 'l-parts l-labels' }); svg.append(labels);
-  const pausedG = s('g', { class: 'svg-hide' }, s('rect', { x: 150, y: BY - 12, width: 900, height: 32, class: 'l3-pausewash' }), s('text', { x: 600, y: 120, class: 'l3-paused', 'text-anchor': 'middle' }, 'LINE PAUSED')); svg.append(pausedG);
+  svg.firstChild.append(s('clipPath', { id: 'ln-claim-clip' }, s('polygon', { points: '346,262 432,262 440,334 336,334' })), s('clipPath', { id: 'ln-push-clip' }, s('polygon', { points: '1098,262 1172,262 1200,392 1086,392' })));
+  const stationEls = [], names = [], overlays = [], sprites = [];
+  stages.forEach(([key, name], i) => { const X = stX(i); const dx = X - (ART_C[key] ?? 385); const m = (MACH[key] ?? MACH.claim)();
+    const sprite = s('g', { class: 'ln-station', transform: `translate(${dx} 0)` }, m[0]); sprites.push(sprite);
+    const rest = s('g', { class: 'ln-station ln-over', transform: `translate(${dx} 0)` }, ...m.slice(1)); overlays.push(rest);
+    if (key === 'agent') { sprite.append(...[]); }
+    stationEls.push(sprite, rest);
+    names.push(s('text', { x: X, y: 512, class: 'ln-name', 'text-anchor': 'middle' }, name.toUpperCase()));
+  });
+  // the sandbox's force field sits around the parcel and the press/lift effects need the parcel position, so they live in the parcel overlay layer
+  const fieldX = stX(stages.findIndex(([k]) => k === 'sandbox')); const field = s('g', { class: 'ln-field', transform: `translate(${fieldX} ${LANE})` }, s('g', { class: 'ln-fieldin' }, s('ellipse', { rx: 54, ry: 10, class: 'ln-ring' }), s('path', { d: 'M-54 0 A54 70 0 0 1 54 0', class: 'ln-dome' }), s('path', { d: 'M-54 0 A54 70 0 0 1 54 0 Z', fill: 'rgba(110,200,255,.12)' })));
+  const liftX = stX(stages.findIndex(([k]) => k === 'push')); const lift = s('g', { class: 'ln-lift', transform: `translate(${liftX} ${LANE})` }, s('ellipse', { rx: 50, ry: 8, fill: 'url(#ln-warm)' }), s('rect', { x: -30, y: -70, width: 60, height: 70, fill: 'url(#ln-warm)', opacity: 0.4 }));
+  const pressX = stX(stages.findIndex(([k]) => k === 'pr'));
+  svg.append(...sprites);
+  const layer = s('g', { class: 'ln-parts' }); svg.append(layer, field, lift, ...overlays);
 
-  // a parcel: a cardboard box that picks up a label, a code stripe, a check mark and strapping tape as it moves down the line
-  const SIT = BY - 6;
+  // ---- labels, numbers, glyphs (live text over the artwork)
+  const qText = s('text', { x: slotX(0), y: 496, class: 'ln-big', 'text-anchor': 'middle' }, '0'), qLabel = s('text', { x: slotX(0), y: 526, class: 'ln-label', 'text-anchor': 'middle' }, 'TICKETS WAITING');
+  const sText = s('text', { x: slotX(7), y: 496, class: 'ln-big ship', 'text-anchor': 'middle' }, '0');
+  svg.append(s('text', { x: slotX(0), y: 168, class: 'ln-title', 'text-anchor': 'middle' }, 'HOPPER'), qText, qLabel, s('text', { x: slotX(7), y: 168, class: 'ln-title', 'text-anchor': 'middle' }, 'SHIPPED'), sText, s('text', { x: slotX(7), y: 526, class: 'ln-label', 'text-anchor': 'middle' }, 'PRS TODAY'), ...names);
+  const glyphs = stages.map(([key], i) => glyph(key, stX(i), 168)); svg.append(...glyphs);
+  for (let i = 1; i < stages.length; i++) { const x = (stX(i - 1) + stX(i)) / 2; svg.append(s('line', { x1: x, y1: 490, x2: x, y2: 526, class: 'ln-sep' })); }
+  const labels = s('g', { class: 'ln-parts ln-labels' }); svg.append(labels);
+  const pausedG = s('g', { class: 'svg-hide' }, s('rect', { x: BELT0, y: 362, width: BELT1 - BELT0, height: 80, class: 'ln-pausewash' }), s('text', { x: 834, y: 300, class: 'ln-paused', 'text-anchor': 'middle' }, 'LINE PAUSED')); svg.append(pausedG);
+
+  // ---- a parcel: the cardboard box from the artwork. It picks up a label, a code stripe, a check mark and a strap as it goes down the line.
+  const OFF = { agent: 52 }; const lane = (key) => (key === 'pr' ? 362 : LANE);
   const parts = new Map(); let ready = false; const last = { q: null, s: null }; const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
   const setCount = (el, key, v) => { if (last[key] === v) return; el.textContent = String(v); if (last[key] !== null) { el.classList.remove('l-flash'); void el.getBoundingClientRect(); el.classList.add('l-flash'); } last[key] = v; };
-  const makePart = () => { const inner = s('g', { class: 'bob' }, s('polygon', { points: '15,-22 21,-27 21,-5 15,0', fill: 'url(#l3-card-s)' }), s('polygon', { points: '-15,-22 15,-22 21,-27 -9,-27', fill: 'url(#l3-card-t)' }), s('rect', { x: -15, y: -22, width: 30, height: 22, fill: 'url(#l3-card-f)' }), s('line', { x1: -15, y1: -22, x2: 15, y2: -22, stroke: '#8a6232', 'stroke-width': 1, opacity: 0.6 }),
-      s('g', { class: 'p-label' }, s('rect', { x: -11, y: -18, width: 15, height: 10, fill: '#f8f4e9' }), s('rect', { x: -9, y: -15, width: 11, height: 1.6, fill: '#9a9588' }), s('rect', { x: -9, y: -11.5, width: 7, height: 1.6, fill: '#9a9588' })),
-      s('rect', { x: -12, y: -5.5, width: 24, height: 3, fill: '#1f9e6b', class: 'p-code' }), s('g', { class: 'p-check' }, s('circle', { cx: 9, cy: -12, r: 5, fill: '#3be0a1' }), s('path', { d: 'M6.4 -12L8.4 -10L11.8 -14', fill: 'none', stroke: '#07130e', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })), s('rect', { x: -2.5, y: -22, width: 5, height: 22, fill: '#3be0a1', opacity: 0.9, class: 'p-tape' }));
-    const g = s('g', { class: 'l-part-g' }, inner); layer.append(g); const lab = s('g', { class: 'l-part-g l-lab' }, s('text', { x: 0, y: 0, class: 'l3-part-label', 'text-anchor': 'middle' }, '')); labels.append(lab); return { g, inner, lab, label: lab.firstChild }; };
+  const makePart = () => { const inner = s('g', { class: 'bob' }, s('image', { href: `${ART}parcel.webp`, x: -38, y: -58, width: 76, height: 58 }),
+      s('g', { class: 'p-label' }, s('rect', { x: -27, y: -34, width: 26, height: 17, fill: '#f8f4e8', stroke: '#b9b3a2', 'stroke-width': 0.8 }), s('rect', { x: -23, y: -29, width: 17, height: 2.2, fill: '#8d887a' }), s('rect', { x: -23, y: -24, width: 11, height: 2.2, fill: '#8d887a' })),
+      s('rect', { x: -28, y: -10, width: 52, height: 4, rx: 1, fill: '#1fbf7e', class: 'p-code' }), s('g', { class: 'p-check' }, s('circle', { cx: 17, cy: -21, r: 8.5, fill: '#3be0a1', stroke: '#07130e', 'stroke-width': 1 }), s('path', { d: 'M12.5 -21L16 -17.5L22 -25', fill: 'none', stroke: '#07130e', 'stroke-width': 2.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })),
+      s('rect', { x: -3, y: -50, width: 11, height: 49, fill: '#2fe0a0', opacity: 0.85, class: 'p-tape' }));
+    const g = s('g', { class: 'l-part-g' }, s('g', { transform: 'scale(.96)' }, inner)); layer.append(g); const lab = s('g', { class: 'l-part-g l-lab' }, s('text', { x: 0, y: 0, class: 'ln-part-label', 'text-anchor': 'middle' }, '')); labels.append(lab); return { g, inner, lab, label: lab.firstChild }; };
   function update({ queued = 0, shipped = 0, active = [], paused = false }) {
     svg.classList.toggle('running', active.length > 0 && !paused); svg.classList.toggle('shipping', shipped > 0);
     svg.setAttribute('aria-label', `Assembly line: ${queued} queued, ${active.length} in progress, ${shipped} shipped today`);
-    hopTickets.forEach((e, i) => e.classList.toggle('show', i < Math.min(queued, 5))); trays.forEach((e, i) => e.classList.toggle('show', i < Math.min(shipped, 4)));
+    pileEls.forEach((e, i) => e.classList.toggle('show', i < Math.min(queued, 5)));
+    const trays = Math.min(shipped, 4); trayClip.firstChild.setAttribute('y', trays ? TRAY_TOP[trays - 1] - 4 : 400); trayClip.firstChild.setAttribute('height', trays ? 392 - (TRAY_TOP[trays - 1] - 4) : 0);
     setCount(qText, 'q', queued); setCount(sText, 's', shipped); qLabel.textContent = queued === 1 ? 'TICKET WAITING' : 'TICKETS WAITING'; pausedG.classList.toggle('svg-hide', !paused);
     const per = {}; const seen = new Set(); const lit = new Set();
-    for (const a of active) { seen.add(a.run); const ph = a.phase === 'review' || a.phase === 'visual' ? 'verify' : a.phase; const si = Math.max(0, stages.findIndex(([k]) => k === ph)); lit.add(si); const k = (per[si] = (per[si] ?? -1) + 1); const x = X0 + si * DX + 4 - k * 36, y = SIT; let p = parts.get(a.run);
-      if (!p) { p = makePart(); parts.set(a.run, p); for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? HOP + 18 : x, SIT); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } }
-      const cls = `bob at-${stages[si][0]} s${si}`; if (p.inner.getAttribute('class') !== cls) p.inner.setAttribute('class', cls);
-      const t = a.title ?? ''; const short = t.length > 22 ? `${t.slice(0, 21)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; place(p.g, x, y); place(p.lab, x, BY - 98); }
-    for (const [id, p] of parts) if (!seen.has(id)) { parts.delete(id); place(p.g, 1096, SIT + 14); p.g.style.opacity = '0'; p.lab.style.opacity = '0'; setTimeout(() => { p.g.remove(); p.lab.remove(); }, 1400); }
-    stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(Math.floor(i / 2)))); names.forEach((n, i) => n.classList.toggle('on', lit.has(i))); ready = true;
+    for (const a of active) { seen.add(a.run); const ph = a.phase === 'review' || a.phase === 'visual' ? 'verify' : a.phase; const si = Math.max(0, stages.findIndex(([k]) => k === ph)); lit.add(si); const key = stages[si][0]; const k = (per[si] = (per[si] ?? -1) + 1);
+      const x = stX(si) + (OFF[key] ?? 0) - k * 84, y = lane(key); let p = parts.get(a.run);
+      if (!p) { p = makePart(); parts.set(a.run, p); for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? BELT0 + 40 : x, LANE); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } }
+      const cls = `bob at-${key} s${si}`; if (p.inner.getAttribute('class') !== cls) p.inner.setAttribute('class', cls);
+      const t = a.title ?? ''; const short = t.length > 24 ? `${t.slice(0, 23)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; place(p.g, x, y); place(p.lab, stX(si), 214); }
+    for (const [id, p] of parts) if (!seen.has(id)) { parts.delete(id); place(p.g, slotX(7) - 40, 340); p.g.style.opacity = '0'; p.lab.style.opacity = '0'; setTimeout(() => { p.g.remove(); p.lab.remove(); }, 1400); }
+    stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(Math.floor(i / 2)))); names.forEach((n, i) => n.classList.toggle('on', lit.has(i))); glyphs.forEach((n, i) => n.classList.toggle('on', lit.has(i))); field.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'sandbox'))); lift.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'push'))); ready = true;
   }
   return { svg, update };
 }
