@@ -94,3 +94,10 @@ test('after the free models fail, the job enters Codex on the CHEAPEST step (not
   const r = await e._agentFor('reviewer', path.join(root, 'l.log'), { project: 'p' }).run(sb, { dir }, 'You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix.\nJudge this', { timeoutMs: 20_000, meta: {} });
   assert.deepEqual(models, ['gpt-6-luna'], 'Codex was entered on the cheap step, and it answered properly so it stayed there'); assert.equal(r.model, 'gpt-6-luna'); const u = readUsage(e.cfg.stateDir).at(-1); assert.equal(u.via, 'codex'); assert.equal(u.escalated, true); assert.match(u.why, /model gpt-6-luna \(step 1 of 2\)/);
 });
+
+test('a verdict on Codex is one request about the diff: an empty folder and the one-request prompt, not an agent wandering through the repository', async () => {
+  const V = '{"verdict":"approve","summary":"ok","findings":[]}'; const e = eng({ agents: { mode: 'codex' } }); const real = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-')); fs.writeFileSync(path.join(real, 'a.txt'), 'x'); let seen = null; const sb = { kind: 'local', exec: async (ws, _c, _a, o) => { seen = { dir: ws.dir, prompt: o.env.FACTORY_PROMPT, files: fs.readdirSync(ws.dir) }; return { code: 0, out: V }; } };
+  await e._agentFor('reviewer', path.join(real, 'l.log'), { project: 'p' }).run(sb, { dir: real }, 'You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix.\nJudge this', { timeoutMs: 20_000, meta: {} });
+  assert.notEqual(seen.dir, real, 'not the repository'); assert.deepEqual(seen.files, [], 'an empty folder'); assert.match(seen.prompt, /No checkout is available/); assert.doesNotMatch(seen.prompt, /You may read any file in this checkout/); assert.equal(fs.existsSync(seen.dir), false, 'and it is cleaned up');
+  const b = await e._agentFor('builder', path.join(real, 'l.log'), { project: 'p' }).run(sb, { dir: real }, 'Implement the ticket', { timeoutMs: 20_000, meta: {} }); assert.equal(seen.dir, real, 'a builder still works in the real checkout');
+});

@@ -78,6 +78,12 @@ export const delegationMethods = {
       await this._localEnsure().catch(() => null); const t0 = Date.now(); const meta = args[3]?.meta ?? {}; const call = this._delegationCtx(role, ctx, meta); const dec = decide(call); let why = dec.why; let via = dec.provider; let r; let escalated = false;
       // Every way into Codex goes through the same harness ladder: start on the cheapest step (a builder starts on the step for its attempt number), and step up when the role's output fails its check. The calls that failed still cost tokens: they are counted.
       const codexLadder = async () => {
+        // a verdict on a change is ONE request about the diff (that is the form that was benchmarked, and about a seventh of the tokens of an agent wandering through the repository): the judge gets an empty folder and the shot prompt
+        const oneShot = JUDGES.has(role) && SHOT_LINE.test(String(args[2])); let empty = null; if (oneShot) { empty = fs.mkdtempSync(path.join(os.tmpdir(), 'judge-')); }
+        const rargs = oneShot ? [args[0], { ...(args[1] ?? {}), dir: empty }, this._shotPrompt(args[2]), { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), shot: true } }] : args;
+        try { return await codexLadderRun(rargs); } finally { if (empty) fs.rmSync(empty, { recursive: true, force: true }); }
+      };
+      const codexLadderRun = async (args) => {
         const seq = this._ladder(role, call.size).models; const climbs = role === 'builder' || role === 'fixer'; let idx = climbs ? Math.min(Math.max(1, call.attempt), seq.length || 1) - 1 : 0; let tier = seq[idx] ?? null; let o = await onPlan(args, tier); let rr = o.r; let spent = null; let note = ''; let stepped = false;
         while (!climbs && !o.lim && seq.length && idx < seq.length - 1 && !validateOutput(role, rr?.out).ok) { const bad = validateOutput(role, rr?.out); this._audit({ what: 'harness', action: 'step-up', role, project: ctx.project ?? null, from: tier, to: seq[idx + 1], why: bad.why }); spent = addTokens(spent, rr?.tokens); idx++; const prev = tier; tier = seq[idx]; o = await onPlan(args, tier); rr = o.r; stepped = true; note += `; ${prev} ${bad.why}, so ${tier} took over`; }
         if (spent && rr) rr = { ...rr, tokens: addTokens(rr.tokens, spent) };

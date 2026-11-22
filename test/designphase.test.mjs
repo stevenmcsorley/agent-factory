@@ -91,7 +91,7 @@ test('drift: a design approved after (or changed since) a page was built shows w
 
 test('match designs: shared look first, then the artwork, then one ticket per page; refuses while a plan is running; launches when asked', async () => {
   const w = world(); await project(w, { unattended: true }); await w.e.launchPlan('app'); await settle(w); const dir = w.e._packDir('app'); const pk = await import('../src/pack.mjs');
-  await assert.rejects(() => w.e.matchDesigns('app', {}), /plan is still running/); const pack = pk.loadPack(dir); pack.plan.status = 'complete'; pk.savePack(dir, pack);
+  await assert.rejects(() => w.e.matchDesigns('app', {}), /launched and is not finished yet/); const pack = pk.loadPack(dir); pack.plan.status = 'complete'; pk.savePack(dir, pack);
   const r = await callOp(w.e, 'match_designs', { project: 'app', all: true, launch: false }); assert.equal(r.created, true); assert.equal(r.launched, false); const ts = pk.loadPack(dir).plan.epics[0].tickets;
   assert.deepEqual(ts.map((t) => t.id), ['shared-look', 'use-artwork', 'match-index', 'match-about']); assert.deepEqual(ts[3].dependsOn, ['shared-look', 'use-artwork']); assert.deepEqual(ticketPages(ts[3].body), ['about.html']); assert.match(ts[2].body, /approved screen \(.factory-context\/designs\//);
 });
@@ -120,4 +120,10 @@ test('token economy: reviewers get what they need (brief, this ticket\'s screen 
   const w = world(); await project(w, { unattended: true }); await w.e.launchPlan('app'); await settle(w); const p = w.e.project('app'); const cfg = w.e.deps(p).config; const t = { id: 1, title: 'Foundation', body: EPICS[0].tickets[0].body };
   const builder = cfg.contextFor(t); const reviewer = cfg.reviewContextFor(t);
   assert.match(reviewer, /Project brief/); assert.match(reviewer, /This ticket builds a designed screen/); assert.doesNotMatch(reviewer, /```css/); assert.ok(reviewer.length < builder.length, 'smaller than the builder\'s');
+});
+
+test('a failed design does not stop the others, is tried twice, is reported plainly, and its page is not counted as designed', async () => {
+  const src = fs.readFileSync(new URL('../src/engine-unattended.mjs', import.meta.url), 'utf8');
+  assert.match(src, /for \(let attempt = 1; attempt <= 2 && !ok; attempt\+\+\)/, 'two tries per design'); assert.match(src, /st\.failed\.push\(/, 'a job that still fails is recorded and the loop carries on'); assert.match(src, /The other designs were made\. Run it again to retry just the missing ones/); assert.match(src, /d\.status !== 'failed'\);\s*\/\/ a design that failed is not a design/);
+  const dp = fs.readFileSync(new URL('../src/engine-designphase.mjs', import.meta.url), 'utf8'); assert.match(dp, /this\._designPass\?\.get\(id\)\?\.state === 'failed'\) return this\.designProject\(id, \{\}\)/, 'retry works for a failed restyle or unattended design pass too'); assert.match(dp, /Nothing to retry/);
 });

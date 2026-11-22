@@ -45,7 +45,7 @@ export const designPhaseMethods = {
     const dir = this._packDir(id); const out = []; for (const x of ds.listDesigns(dir).filter((y) => y.status !== 'archived' && y.status !== 'approved' && y.versions.length)) { try { this.setDesignStatus(id, x.id, 'approved', x.versions.at(-1).n); out.push(x.title); } catch { /* one that cannot be approved stays as it is */ } }
     this._audit({ what: 'design-phase', project: id, action: 'approved-all', count: out.length }); this.releasePlan(id).catch(() => {}); return { approved: out, ...this.designPhaseStatus(id) };
   },
-  skipDesignPhase(id) { const dir = this._packDir(id); const pack = pk.loadPack(dir); if (!pack.plan?.design?.required) throw bad('This plan has no design stage'); pack.plan.design.skipped = true; pk.savePack(dir, pack); this._audit({ what: 'design-phase', project: id, action: 'skipped' }); this.releasePlan(id).catch(() => {}); return this.designPhaseStatus(id); },
+  skipDesignPhase(id) { const dir = this._packDir(id); const pack = pk.loadPack(dir); if (!pack.plan?.design?.required) { if (this._designPass?.get(id)?.state === 'failed') return this.designProject(id, {}); throw bad('Nothing to retry: this project has no failed design stage or design pass.'); } pack.plan.design.skipped = true; pk.savePack(dir, pack); this._audit({ what: 'design-phase', project: id, action: 'skipped' }); this.releasePlan(id).catch(() => {}); return this.designPhaseStatus(id); },
   retryDesignPhase(id) { const dir = this._packDir(id); const pack = pk.loadPack(dir); if (!pack.plan?.design?.required) throw bad('This plan has no design stage'); this._designPass?.delete(id); return this.designProject(id, { pages: pack.plan.design.pages, assets: pack.plan.design.assets, approve: this._autoApproveDesigns(this.project(id)) }); },
   _autoApproveDesigns(p) { return p.autonomy?.mode === 'merge' && !!this.cfg.autonomy?.allow; },
   // Called when a plan is launched: record that this plan starts with a design stage and start the designer. Unattended projects approve as they go; otherwise it waits for you.
@@ -89,7 +89,7 @@ export const designPhaseMethods = {
   async matchDesigns(id, { all = false, launch } = {}) {
     const p = this.project(id); const dir = this._packDir(id); const pack = pk.loadPack(dir); const screens = approvedScreens(dir); const art = approvedAssets(dir);
     if (!screens.length && !art.length) throw bad('There are no approved designs to match yet. Approve the designs first.');
-    if (pack.plan && pack.plan.status === 'launched') throw bad('A plan is still running. Let it finish (or discard it) before planning the match.', 409);
+    if (pack.plan && pack.plan.status === 'launched') throw bad('The project\'s plan has been launched and is not finished yet. Let it finish (or discard it), then ask again. A restyle adds its own match tickets by itself once its designs are approved.', 409);
     const drifted = new Set(this.designDrift(id).map((x) => areaOfPage(x.page))); const pick = screens.filter((d) => d.area && (all || !pack.plan || drifted.size === 0 || drifted.has(d.area))).sort((a, b) => (a.area === 'index' ? -1 : b.area === 'index' ? 1 : a.area.localeCompare(b.area)));   // home first, then alphabetical: the same order every time
     if (!pick.length && !art.length) return { created: false, reason: 'every page already matches its approved design' };
     const rule = 'Change how it looks and how it is laid out, not what it says or does: keep the existing content, links, behaviour and tests working. Only add to or adjust shared files; never recreate them.';

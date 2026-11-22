@@ -38,7 +38,7 @@ export const unattendedMethods = {
   designProject(id, { pages, assets = true, approve = true, force = false, extra = '', onDone } = {}) {
     const dir = this._packDir(id); const pack = pk.loadPack(dir); const goal = (pack.brief?.goal ?? '').trim(); if (!goal) throw bad('Write the brief first (at least the goal): the designer works from it.');
     this._designPass ??= new Map(); if (this._designPass.get(id)?.state === 'running') throw bad('The designer is already working on this project', 409);
-    this.assertAgentAvailable(); const have = ds.listDesigns(dir).filter((d) => d.status !== 'archived');
+    this.assertAgentAvailable(); const have = ds.listDesigns(dir).filter((d) => d.status !== 'archived' && d.status !== 'failed');   // a design that failed is not a design: its page is tried again
     const found = pages ?? this._designPages(pack); const list = (found.length ? found : ['index.html']).slice(0, 5);
     const jobs = []; const slug = (f) => f.replace(/\.html$/, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'home'; const scope = pack.brief?.scope ?? '';
     for (const f of list) { if (!force && have.some((d) => d.kind === 'screen' && d.area === slug(f))) continue;
@@ -48,10 +48,15 @@ export const unattendedMethods = {
     if (!jobs.length) return { started: false, reason: 'every page and the artwork already have a design', ...this.designPassStatus(id) };
     this._designPass.set(id, { state: 'running', total: jobs.length, done: 0, startedAt: Date.now() }); this._audit({ what: 'design-pass', project: id, jobs: jobs.length, approve });
     (async () => { const st = this._designPass.get(id);
-      try { for (const j of jobs) { const d = this.startDesign(id, j); const key = `${id}:${d.id}`; while (this.designJobs?.has(key)) await new Promise((r) => setTimeout(r, 500));
-          const got = ds.getDesign(dir, d.id); if (got.error || !got.versions.length) throw bad(`The designer could not make "${j.title}": ${got.error ?? 'no result'}`);
-          if (approve) this.setDesignStatus(id, d.id, 'approved', got.versions.at(-1).n); st.done++; }
-        st.state = 'done'; if (typeof onDone === 'function') await onDone(); } catch (e) { st.state = 'failed'; st.error = String(e.message ?? e).slice(0, 300); }
+      // One failed design must not stop the rest: each job gets a second try, and a job that still fails is reported while the others carry on.
+      try { st.failed = [];
+        for (const j of jobs) { let ok = false; let why = '';
+          for (let attempt = 1; attempt <= 2 && !ok; attempt++) { const d = this.startDesign(id, j); const key = `${id}:${d.id}`; while (this.designJobs?.has(key)) await new Promise((r) => setTimeout(r, 500));
+            const got = ds.getDesign(dir, d.id); if (got.error || !got.versions.length) { why = got.error ?? 'no result'; this._audit({ what: 'design-pass', project: id, retry: attempt === 1, failed: j.title, why: String(why).slice(0, 160) }); continue; }
+            if (approve) this.setDesignStatus(id, d.id, 'approved', got.versions.at(-1).n); ok = true; }
+          if (ok) st.done++; else st.failed.push({ title: j.title, why }); }
+        if (st.failed.length) { st.state = 'failed'; st.error = `The designer could not make ${st.failed.map((f) => `"${f.title}"`).join(', ')} after two tries (${String(st.failed[0].why).slice(0, 120)}). The other designs were made. Run it again to retry just the missing ones.`; }
+        else { st.state = 'done'; if (typeof onDone === 'function') await onDone(); } } catch (e) { st.state = 'failed'; st.error = String(e.message ?? e).slice(0, 300); }
       this._audit({ what: 'design-pass-end', project: id, state: st.state, done: st.done, error: st.error ?? null }); })();
     return { started: true, jobs: jobs.map((j) => j.title), approve };
   },

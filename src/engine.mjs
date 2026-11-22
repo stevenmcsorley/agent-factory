@@ -122,6 +122,8 @@ export class Engine {
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       // Same-for-every-ticket text first (so a provider can reuse its cache of that beginning across tickets), then what depends on THIS ticket.
       // What a REVIEWER needs: the brief, this ticket's design and source excerpts and where it sits in the plan. Not the builder's skills, reusable parts or every screen's stylesheet.
+      // who may add instructions in a ticket's comments: the project's trusted authors (and the owner, on the built-in tracker). Anyone else's comments never reach the agent.
+      trustedAuthors: [...(p.feedbackAuthors ?? []), ...((p.tickets?.kind ?? p.source?.kind) === 'local' || !(p.tickets || p.source) ? ['you'] : [])],
       reviewContextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); const c = pk.renderContextParts(pk.loadPack(d), d, t); return [c.fixed, this._ticketDesignHint?.(p, t), c.perTicket, this._planContext(p, t)].filter(Boolean).join('\n\n'); } catch { return ''; } },
       contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); const c = pk.renderContextParts(pk.loadPack(d), d, t); const hint = this._ticketDesignHint?.(p, t); return [c.fixed, this._designContext?.(p.id, { slim: !!hint }), hint, this._skillsText('builder', p.id), c.perTicket, this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
