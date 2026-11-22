@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SYSTEM = `You are an autonomous software engineer working in a git repository checked out in the current directory. Use the tools to look around, read and search files, edit files and run commands (for example the project's tests). Paths are relative to the repository root.
-Work step by step and keep each step small. Do not run git commit or git push (the harness does that). Never print or write secrets. When the task is finished, reply with a short plain-text summary and NO tool call. If the task asks for a specific reply format (for example a JSON object), your final reply must be exactly that.`;
+Every request counts against a small daily allowance, so work efficiently: you may make SEVERAL tool calls in one reply (for example read several files at once), and combine shell commands. Keep going until the task is done. Do not run git commit or git push (the harness does that). Never print or write secrets. When the task is finished, reply with a short plain-text summary and NO tool call. If the task asks for a specific reply format (for example a JSON object), your final reply must be exactly that.`;
 const TOOLS = [
   { name: 'list_files', description: 'List files and folders under a directory (default: the repository root), up to 3 levels deep.', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
   { name: 'read_file', description: 'Read a text file. Optionally a line range.', parameters: { type: 'object', properties: { path: { type: 'string' }, start_line: { type: 'integer' }, end_line: { type: 'integer' } }, required: ['path'] } },
@@ -20,7 +20,7 @@ const SKIP = new Set(['.git', 'node_modules', '.venv', '__pycache__']);
 const clip = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}\n…[truncated ${String(s).length - n} characters]` : String(s));
 const stripThink = (t) => String(t ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 const text = (c) => (Array.isArray(c) ? c.map((p) => p?.text ?? '').join('') : String(c ?? ''));
-const clockOf = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase();
+const clockOf = (ms) => { const d = new Date(ms); const h = d.getHours(); return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
 let lastCallAt = 0;   // free models allow about 20 requests a minute in total: keep our own calls a little apart
 
 export function confine(root, p) { const abs = path.resolve(root, String(p ?? '.').replace(/^\/+/, '')); const rel = path.relative(root, abs); if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('That path is outside the repository'); return { abs, rel: rel || '.' }; }
@@ -36,10 +36,24 @@ export async function runTool(name, args, { root, sandbox, ws, timeoutMs, image 
   return `Unknown tool: ${name}`;
 }
 
+const limitedResult0 = (until) => ({ out: `You've hit your usage limit: every OpenRouter free model is resting right now. Try again at ${clockOf(until ?? Date.now() + 10 * 60_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true });
 export function openrouterAgent({ router, client, role = 'builder', project = null, maxSteps = 40, minGapMs = 3200, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), onEvent } = {}) {
   return { name: 'openrouter', info: { model: 'auto (OpenRouter free models)', reasoningEffort: null },
     async run(sandbox, ws, prompt, { timeoutMs = 900_000, meta = {} } = {}) {
-      const deadline = now() + timeoutMs; const messages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: String(prompt) }]; const tok = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }; const used = []; const tried = new Set(); let lastModel = null; let badRun = 0; let nudged = false;
+      const deadline = now() + timeoutMs; const budget = router.budget?.(); const free = !router.config?.().allowPaid;
+      // One request, no tools: the whole job is in the prompt (a review of a diff). Cheap, and all a free allowance can afford many times a day.
+      if (meta.shot) {
+        if (free && budget?.remaining !== null && budget?.remaining < 1) return { out: `You've hit your usage limit: today's free OpenRouter allowance is used. Try again at ${clockOf(router.nextReady({ role, need: { tools: false } }) ?? now() + 3_600_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true };
+        const used1 = []; const skip1 = new Set(); const tk = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 };
+        for (let n = 0; n < 4; n++) { const pick = router.pick({ role, need: { tools: false }, exclude: [...skip1] }); if (!pick) break; const gap = lastCallAt + minGapMs - now(); if (gap > 0) await sleep(gap); lastCallAt = now(); onEvent?.({ type: 'model', model: pick.id, role, step: 0 });
+          const res = await client.chat({ model: pick.id, messages: [{ role: 'system', content: 'You are a careful reviewer. No tools or files are available: judge only from what the user message contains. Reply exactly in the format asked for.' }, { role: 'user', content: String(prompt) }], maxTokens: 2500 });
+          if (!res.ok) { router.noteFail(pick.id, res.error, { ms: res.ms, role, project, ref: meta.ref }); onEvent?.({ type: 'fail', model: pick.id, kind: res.error.kind, message: res.error.message }); skip1.add(pick.id); if (res.error.kind === 'auth') break; continue; }
+          router.noteOk(pick.id, { ms: res.ms, usage: res.usage, role, project, ref: meta.ref }); used1.push(pick.id); for (const x of ['input', 'output', 'cached', 'reasoning']) tk[x] += res.usage[x]; return { out: stripThink(text(res.message.content)), costUsd: 0, tokens: tk, model: pick.id, models: used1 }; }
+        return limitedResult0(router.nextReady({ role, need: { tools: false } }));
+      }
+      // a tool-using task needs a fair number of requests: do not start one the allowance cannot finish (it would die half-way)
+      if (free && budget?.remaining !== null && budget?.remaining < 8) return { out: `You've hit your usage limit: too little of today's free OpenRouter allowance is left to finish a task (${budget.remaining} requests). Try again at ${clockOf(router.nextReady({ role, need: { tools: true } }) ?? now() + 3_600_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true };
+      const messages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: String(prompt) }]; const tok = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }; const used = []; const tried = new Set(); let lastModel = null; let badRun = 0; let nudged = false;
       const need = { tools: true }; const limitedResult = (until) => ({ out: `You've hit your usage limit: every OpenRouter free model is resting right now. Try again at ${clockOf(until ?? now() + 10 * 60_000)}.`, costUsd: 0, tokens: tok, model: lastModel, models: used, limited: true });
       for (let step = 0; step < maxSteps + 5; step++) {
         if (now() > deadline) return { out: 'Stopped: the time limit was reached.', costUsd: 0, tokens: tok, model: lastModel, models: used, timedOut: true };

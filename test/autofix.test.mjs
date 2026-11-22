@@ -34,11 +34,11 @@ function world({ fixes = true } = {}) {
   return { e, root, calls, repo: () => path.join(forgeDir(e.cfg.stateDir, 'app'), 'repo.git') };
 }
 // The builder's first attempt has no header, and its (recorded) review says "changes": exactly what autonomous mode would hold.
-async function heldPr(w) {
+async function heldPr(w, verdictOverride) {
   await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } }); w.e.setVerify('app', { verify: 'test -f a.js' }); w.e.setAutonomyAllowed({ allow: true });
   const p = w.e.project('app'); const d = w.e.deps(p); d.config.maxAttempts = 1; d.config.verify = 'test -f a.js';
   d.agent = { run: async (_sb, ws) => { write(path.join(ws.dir, 'a.js'), 'export const a = 1;\n'); return { out: 'done', costUsd: 0 }; } };
-  d.config.review = async () => ({ verdict: 'changes', summary: 'needs a header', findings: [{ severity: 'major', file: 'a.js', line: 1, issue: 'the file has no header comment', fix: 'add one' }] });
+  d.config.review = async () => verdictOverride ?? ({ verdict: 'changes', summary: 'needs a header', findings: [{ severity: 'major', file: 'a.js', line: 1, issue: 'the file has no header comment', fix: 'add one' }] });
   await w.e.createTicket('app', { title: 'Add a', body: 'Add a to a.js with a test that checks it works.' }); const [rec] = await tick(d); assert.equal(rec.status, 'ok'); return rec;
 }
 
@@ -111,4 +111,9 @@ test('design pass: the unattended switch starts it (and says so), and tickets ar
   w.e._designPass.get('app').state = 'running'; assert.equal((await w.e.releasePlan('app')).waiting, 'designs');
   for (let i = 0; i < 200 && w.e.designJobs?.size; i++) await new Promise((r) => setTimeout(r, 50));
   w.e._designPass.get('app').state = 'done'; assert.equal(w.e.setUnattended('app', { designs: false }).design, null);
+});
+
+test('autonomous mode: a review that could not run (the reviewers hit a limit) is run again, not held forever; the fresh review finds the problem, a fix round addresses it, and the PR merges', async () => {
+  const w = world({ fixes: true }); await heldPr(w, { verdict: 'error', summary: 'The reviewer did not return a verdict in the expected format.', findings: [] }); w.e.setUnattended('app', { rounds: 2, designs: false }); const p = w.e.project('app');
+  const res = await w.e.autopilot(p); assert.deepEqual(res.map((r) => r.status), ['merged']); assert.ok(w.calls.review >= 2, 'a fresh review, then another after the fix'); assert.equal(w.calls.fix, 1); assert.match(bare(w.repo(), 'show', 'main:a.js'), /\/\/ header/);
 });

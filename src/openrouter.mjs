@@ -12,11 +12,11 @@ export function classifyError({ status, body, headers = {}, now = Date.now() }) 
   // when the limit lifts, if anything says so: a reset header (epoch ms or seconds) or Retry-After (seconds)
   const h = Object.fromEntries(Object.entries({ ...(meta.headers ?? {}), ...headers }).map(([k, v]) => [String(k).toLowerCase(), v]));
   let retryAtMs = null; const reset = Number(h['x-ratelimit-reset']); if (Number.isFinite(reset) && reset > 0) retryAtMs = reset > 1e12 ? reset : reset > 1e9 ? reset * 1000 : null;
-  const ra = Number(h['retry-after']); if (retryAtMs === null && Number.isFinite(ra) && ra > 0) retryAtMs = now + ra * 1000;
+  const cap = Number(h['x-ratelimit-limit']); const ra = Number(h['retry-after']); if (retryAtMs === null && Number.isFinite(ra) && ra > 0) retryAtMs = now + ra * 1000;
   const code = Number(status ?? err.code);
   if (code === 401 || code === 403) return { kind: 'auth', message: msg || 'The API key was refused', retryAtMs: null };
   if (code === 402) return { kind: 'credits', message: msg || 'This needs credits', retryAtMs: null };
-  if (code === 429) { const daily = /per-day|per day|daily|free-models-per-day|requests per day/.test(raw); return { kind: daily ? 'daily-limit' : 'rate-limit', message: msg || 'Rate limited', retryAtMs: retryAtMs ?? (daily ? utcMidnightAfter(now) : null), source: meta.limit_source ?? null, provider: meta.provider_name ?? null }; }
+  if (code === 429) { const daily = /per-day|per day|daily|free-models-per-day|requests per day/.test(raw); return { kind: daily ? 'daily-limit' : 'rate-limit', message: msg || 'Rate limited', retryAtMs: retryAtMs ?? (daily ? utcMidnightAfter(now) : null), limit: Number.isFinite(cap) && cap > 0 ? cap : null, source: meta.limit_source ?? null, provider: meta.provider_name ?? null }; }
   if (code === 404 || /no endpoints found|model.*(not found|unavailable|no longer)/.test(raw)) return { kind: 'unavailable', message: msg || 'The model is not available', retryAtMs: null };
   if (code === 400 || code === 422) return { kind: 'bad-request', message: msg || 'The model rejected the request', retryAtMs: null };
   if (code === 408 || code === 504) return { kind: 'timeout', message: msg || 'Timed out', retryAtMs: null };

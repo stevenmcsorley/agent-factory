@@ -20,7 +20,7 @@ export function priorScore(m, role = 'builder') {
 
 export class ModelRouter {
   constructor({ dir, client, now = () => Date.now(), config = () => ({}) }) { this.dir = dir; this.client = client; this.now = now; this.config = config; this.file = path.join(dir, 'openrouter.json'); this.callsFile = path.join(dir, 'openrouter-calls.jsonl'); this.s = this._load(); }
-  _load() { try { const s = JSON.parse(fs.readFileSync(this.file, 'utf8')); return { models: s.models ?? {}, stats: s.stats ?? {}, refreshedAt: s.refreshedAt ?? null, freeUntil: s.freeUntil ?? 0, authFailed: !!s.authFailed, day: s.day ?? { date: null, requests: 0 }, keyInfo: s.keyInfo ?? null }; } catch { return { models: {}, stats: {}, refreshedAt: null, freeUntil: 0, authFailed: false, day: { date: null, requests: 0 }, keyInfo: null }; } }
+  _load() { try { const s = JSON.parse(fs.readFileSync(this.file, 'utf8')); return { models: s.models ?? {}, stats: s.stats ?? {}, refreshedAt: s.refreshedAt ?? null, freeUntil: s.freeUntil ?? 0, authFailed: !!s.authFailed, day: s.day ?? { date: null, requests: 0 }, keyInfo: s.keyInfo ?? null, dailyCap: s.dailyCap ?? null }; } catch { return { models: {}, stats: {}, refreshedAt: null, freeUntil: 0, authFailed: false, day: { date: null, requests: 0 }, keyInfo: null, dailyCap: null }; } }
   _save() { try { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.s)); fs.renameSync(`${this.file}.tmp`, this.file); } catch { /* the router must never break a run */ } }
   _stat(id) { return (this.s.stats[id] ??= { calls: 0, ok: 0, limited: 0, unavailable: 0, badTools: 0, otherFail: 0, ms: 0, input: 0, output: 0, cached: 0, lastOk: null, lastErr: null, lastKind: null, lastMsg: null, cooldown: null, level: 0, restEma: null, rests: 0 }); }
 
@@ -45,6 +45,8 @@ export class ModelRouter {
   pick(opts) { return this.candidates(opts)[0] ?? null; }
 
   // ---- what happened
+  // The free allowance for today: the cap OpenRouter told us (50 on a free key, 1000 once the account has credit), what we have used, what is left. Our count is a good estimate, not gospel.
+  budget() { const cap = this.s.dailyCap ?? (this.s.keyInfo ? (this.s.keyInfo.freeTier ? 50 : 1000) : null); const used = this._day().requests; return { cap, used, remaining: cap === null ? null : Math.max(0, cap - used), freeTier: this.s.keyInfo?.freeTier ?? null }; }
   _day() { const d = new Date(this.now()).toISOString().slice(0, 10); if (this.s.day.date !== d) this.s.day = { date: d, requests: 0 }; return this.s.day; }
   noteOk(id, { ms = 0, usage = {}, role = null, project = null, steps = 0, ref = null } = {}) {
     const st = this._stat(id); const t = this.now(); this._day().requests++; st.calls++; st.ok++; st.ms += ms; st.input += usage.input ?? 0; st.output += usage.output ?? 0; st.cached += usage.cached ?? 0; st.lastOk = t;
@@ -55,7 +57,7 @@ export class ModelRouter {
     const st = this._stat(id); const t = this.now(); this._day().requests++; st.calls++; st.ms += ms; st.lastErr = t; st.lastKind = error.kind; st.lastMsg = clip(error.message, 200); let until = 0;
     const learned = st.restEma ?? null;
     if (error.kind === 'auth') this.s.authFailed = true;
-    else if (error.kind === 'daily-limit') { until = error.retryAtMs ?? t + 6 * HOUR; if (!id.includes(':free') && this.s.models[id]?.free === false) { /* a paid model's own daily limit */ } else this.s.freeUntil = Math.max(this.s.freeUntil, until); st.limited++; }
+    else if (error.kind === 'daily-limit') { if (error.limit) this.s.dailyCap = error.limit; until = error.retryAtMs ?? t + 6 * HOUR; if (!id.includes(':free') && this.s.models[id]?.free === false) { /* a paid model's own daily limit */ } else this.s.freeUntil = Math.max(this.s.freeUntil, until); st.limited++; }
     else if (error.kind === 'rate-limit') { st.limited++; st.level++; const base = learned ?? MIN; until = error.retryAtMs ? Math.min(error.retryAtMs, t + 24 * HOUR) : t + Math.min(HOUR, base * 2 ** (st.level - 1)); }
     else if (error.kind === 'unavailable') { st.unavailable++; st.level++; until = t + Math.min(6 * HOUR, 5 * MIN * 2 ** (st.level - 1)); if (/no endpoints|not found|no longer/i.test(error.message)) until = t + 6 * HOUR; }
     else if (error.kind === 'bad-request') { st.badTools++; until = t + 30 * MIN; }
@@ -80,6 +82,6 @@ export class ModelRouter {
         backAt: rest ? rest.until : freeRest ? this.s.freeUntil : null, restKind: rest?.kind ?? (freeRest ? 'daily-limit' : null), learnedRestMs: st?.restEma ?? null,
         calls: st?.calls ?? 0, ok: st?.ok ?? 0, limited: st?.limited ?? 0, unavailable: st?.unavailable ?? 0, badTools: st?.badTools ?? 0, avgMs: st?.ok ? Math.round(st.ms / st.ok) : null, tokensIn: st?.input ?? 0, tokensOut: st?.output ?? 0, lastOk: st?.lastOk ?? null, lastErr: st?.lastErr ?? null, lastMsg: st?.lastMsg ?? null }; });
     rows.sort((a, b) => (b.state === 'ready') - (a.state === 'ready') || b.score - a.score);
-    return { refreshedAt: this.s.refreshedAt, authFailed: this.s.authFailed, freeUntil: this.s.freeUntil > t ? this.s.freeUntil : null, today: this._day().requests, keyInfo: this.s.keyInfo, models: rows, ready: rows.filter((r) => r.state === 'ready').length, resting: rows.filter((r) => r.state === 'resting').length };
+    return { refreshedAt: this.s.refreshedAt, authFailed: this.s.authFailed, freeUntil: this.s.freeUntil > t ? this.s.freeUntil : null, today: this._day().requests, budget: this.budget(), keyInfo: this.s.keyInfo, models: rows, ready: rows.filter((r) => r.state === 'ready').length, resting: rows.filter((r) => r.state === 'resting').length };
   }
 }

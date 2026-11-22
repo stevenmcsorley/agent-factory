@@ -14,16 +14,16 @@ export const unattendedMethods = {
   // One call = one round, counted per PR; once the project's fixReviewRounds are used up the PR stays held (and the usual notifications fire).
   async _autoFix(p, pr, run, verdict, st, d) {
     const auto = { ...AUTONOMY_DEFAULTS, ...(p.autonomy ?? {}) }; const rounds = auto.fixReviewRounds; if (!rounds || !run) return null;
-    const reviewerChanges = run.review?.verdict === 'changes'; let conflicts = false;
+    const reviewerChanges = run.review?.verdict === 'changes'; const reviewerError = run.review?.verdict === 'error'; let conflicts = false;   // an error = the reviewers could not run (a limit, a timeout): look again instead of holding the PR forever
     if (hostKind(p) === 'local' && auto.autoResolveConflicts) { const c = await this._forge(p).mergeCheck(pr.number).catch(() => null); conflicts = c?.clean === false; }
-    if (!reviewerChanges && !conflicts) return null;
+    if (!reviewerChanges && !reviewerError && !conflicts) return null;
     const hardBlockers = (verdict.blockers ?? []).filter((b) => !/reviewer asked for changes|reviewer did not approve|no reviewer agent/.test(b)); if (hardBlockers.length && !conflicts) return null;   // something a fix round cannot cure (failed checks, caps…)
     st.fixRounds ??= {}; const key = `${p.id}:${pr.number}`; const used = st.fixRounds[key] ?? 0; if (used >= rounds) return null;
     st.fixRounds[key] = used + 1; this._autoSave(st); const base = p.base ?? 'main';
     const ticket = await d.tickets.get?.(run.ticket).catch(() => null) ?? { id: run.ticket, title: pr.title, body: '' };
     this._audit({ what: 'auto-fix', project: p.id, pr: pr.number, round: used + 1, of: rounds, conflicts, reviewer: run.review?.verdict ?? null });
     if (conflicts) { const r = await resolveConflicts(this.deps(p, 'fixer'), pr, { base, findings: this._findingsText(this._assessment(p, run, pr.number)) }); if (r.status !== 'ok') return null; }
-    const out = await reviewFixRound(this.deps(p, 'reviewer'), pr, { run, ticket: { id: ticket.id ?? run.ticket, title: ticket.title ?? pr.title, body: ticket.body ?? '' }, reviewFirst: conflicts, round: used + 1 });
+    const out = await reviewFixRound(this.deps(p, 'reviewer'), pr, { run, ticket: { id: ticket.id ?? run.ticket, title: ticket.title ?? pr.title, body: ticket.body ?? '' }, reviewFirst: conflicts || reviewerError, round: used + 1 });
     this.cache.delete(`p:${p.id}`); if (!out.review || out.status === 'error') return null;
     const fresh = (await import('./budget.mjs')).readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && /(\d+)$/.exec(String(r.pr))?.[1] === String(pr.number)).at(-1); return fresh ?? null;
   },

@@ -168,3 +168,16 @@ test('status rows keep their fields distinct (input types vs token counts), and 
   const c = clock(); const cat = [...CATALOGUE, M('goog/lyria-3:free', { output: ['audio'] })]; const r = new ModelRouter({ dir: tmp(), client: fakeClient(cat), now: c.now, config: () => ({}) }); await r.refresh(); r.noteOk('mid/gemma-31b:free', { ms: 1000, usage: { input: 1234, output: 56 } });
   const rows = r.status().models; const row = rows.find((m) => m.id === 'mid/gemma-31b:free'); assert.deepEqual(row.modalities, ['text']); assert.equal(row.tokensIn, 1234); assert.equal(row.tokensOut, 56); assert.ok(!rows.some((m) => m.id === 'goog/lyria-3:free'), 'not listed'); assert.ok(!r.candidates({}).some((m) => m.id === 'goog/lyria-3:free'), 'not picked');
 });
+
+test('budget: the daily cap comes from OpenRouter itself (50 on a free key), a review is ONE request with no tools, and a task it cannot finish is not started', async () => {
+  const dq = { error: { message: 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day', code: 429, metadata: { headers: { 'X-RateLimit-Limit': '50', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': String(Date.UTC(2026, 10, 23)) } } } };
+  const e = classifyError({ status: 429, body: dq, now: Date.UTC(2026, 10, 22, 18) }); assert.equal(e.kind, 'daily-limit'); assert.equal(e.limit, 50); assert.equal(e.retryAtMs, Date.UTC(2026, 10, 23));
+  const c = clock(Date.UTC(2026, 10, 22, 9, 0, 0)); const router = new ModelRouter({ dir: tmp(), client: fakeClient(), now: c.now, config: () => ({}) }); await router.refresh(); assert.deepEqual(router.budget(), { cap: 50, used: 0, remaining: 50, freeTier: true }, 'a free key: 50 until told otherwise');
+  const calls = []; const client = { chat: async (a) => { calls.push({ model: a.model, tools: !!a.tools }); return reply({ content: '{"verdict":"approve","summary":"ok","findings":[]}' }); } };
+  const agent = openrouterAgent({ router, client, role: 'reviewer', minGapMs: 0, sleep: async () => {}, now: c.now }); const r = await agent.run({}, { dir: tmp() }, 'Judge: diff here', { meta: { shot: true } });
+  assert.equal(r.out, '{"verdict":"approve","summary":"ok","findings":[]}'); assert.equal(calls.length, 1, 'one request'); assert.equal(calls[0].tools, false, 'no tools'); assert.equal(router.budget().used, 1);
+  for (let i = 0; i < 44; i++) router.noteOk('mid/gemma-31b:free', { ms: 1, usage: {} }); assert.equal(router.budget().remaining, 5);   // 50 - 45
+  const task = await agent.run({}, { dir: tmp() }, 'Build it', {}); assert.equal(task.limited, true, 'not enough left to finish a task'); assert.match(task.out, /5 requests/); assert.equal(calls.length, 1, 'and no request was wasted on it'); assert.ok(parseUsageLimit(task.out));
+  const review = await agent.run({}, { dir: tmp() }, 'Judge again', { meta: { shot: true } }); assert.equal(review.out.includes('approve'), true, 'a one-request review is still affordable');
+  router.noteFail('mid/gemma-31b:free', e); assert.equal(router.budget().cap, 50); assert.equal((await agent.run({}, { dir: tmp() }, 'Judge', { meta: { shot: true } })).limited, true, 'allowance used: it says so, with the reset time');
+});

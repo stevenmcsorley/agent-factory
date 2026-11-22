@@ -67,7 +67,7 @@ export const roleMethods = {
     // The one place every agent call passes through, whichever role: the first sign of the plan's usage limit pauses every agent (engine-limit.mjs), and the tokens used are logged (usage.mjs).
     return { ...agent, run: async (...args) => { const t0 = Date.now(); let r = await agent.run(...args); let lim = parseUsageLimit(r?.out); let swapped = false;
       // the plan ran out in the middle of this call: say so, and (when OpenRouter is set to stand in) do the same job again on a free model instead of failing it
-      if (lim && agent.name !== 'openrouter' && !this.f.agent && this._fallbackCovers(role)) { this._noteLimit(lim); this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await this._orAgent(role, log, ctx).run(...args); lim = parseUsageLimit(r?.out); swapped = true; } if (lim) this._noteLimit(lim);
+      if (lim && agent.name !== 'openrouter' && !this.f.agent && this._fallbackCovers(role)) { this._noteLimit(lim); this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await this._orAgent(role, log, ctx).run(args[0], args[1], args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(role === 'reviewer' || role === 'security' ? { shot: true } : {}) } }); lim = parseUsageLimit(r?.out); swapped = true; } if (lim) this._noteLimit(lim);
       const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via: r?.models || agent.name === 'openrouter' || swapped ? 'openrouter' : null, input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...(lim ? { limited: true } : {}) }); return r; } };
   },
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },
@@ -83,7 +83,8 @@ export const roleMethods = {
         announce?.(role, role === 'security' ? 'checking for security problems' : 'reading the change'); const copy = copyWorkspace(ws);
         try {
           const prompt = reviewPrompt({ rules: getPrompt(rules, {}, this._promptDirs()), skills: this._skillsText(role, p.id), ticket, diff, context });
-          const r = await this._agentFor(role, log, { project: p.id }).run(sandbox, copy, prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta });
+          const ag = this._agentFor(role, log, { project: p.id }); const shot = ag.name === 'openrouter';   // on a free-model allowance a review is ONE request: the diff is in the prompt, there is no checkout to explore
+          const r = await ag.run(sandbox, copy, shot ? prompt.replace(/You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix\./, 'No checkout is available: judge from the diff and context below.') : prompt, { timeoutMs: this.cfg.limits.timeoutMs ?? 900_000, meta: { ...meta, ...(shot ? { shot: true } : {}) } });
           if (r.timedOut) results.push({ role, verdict: 'error', summary: `The ${role} pass timed out.`, findings: [] });
           else if (parseUsageLimit(r.out)) results.push({ role, verdict: 'error', summary: `The ${role} pass hit its usage limit.`, findings: [] });
           else results.push({ role, ...parseVerdict(r.out), ...(r.tokens ? { tokens: r.tokens } : {}) });
