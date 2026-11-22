@@ -16,6 +16,12 @@ def key(img, lo=LO, hi=HI):
     chroma = a.max(-1) - a.min(-1); alpha = np.clip((lum - lo) / (hi - lo), 0, 1); alpha = np.maximum(alpha, np.clip((chroma - 14) / 20, 0, 1))
     out = np.dstack([a, alpha * 255]).astype(np.uint8); return Image.fromarray(out, 'RGBA')
 
+def key_solid(img, size=13, lo=LO, hi=HI):
+    """Like key(), but dark metal INSIDE the outline stays solid (a binary closing fills the dark faces of posts and housings that the plain key would make see-through)."""
+    from PIL import ImageFilter
+    rgba = key(img, lo, hi); a = np.asarray(rgba).copy(); m = Image.fromarray(((a[..., 3] > 60) * 255).astype(np.uint8), 'L').filter(ImageFilter.MaxFilter(size)).filter(ImageFilter.MinFilter(size)); closed = np.asarray(m) > 128
+    a[..., 3] = np.where(closed, np.maximum(a[..., 3], 255), a[..., 3]); return Image.fromarray(a)
+
 def paint(img, box, rgb):
     a = np.asarray(img).copy(); x0, y0, x1, y1 = box; a[y0:y1, x0:x1] = rgb; return Image.fromarray(a)
 
@@ -35,12 +41,12 @@ def emit(name, rgba, box):
 
 BG_DARK = (12, 13, 12)
 # --- the six machines and the hopper / bin
-emit('claim', key(SRC.crop((298, 222, 482, 396))), (298, 222, 482, 396))
-emit('sandbox', key(SRC.crop((506, 222, 664, 396))), (506, 222, 664, 396))
-gate = key(SRC.crop((868, 226, 1036, 398))); emit('gate', gate, (868, 226, 1036, 398))
-emit('push', key(SRC.crop((1054, 256, 1212, 398))), (1054, 256, 1212, 398))
+emit('claim', key_solid(SRC.crop((298, 222, 482, 396))), (298, 222, 482, 396))
+emit('sandbox', key_solid(SRC.crop((506, 222, 664, 396))), (506, 222, 664, 396))
+gate = key_solid(SRC.crop((868, 226, 1036, 398))); emit('gate', gate, (868, 226, 1036, 398))
+emit('push', key_solid(SRC.crop((1054, 256, 1212, 398))), (1054, 256, 1212, 398))
 # press: paint out the parcel that is baked in under it (a real parcel now rides there)
-pr = paint(SRC, (1272, 300, 1352, 357), BG_DARK); emit('press', key(pr.crop((1222, 212, 1408, 398))), (1222, 212, 1408, 398))
+pr = paint(SRC, (1272, 300, 1352, 357), BG_DARK); emit('press', key_solid(pr.crop((1222, 212, 1408, 398))), (1222, 212, 1408, 398))
 # the parcel itself, cut from that same spot of the artwork
 emit('parcel', key(SRC.crop((1274, 304, 1350, 362)), lo=30, hi=52), (1274, 304, 1350, 362))
 # hopper with its front panel cut away so parcels can pile up from the bottom inside it
