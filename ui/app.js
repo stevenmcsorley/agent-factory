@@ -36,7 +36,7 @@ let tickerKey = '';
 function drawTicker(events, st) {
   const key = JSON.stringify([events.slice(0, 12).map((e) => e.at + e.type + (e.phase ?? '')), st?.paused, st?.active]); if (key === tickerKey) return; tickerKey = key;
   const items = events.slice(0, 14).map((e) => { const t = new Date(e.at).toLocaleTimeString([], { hour12: false });
-    const msg = e.type === 'phase' ? `${e.phase.toUpperCase()}` : e.type === 'start' ? 'PICKED UP' : e.status === 'ok' ? 'SHIPPED' : `STOPPED: ${e.status}`; const cls = e.type === 'end' ? (e.status === 'ok' ? 't-ok' : 't-bad') : 't-run';
+    const PH = { claim: 'picked up', sandbox: 'setting up', agent: 'writing the change', verify: 'running the tests', visual: 'checking how it looks', review: 'being reviewed', push: 'uploading', pr: 'opening the pull request' }; const msg = e.type === 'phase' ? (PH[e.phase] ?? e.phase) : e.type === 'role' ? (e.detail ?? 'working') : e.type === 'start' ? 'picked up' : e.status === 'ok' ? 'shipped' : e.status ? `stopped (${e.status})` : 'stopped'; const cls = e.type === 'end' ? (e.status === 'ok' ? 't-ok' : 't-bad') : 't-run';
     return h('span', {}, h('em', {}, t), h('b', {}, `${(e.title ?? `#${e.ticket ?? e.pr ?? ''}`).slice(0, 38)}`), ' ', h('i', { class: cls, style: { fontStyle: 'normal' } }, `› ${msg}`)); });
   const idle = h('span', {}, st?.paused ? 'Paused · no new work will start until you press Resume' : st?.limit ? `Codex has run out of usage · back ${st.limit.untilText}${st.autoResume ? ' · work resumes by itself' : ''}` : `Quiet right now · watching ${st?.projects?.length ?? 0} project${st?.projects?.length === 1 ? '' : 's'} for new work`);
   ticker.className = `ticker ${items.length < 4 ? 'static' : ''}`;
