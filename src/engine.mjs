@@ -311,6 +311,7 @@ export class Engine {
       const g = assessTicket({ title: cur.title, body }, this.cfg.limits.gate);
       if (!g.ok) throw bad(`Still too vague for the factory to start: ${g.problems.join('; ')}. Add concrete detail (function/file names, expected behaviour) and try again.`);
       if (details) await adapter.update(ticketId, { body });
+      if (cur.state === 'CLOSED' && typeof adapter.reopen === 'function') await adapter.reopen(ticketId);   // a closed ticket is never picked up, whatever its label says
       await adapter.label(ticketId, ['agent-ready'], AGENT_LABELS.filter((l) => l !== 'agent-ready'));
       this.outcomes.delete(`${projectId}#${ticketId}`); await adapter.comment(ticketId, `agent-factory: requeued by you${details ? ' with extra detail' : ''}.`).catch(() => {});
       return { requeued: true };

@@ -141,3 +141,10 @@ test('every host: a ticket closed after its pull request was closed WITHOUT merg
   mk(); const pr = (await w.e.listPrs('app'))[0]; w.e._forge(w.e.project('app')).close(pr.number); await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear();   // PR closed directly on the forge, then the ticket closed by hand
   assert.equal((await w.e.getPlan('app')).progress.failed, 1, 'closed without merging = failed'); assert.equal((await w.e.getPlan('app')).progress.done, 0);
 });
+
+test('requeueing a ticket that was closed reopens it, so the factory actually picks it up again', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'Add greeting', { 'a.js': 'export const a = 1;\n' });
+  await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear(); assert.equal((await labelsOf(w, ticket)).state, 'CLOSED');
+  const pr = (await w.e.listPrs('app'))[0]; const r = await w.e.prAction('app', pr.number, 'rebuild', {}); assert.equal(r.requeued, true, r.requeueError ?? ''); w.e.cache.clear();
+  const t = await labelsOf(w, ticket); assert.notEqual(t.state, 'CLOSED', 'reopened'); assert.ok(t.labels.includes('agent-ready'));
+});
