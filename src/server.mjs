@@ -203,7 +203,7 @@ export function createServer(engine, { token, allowedHosts }) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.startsWith('/fonts/') ? path.join('fonts', path.basename(url.pathname)) : path.basename(url.pathname);
         const file = path.join(UI, name);
         if (!TYPES[path.extname(name)] || !fs.existsSync(file)) return send(res, 404, { error: 'Not found' });
-        return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)], ...(name.startsWith('fonts') ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : {}),
+        return send(res, 200, fs.readFileSync(file), { 'Content-Type': TYPES[path.extname(name)], ...(name.startsWith('fonts') ? { 'Cache-Control': 'public, max-age=31536000, immutable' } : { 'Cache-Control': 'no-cache' }),
           'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" });
       }
       const bearer = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '')?.[1];

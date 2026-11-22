@@ -303,7 +303,14 @@ export class Engine {
     }));
     return out;
   }
-  async inboxCount() { const inb = await this._cached('inbox-count', 8000, () => this.inbox()).catch(() => null); if (inb) return { count: inb.items.filter((i) => i.kind !== 'plan').length + 0 }; const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures(false)).length; return { count: n }; }
+  // The Inbox badge. Working out the Inbox is expensive (every project's tickets, every open pull request and whether it would merge), so the badge is served from the last answer and
+  // refreshed in the background; only the very first call waits. It must never slow down a page.
+  async inboxCount() {
+    const c = (this._ibx ??= { count: 0, at: 0, busy: null, ready: false }); const stale = Date.now() - c.at > 15_000;
+    if (stale && !c.busy) c.busy = (async () => { try { const inb = await this.inbox(); const n = inb.items.filter((i) => i.kind !== 'plan').length; const changed = !c.ready || n !== c.count; c.count = n; c.ready = true; c.at = Date.now(); if (changed) this.notify('inbox'); }
+      catch { try { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); c.count = n; c.ready = true; c.at = Date.now(); } catch { /* keep the last answer */ } } finally { c.busy = null; } })();
+    if (!c.ready && c.busy) await c.busy; return { count: c.count };
+  }
 
   // Act on a ticket from the inbox. Everything is validated; re-queueing re-runs the clarity gate so a vague ticket cannot just bounce back.
   async ticketAction(projectId, ticketId, action, payload = {}) {

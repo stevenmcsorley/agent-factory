@@ -98,13 +98,16 @@ function showUpdate() {
   if (document.querySelector('.updatebar')) return;
   document.body.prepend(h('div', { class: 'updatebar', role: 'status' }, h('span', {}, 'The factory was updated. Reload to get the new interface.'), h('button', { class: 'btn small primary', onclick: () => location.reload() }, 'Reload now')));
 }
+let badgeBusy = false;
+function updateInboxBadge() { if (badgeBusy) return; badgeBusy = true; api('/inbox/count').then((ic) => { if (ic.count !== inboxCount) { inboxCount = ic.count; headerKey = ''; if (header && status) drawHeader(lastNav); } }).catch(() => {}).finally(() => { badgeBusy = false; }); }
 async function refresh(force = false) {
   if (!session.token) return login();
   const r = match(); view = r.v;
   try {
-    const [data, st, act2, ic] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] })), api('/inbox/count').catch(() => ({ count: 0 }))]);
+    const [data, st, act2] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] }))]);
+    updateInboxBadge();   // never waited for: the count arrives when it arrives
     if (st.build) { if (!buildId) buildId = st.build; else if (st.build !== buildId) showUpdate(); }
-    status = st; inboxCount = ic.count; if (!header) { shell(); lastRoute = null; } lastNav = r.nav; drawHeader(r.nav); drawTicker(act2.events, st); startStream();
+    status = st; if (!header) { shell(); lastRoute = null; } lastNav = r.nav; drawHeader(r.nav); drawTicker(act2.events, st); startStream();
     const key = JSON.stringify([location.hash, data]);
     if (!force && key === lastKey) return;
     if (!force && typing()) return;

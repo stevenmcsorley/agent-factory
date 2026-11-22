@@ -11,7 +11,7 @@ const EVENT_ICON = { 'codex-limit': 'alert', 'codex-resume': 'play', fallback: '
 const RANGES = [[1, 'Last 24 hours'], [7, '7 days'], [30, '30 days']];
 const state = { days: 7, provider: '', role: '', project: '', outcome: '', page: 0 };
 const PAGE = 20;
-const tip = (text, label) => h('span', { class: 'tip', title: text, tabindex: '0', 'aria-label': text }, label ?? '?');
+const tip = (text, label) => h('span', { class: 'hint', title: text, tabindex: '0', 'aria-label': text }, label ?? '?');
 const th = (text, help) => h('th', {}, text, help ? tip(help) : null);
 
 async function downloadCsv() {
@@ -24,7 +24,7 @@ function tiles(a) {
   const cells = [[t.calls, 'jobs run', 'Every time an agent was asked to do something.'], [compact(t.input), 'tokens read', 'Tokens are the small pieces of text (about three quarters of a word) an AI model reads or writes. Providers measure usage in tokens. "Read" is what the agent was shown, including what it re-read.'],
     [compact(t.output), 'tokens written', 'What the agents wrote back: code, reviews, plans.'], [percent(t.freeShare), 'done by free models', 'Share of the work, measured by cost. Free models cost nothing but count towards the share so you can see how much Codex usage they save.'],
     [a.events.filter((e) => e.kind === 'codex-limit').length, 'times Codex ran out', 'How often the Codex plan hit its usage limit in this period.'], [t.escalated, 'jobs a free model could not do', 'The free model could not give a usable answer, so Codex did the job instead.']];
-  return h('div', { class: 'tiles' }, cells.map(([n, label, help]) => h('div', { class: 'tile', title: help }, h('b', {}, String(n)), h('span', {}, label))));
+  return h('div', { class: 'kpis' }, cells.map(([n, label, help]) => h('div', { class: 'kpi', title: help }, h('b', {}, String(n)), h('span', {}, label))));
 }
 
 function daysCard(a) {
@@ -52,8 +52,8 @@ function limitsCard(a) {
 
 function modelsCard(a) {
   if (!a.byModel.length) return null;
-  const rows = a.byModel.map((m) => { const reread = m.input ? m.cached / m.input : 0; return h('tr', {}, h('td', {}, chip(m.provider === 'openrouter' ? 'ok' : 'off', PROVIDER[m.provider]), h('div', { class: 'small mono' }, m.model.length > 34 ? `${m.model.slice(0, 33)}…` : m.model)), h('td', { class: 'num' }, String(m.calls)), h('td', { class: 'num' }, compact(m.input)), h('td', { class: 'num' }, compact(m.output)),
-    h('td', { class: 'num' }, m.input ? percent(reread) : '–'), h('td', { class: 'num' }, m.steps ? String(m.avgSteps) : '–'), h('td', { class: 'num' }, m.tokensPerStep != null ? compact(m.tokensPerStep) : '–'), h('td', { class: 'num' }, m.toolFailures ? h('span', { class: 'bad' }, String(m.toolFailures)) : '0'), h('td', { class: 'num' }, m.avgMs ? `${(m.avgMs / 1000).toFixed(1)}s` : '–'), h('td', { class: 'num' }, m.limited ? String(m.limited) : '–'), h('td', { class: 'small muted' }, m.last ? ago(m.last) : '–')); });
+  const rows = a.byModel.map((m) => { const reread = m.input ? m.cached / m.input : 0; return h('tr', {}, h('td', {}, chip(m.provider === 'openrouter' ? 'ok' : 'off', PROVIDER[m.provider]), h('div', { class: 'small mono' }, m.model.length > 34 ? `${m.model.slice(0, 33)}…` : m.model)), h('td', { class: 'tnum' }, String(m.calls)), h('td', { class: 'tnum' }, compact(m.input)), h('td', { class: 'tnum' }, compact(m.output)),
+    h('td', { class: 'tnum' }, m.input ? percent(reread) : '–'), h('td', { class: 'tnum' }, m.steps ? String(m.avgSteps) : '–'), h('td', { class: 'tnum' }, m.tokensPerStep != null ? compact(m.tokensPerStep) : '–'), h('td', { class: 'tnum' }, m.toolFailures ? h('span', { class: 'bad' }, String(m.toolFailures)) : '0'), h('td', { class: 'tnum' }, m.avgMs ? `${(m.avgMs / 1000).toFixed(1)}s` : '–'), h('td', { class: 'tnum' }, m.limited ? String(m.limited) : '–'), h('td', { class: 'small muted' }, m.last ? ago(m.last) : '–')); });
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'By model'), h('span', { class: 'muted small' }, 'Use the tool-call columns to see which models work efficiently')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('Model'), th('Jobs'), th('Read', 'Tokens the model was shown, including text it re-read.'), th('Written', 'Tokens the model wrote.'), th('Re-read', 'The share of what was read that the provider had already seen and charges a tenth for. High is good.'), th('Steps per job', 'Steps are actions an agent takes with its tools: read a file, search, edit, run a command. Fewer steps for the same result means a more efficient model.'), th('Read per step', 'How much text is read on each step. High numbers mean each step re-reads a lot.'), th('Bad tool calls', 'Times the model asked to use a tool in a way that could not be run.'), th('Avg time', 'Average time per job.'), th('Limited', 'Jobs that stopped because of a limit.'), th('Last used')]))
     , h('tbody', {}, ...rows))));
 }
@@ -61,13 +61,13 @@ function modelsCard(a) {
 function rolesCard(a) {
   if (!a.byRole.length) return null; const maxW = Math.max(1, ...a.byRole.map((r) => r.codex.weighted + r.openrouter.weighted));
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'By agent'), h('span', { class: 'muted small' }, 'Which provider each agent used')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('Agent'), th('Codex jobs'), th('Codex tokens'), th('Free jobs'), th('Free tokens'), th('Split', 'Blue is Codex, green is free models, measured by cost.')])),
-    h('tbody', {}, ...a.byRole.map((r) => { const w = r.codex.weighted + r.openrouter.weighted; return h('tr', {}, h('td', {}, h('b', {}, r.role)), h('td', { class: 'num' }, String(r.codex.calls)), h('td', { class: 'num' }, compact(r.codex.input + r.codex.output)), h('td', { class: 'num' }, String(r.openrouter.calls)), h('td', { class: 'num' }, compact(r.openrouter.input + r.openrouter.output)),
+    h('tbody', {}, ...a.byRole.map((r) => { const w = r.codex.weighted + r.openrouter.weighted; return h('tr', {}, h('td', {}, h('b', {}, r.role)), h('td', { class: 'tnum' }, String(r.codex.calls)), h('td', { class: 'tnum' }, compact(r.codex.input + r.codex.output)), h('td', { class: 'tnum' }, String(r.openrouter.calls)), h('td', { class: 'tnum' }, compact(r.openrouter.input + r.openrouter.output)),
       h('td', { class: 'splitcell' }, splitBar([{ label: 'Codex', value: r.codex.weighted, cls: 'codex' }, { label: 'Free', value: r.openrouter.weighted, cls: 'free' }]), h('i', { class: 'scale', style: { width: `${(100 * w) / maxW}%` } }))); })))));
 }
 
 function projectsCard(a) {
   if (!a.byProject.length) return null; return card(h('div', { class: 'card-h' }, h('h2', {}, 'By project')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Project', 'Jobs', 'Tokens read', 'Tokens written'].map((x) => h('th', {}, x)))),
-    h('tbody', {}, ...a.byProject.map((p) => h('tr', {}, h('td', {}, h('a', { href: `#/project/${p.project}` }, p.project)), h('td', { class: 'num' }, String(p.calls)), h('td', { class: 'num' }, compact(p.input)), h('td', { class: 'num' }, compact(p.output))))))));
+    h('tbody', {}, ...a.byProject.map((p) => h('tr', {}, h('td', {}, h('a', { href: `#/project/${p.project}` }, p.project)), h('td', { class: 'tnum' }, String(p.calls)), h('td', { class: 'tnum' }, compact(p.input)), h('td', { class: 'tnum' }, compact(p.output))))))));
 }
 
 function callsCard(a, rerender) {
@@ -79,7 +79,7 @@ function callsCard(a, rerender) {
     h('div', { class: 'row filters' }, sel('provider', 'Any provider', opts('provider'), (v) => PROVIDER[v] ?? v), sel('role', 'Any agent', opts('role')), sel('project', 'Any project', opts('project')), sel('outcome', 'Any result', opts('outcome'), (v) => OUTCOME[v]?.[1] ?? v)),
     h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('When'), th('Agent'), th('Provider'), th('Project'), th('Read'), th('Written'), th('Steps'), th('Time'), th('Result')])),
       h('tbody', {}, ...view.map((c) => h('tr', {}, h('td', { class: 'small', title: new Date(c.at).toLocaleString() }, ago(c.at)), h('td', {}, c.role), h('td', {}, h('span', { title: c.model ?? '' }, PROVIDER[c.provider] ?? c.provider), c.model && c.provider !== 'none' ? h('div', { class: 'small muted mono' }, c.model.split('/').pop().slice(0, 26)) : null),
-        h('td', {}, c.project ? h('a', { href: `#/project/${c.project}` }, c.project) : '–', c.run ? h('a', { class: 'small', href: `#/run/${c.run}`, title: 'The work order for this run' }, ' ↗') : null), h('td', { class: 'num' }, c.input ? compact(c.input) : '–'), h('td', { class: 'num' }, c.output ? compact(c.output) : '–'), h('td', { class: 'num' }, c.steps || '–'), h('td', { class: 'num' }, c.ms ? `${(c.ms / 1000).toFixed(1)}s` : '–'),
+        h('td', {}, c.project ? h('a', { href: `#/project/${c.project}` }, c.project) : '–', c.run ? h('a', { class: 'small', href: `#/run/${c.run}`, title: 'The work order for this run' }, ' ↗') : null), h('td', { class: 'tnum' }, c.input ? compact(c.input) : '–'), h('td', { class: 'tnum' }, c.output ? compact(c.output) : '–'), h('td', { class: 'tnum' }, c.steps || '–'), h('td', { class: 'tnum' }, c.ms ? `${(c.ms / 1000).toFixed(1)}s` : '–'),
         h('td', {}, h('span', { class: `pill2 ${OUTCOME[c.outcome]?.[0] ?? ''}` }, OUTCOME[c.outcome]?.[1] ?? c.outcome), c.why ? h('div', { class: 'small muted', title: c.why }, c.why.length > 70 ? `${c.why.slice(0, 69)}…` : c.why) : null)))))),
     view.length ? null : h('p', { class: 'muted' }, 'No calls match.'),
     pages > 1 ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn small', disabled: state.page === 0, onclick: () => { state.page--; rerender(); } }, 'Newer'), h('span', { class: 'muted small' }, `Page ${state.page + 1} of ${pages}`), h('button', { class: 'btn small', disabled: state.page >= pages - 1, onclick: () => { state.page++; rerender(); } }, 'Older')) : null);
@@ -88,7 +88,7 @@ function callsCard(a, rerender) {
 export const usagePage = {
   async load() { return { a: await api(`/accounts?days=${state.days}&calls=500`) }; },
   draw({ a }, ctx) {
-    const range = h('div', { class: 'seg', role: 'group', 'aria-label': 'Time range' }, RANGES.map(([d, label]) => h('button', { type: 'button', class: state.days === d ? 'on' : '', 'aria-pressed': String(state.days === d), onclick: () => { state.days = d; state.page = 0; ctx.rerender(); } }, label)));
+    const range = h('div', { class: 'segctl', role: 'group', 'aria-label': 'Time range' }, RANGES.map(([d, label]) => h('button', { type: 'button', class: state.days === d ? 'on' : '', 'aria-pressed': String(state.days === d), onclick: () => { state.days = d; state.page = 0; ctx.rerender(); } }, label)));
     return [head('Usage', 'What every agent and model has used, when, and what happened when a limit was hit or lifted.', range, h('button', { class: 'btn small', onclick: downloadCsv }, icon('copy', 12), 'Download as CSV')),
       tiles(a), a.totals.calls ? null : h('div', { class: 'note info' }, icon('alert', 14), h('div', {}, 'No agent has run in this period yet.')), daysCard(a), limitsCard(a), modelsCard(a), rolesCard(a), projectsCard(a), callsCard(a, ctx.rerender)].filter(Boolean);
   },
