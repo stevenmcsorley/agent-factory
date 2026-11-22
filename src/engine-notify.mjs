@@ -18,6 +18,10 @@ export const notifyMethods = {
     if (sample && this._due(sample).reasons.some((r) => r.code === 'daily-cap') && st.capDay !== day) { st.capDay = day; changed = true; this._notify({ event: 'cap-reached', title: 'Daily run cap reached', detail: 'Ready tickets will wait until tomorrow, or raise the cap in Settings.' }); }
     const failing = await this.deployFailures(false).catch(() => []); const keys = failing.map((x) => `${x.project}:${x.workflow}:${x.runId}`); const seen = new Set(st.deploy ?? []);
     for (const x of failing) if (!seen.has(`${x.project}:${x.workflow}:${x.runId}`)) { changed = true; this._notify({ event: 'deploy-failing', project: x.project, title: `${x.workflow} is failing after a merge`, detail: x.pr ? `after PR #${x.pr}` : undefined, url: x.url ?? undefined }); }
+    // a plan with nothing running that is waiting on pull requests or failures: announced once per situation, and again only if it changes
+    const stuckNow = {}; for (const p of this.cfg.projects) { let h = null; try { h = this.planHealth(p.id); } catch { /* no pack */ } if (h?.stuck) stuckNow[p.id] = `${h.review}:${h.failed}:${h.planned}`; }
+    for (const [pid, sig] of Object.entries(stuckNow)) if ((st.stuck ?? {})[pid] !== sig) { changed = true; this._notify({ event: 'plan-stuck', project: pid, title: 'The plan is waiting on you', detail: this.planHealth(pid).reasons.join('; ') }); }
+    if (JSON.stringify(st.stuck ?? {}) !== JSON.stringify(stuckNow)) { st.stuck = stuckNow; changed = true; }
     if (JSON.stringify([...seen].sort()) !== JSON.stringify([...keys].sort())) { st.deploy = keys; changed = true; }
     if (changed) { try { fs.writeFileSync(`${f}.tmp`, JSON.stringify(st)); fs.renameSync(`${f}.tmp`, f); } catch { /* best effort */ } }
   },

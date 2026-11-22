@@ -7,6 +7,7 @@ export const EVENTS = {
   failed: 'A ticket failed',
   parked: 'A ticket needs more detail or a decision',
   'deploy-failing': 'A pipeline is failing after a merge',
+  'plan-stuck': 'A project\'s plan is waiting on you (nothing is running)',
   'cap-reached': 'The daily run cap was reached',
   held: 'An automatic merge was held back',
   'limit-reached': 'The agent plan hit its usage limit (agents paused)',

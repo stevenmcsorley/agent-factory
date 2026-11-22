@@ -80,6 +80,7 @@ export function localHost({ project, dir, base = 'main', exec = run }) {
     // ---- the review side
     pr: {
       async listAgentPrs() { const out = []; for (const p of load().prs) { if (p.state !== 'open' || !p.branch.startsWith('agent/')) continue; const s = await sha(p.branch); if (s) out.push({ number: p.number, branch: p.branch, sha: s, title: p.title }); } return out; },
+      async prState(n) { return find(load(), n).state; },
       async getFeedback(pr) { const p = find(load(), pr.number); return { failedChecks: [], pending: false, comments: p.comments.filter((c) => !c.factory).map((c) => ({ id: c.id, author: c.author, body: c.body, raw: c.body })) }; },
       // The factory comments after it has pushed a verified round, so this is also where the verified head moves forward.
       async comment(pr, text) { const d = load(); const p = find(d, pr.number); const head = await sha(p.branch); if (head) p.head = head; p.comments.push({ id: `c${p.comments.length + 1}`, author: 'agent-factory', body: String(text).slice(0, 20_000), at: now(), factory: true }); p.updatedAt = now(); save(d); },
@@ -97,6 +98,15 @@ export function localHost({ project, dir, base = 'main', exec = run }) {
       void bs; return { pr: { ...view(p), liveHead: live, verifiedHead: p.head, stale: p.state === 'open' && live !== p.head }, files, diff: text.out.slice(0, MAX_DIFF), truncated: text.out.length > MAX_DIFF };
     },
     async comment(n, text, author = 'you') { const body = String(text ?? '').trim(); if (!body) throw bad('Write a comment first'); const d = load(); const p = find(d, n); p.comments.push({ id: `c${p.comments.length + 1}`, author, body: body.slice(0, 20_000), at: now(), factory: false }); p.updatedAt = now(); save(d); },
+    // Would merging this into the base RIGHT NOW conflict, and what does it change? (Nothing is written: merge-tree only computes.)
+    async mergeCheck(n) {
+      const p = find(load(), n); if (p.state !== 'open') return { state: p.state, clean: null, conflicts: [], files: [] };
+      const head = await sha(p.branch); const baseSha = await sha(p.base); if (!head || !baseSha) return { state: 'open', clean: null, conflicts: [], files: [] };
+      const ns = await g(['diff', '--no-ext-diff', '--name-status', `${baseSha}...${head}`]); const files = ns.out.split('\n').filter(Boolean).map((l) => { const [s, ...f] = l.split('\t'); return { status: s[0], path: f[f.length - 1] }; });
+      if ((await g(['merge-base', '--is-ancestor', baseSha, head])).code === 0) return { state: 'open', clean: true, conflicts: [], files, behind: 0 };
+      const mt = await g(['merge-tree', '--write-tree', '--name-only', baseSha, head]); const lines = mt.out.split('\n').slice(1); const blank = lines.indexOf(''); const conflicts = mt.code === 0 ? [] : [...new Set((blank < 0 ? lines : lines.slice(0, blank)).map((x) => x.trim()).filter(Boolean))];   // after the tree id: the conflicted file names, then a blank line, then messages
+      return { state: 'open', clean: mt.code === 0, conflicts: conflicts.slice(0, 20), files, behind: Number((await g(['rev-list', '--count', `${head}..${baseSha}`])).out) || 0 };
+    },
     async close(n) { const d = load(); const p = find(d, n); if (p.state !== 'open') throw bad(`That pull request is already ${p.state}`); p.state = 'closed'; p.updatedAt = now(); save(d); return view(p); },
     // Merge by building objects, never by checking out. Fast-forward when the branch is simply ahead; otherwise a clean merge commit; conflicts refuse.
     async merge(n) {

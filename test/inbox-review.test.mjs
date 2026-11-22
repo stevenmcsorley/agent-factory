@@ -86,3 +86,58 @@ test('a plan that was marked complete reopens when a "done" ticket turns out to 
   await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear(); const g = await w.e.getPlan('app'); assert.equal(g.plan.status, 'launched', 'reopened'); assert.equal(g.progress.review, 1);
   const pr = (await w.e.listPrs('app'))[0]; await w.e.prAction('app', pr.number, 'merge', {}); w.e.cache.clear(); const g2 = await w.e.getPlan('app'); assert.equal(g2.plan.status, 'complete'); assert.equal(g2.progress.done, 1);
 });
+
+// Two pull requests that each create the same file (the skerry-roast situation): the first merges, the second now conflicts.
+async function twoCompeting(w) {
+  const p = w.e.project('app'); const d = w.e.deps(p); d.config.verify = false; d.config.maxAttempts = 1;
+  d.sandbox = { create: async ({ cloneUrl, branch, base }) => { const dir = fs.mkdtempSync(path.join(w.root, 'ws-')); execFileSync('git', ['clone', '-q', '--branch', base, cloneUrl, dir]); git(dir, 'checkout', '-qb', branch); return { dir, destroy() {} }; } };
+  const ids = []; for (const [title, extra] of [['First page', 'one.js'], ['Second page', 'two.js']]) {
+    d.agent = { run: async (_sb, ws) => { write(path.join(ws.dir, 'index.html'), `<h1>${title}</h1>\n`); write(path.join(ws.dir, extra), 'export const x = 1;\n'); return { out: 'done', costUsd: 0 }; } };
+    const t = await w.e.createTicket('app', { title, body: `${title} in ${extra} with a test that checks it works. Also index.html.` }); ids.push(t.id); await tick(d);
+  }
+  return ids;
+}
+
+test('Inbox: a pull request that would conflict with main says so, with the files, and lists the others that touch the same files', async () => {
+  const w = world(); await mkProject(w); const [a, b] = await twoCompeting(w);
+  const inbox1 = await callOp(w.e, 'inbox', {}); const ia = inbox1.items.find((i) => String(i.id) === String(a)); const ib = inbox1.items.find((i) => String(i.id) === String(b));
+  assert.equal(ia.merge.clean, true); assert.ok(ib.overlaps.some((o) => o.files.includes('index.html')), 'they overlap on index.html');
+  await w.e.prAction('app', ia.pr.number, 'merge', {}); w.e.cache.clear();
+  const ib2 = (await callOp(w.e, 'inbox', {})).items.find((i) => String(i.id) === String(b)); assert.equal(ib2.merge.clean, false); assert.deepEqual(ib2.merge.conflicts, ['index.html']);
+});
+
+test('rebuild: the conflicting attempt is thrown away, its ticket goes back to the factory on the current main with the conflicting files and the findings in its instructions', async () => {
+  const w = world(); await mkProject(w); const [a, b] = await twoCompeting(w);
+  const prs = await w.e.listPrs('app'); await w.e.prAction('app', prs.find((x) => x.branch.startsWith(`agent/${a}-`)).number, 'merge', {}); w.e.cache.clear();
+  const pb = (await w.e.listPrs('app')).find((x) => x.branch.startsWith(`agent/${b}-`)); const r = await w.e.prAction('app', pb.number, 'rebuild', {});
+  assert.equal(r.requeued, true, r.requeueError ?? ''); const t = await labelsOf(w, b); assert.ok(t.labels.includes('agent-ready'), 'ready to be built again');
+  const d = await w.e.deps(w.e.project('app')).tickets.get(b); assert.match(d.body, /index\.html/); assert.match(d.body, /already contains/); assert.equal((await w.e.listPrs('app')).some((x) => x.number === pb.number), false, 'the old PR is closed');
+});
+
+test('reject with requeue sends the ticket straight back, carrying the reason', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'Add greeting', { 'a.js': 'export const a = 1;\n' });
+  const pr = (await w.e.listPrs('app'))[0]; const r = await callOp(w.e, 'reject_pr', { project: 'app', pr: pr.number, reason: 'use the shared helper', requeue: true }); assert.equal(r.requeued, true, r.requeueError ?? '');
+  const t = await labelsOf(w, ticket); assert.ok(t.labels.includes('agent-ready')); assert.match((await w.e.deps(w.e.project('app')).tickets.get(ticket)).body, /use the shared helper/);
+});
+
+test('Inbox: a ticket closed by hand while its pull request is open still appears, flagged as unmerged, with its assessment', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'Add greeting', { 'a.js': 'export const a = 1;\n' }, { verdict: 'changes', summary: 'x', passes: [], findings: [{ severity: 'major', issue: 'no check', file: 'a.js', line: 1 }] });
+  await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear();
+  const it = (await callOp(w.e, 'inbox', {})).items.find((i) => i.kind === 'review'); assert.ok(it, 'listed'); assert.equal(it.ticketClosed, true); assert.equal(it.local, true); assert.match(it.assess.reviewer.findings[0].issue, /no check/);
+});
+
+test('plan health: a plan with nothing running and work waiting on you says so, and once with a notification', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'First piece', { 'a.js': 'export const a = 1;\n' });
+  const dir = pk.packDir(w.e.cfg.stateDir, 'app'); const pack = pk.loadPack(dir); pack.plan = { status: 'launched', epics: [{ id: 'e', title: 'E', goal: 'g', tickets: [{ id: 'one', title: 'First piece', body: 'First piece in a.js with a test that checks it works', size: 'S', dependsOn: [], status: 'review', ticketId: String(ticket) }, { id: 'two', title: 'Second piece', body: 'Second piece in b.js with a test that checks it works', size: 'S', dependsOn: ['one'], status: 'planned' }] }] }; pk.savePack(dir, pack);
+  const h = w.e.planHealth('app'); assert.equal(h.stuck, true); assert.match(h.reasons.join(' '), /waiting for you to merge or reject/); assert.match(h.reasons.join(' '), /cannot start until/);
+  const g = await w.e.getPlan('app'); assert.equal(g.health.stuck, true); const it = (await callOp(w.e, 'inbox', {})).items.find((i) => i.kind === 'plan'); assert.ok(it); assert.equal(it.project, 'app');
+  const sent = []; w.e._notify = (e) => { sent.push(e); return Promise.resolve({ sent: true }); }; w.e.cfg.notify = { url: 'https://example.com/x', events: ['plan-stuck'], enabled: true };
+  await w.e.notifyScan(); await w.e.notifyScan(); assert.equal(sent.filter((e) => e.event === 'plan-stuck').length, 1, 'announced once, not on every scan');
+});
+
+test('every host: a ticket closed after its pull request was closed WITHOUT merging is failed, not done; merged is done and remembered', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'First piece', { 'a.js': 'export const a = 1;\n' });
+  const dir = pk.packDir(w.e.cfg.stateDir, 'app'); const mk = () => { const pack = pk.loadPack(dir); pack.plan = { status: 'launched', epics: [{ id: 'e', title: 'E', goal: 'g', tickets: [{ id: 'one', title: 'First piece', body: 'First piece in a.js with a test that checks it works', size: 'S', dependsOn: [], status: 'queued', ticketId: String(ticket) }] }] }; pk.savePack(dir, pack); };
+  mk(); const pr = (await w.e.listPrs('app'))[0]; w.e._forge(w.e.project('app')).close(pr.number); await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear();   // PR closed directly on the forge, then the ticket closed by hand
+  assert.equal((await w.e.getPlan('app')).progress.failed, 1, 'closed without merging = failed'); assert.equal((await w.e.getPlan('app')).progress.done, 0);
+});

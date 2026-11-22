@@ -10,7 +10,7 @@ import { callOp } from '../src/ops.mjs';
 
 test('notification address: https only (or this machine), no credentials, known events', () => {
   assert.equal(normalizeNotify(null), null);
-  assert.equal(normalizeNotify({ url: 'https://ntfy.sh/my-topic' }).events.length, 9);
+  assert.equal(normalizeNotify({ url: 'https://ntfy.sh/my-topic' }).events.length, 10);
   assert.equal(normalizeNotify({ url: 'http://127.0.0.1:9000/x', events: ['merged'] }).events[0], 'merged');
   assert.throws(() => normalizeNotify({ url: 'http://example.com/x' }), /https/); assert.throws(() => normalizeNotify({ url: 'https://u:p@example.com/x' }), /credentials/);
   assert.throws(() => normalizeNotify({ url: 'nonsense' }), /web address/); assert.throws(() => normalizeNotify({ url: 'https://x.test/', events: ['boom'] }), /Unknown event/); assert.throws(() => normalizeNotify({ url: 'https://x.test/', nope: 1 }), /not a notify setting/);

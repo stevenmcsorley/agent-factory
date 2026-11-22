@@ -249,8 +249,11 @@ export class Engine {
     const ATTN = new Set(['failed', 'needs-info', 'needs-human']); const items = []; const errors = []; let budget = 12; const runs = this.runs({ limit: 500 });
     for (const p of this.cfg.projects) {
       let tickets; try { tickets = (await this.listTickets(p.id)).filter((t) => t.state !== 'CLOSED'); } catch (e) { errors.push({ project: p.id, error: String(e.message).slice(0, 160) }); continue; }
-      const mine = tickets.filter((t) => ATTN.has(stateOf(t.labels)) || stateOf(t.labels) === 'review'); if (!mine.length) continue;
-      const prs = mine.some((t) => stateOf(t.labels) === 'review') ? await this.listPrs(p.id).catch(() => []) : [];
+      const mine = tickets.filter((t) => ATTN.has(stateOf(t.labels)) || stateOf(t.labels) === 'review');
+      // local projects are always checked for open pull requests (a cheap file read): a ticket closed by hand can still have an unmerged one
+      const needPrs = mine.some((t) => stateOf(t.labels) === 'review') || hostKind(p) === 'local'; const prs = needPrs ? await this.listPrs(p.id).catch(() => []) : [];
+      const first = items.length; const known = new Set(mine.map((t) => String(t.id)));
+      if (!mine.length && !prs.length) continue;
       for (const t of mine) {
         const state = stateOf(t.labels); const item = { project: p.id, id: t.id, title: t.title, url: t.url, state, kind: state === 'review' ? 'review' : 'decision', updatedAt: t.updatedAt };
         const run = runs.find((r) => r.project === p.id && String(r.ticket) === String(t.id)); if (run) item.run = { id: run.id, status: run.status, error: run.error, finished: run.finished };
@@ -258,10 +261,17 @@ export class Engine {
         else if (budget-- > 0) { try { const d = await this._cached(`d:${p.id}:${t.id}`, 20000, () => this.deps(p).tickets.get(t.id)); item.body = d.body; item.comments = d.comments.slice(-4); } catch (e) { item.detailError = String(e.message).slice(0, 120); } }
         items.push(item);
       }
+      // open pull requests whose ticket is closed (or otherwise not in the lists above): unmerged work, shown so it can be reviewed
+      const all = await this.listTickets(p.id).catch(() => []); const taken = new Set(items.slice(first).map((i) => i.pr?.number).filter(Boolean));
+      for (const pr of prs) { if (taken.has(pr.number)) continue; const tk = all.filter((t) => pr.branch.startsWith(`agent/${t.id}-`)).sort((a, b) => String(b.id).length - String(a.id).length)[0]; if (tk && known.has(String(tk.id))) continue;
+        const run = tk ? runs.find((r) => r.project === p.id && String(r.ticket) === String(tk.id)) : null; const item = { project: p.id, id: tk?.id ?? `pr-${pr.number}`, title: tk?.title ?? pr.title, url: tk?.url, state: 'review', kind: 'review', updatedAt: tk?.updatedAt ?? new Date().toISOString(), pr, ticketClosed: tk?.state === 'CLOSED', local: hostKind(p) === 'local' };
+        if (run) item.run = { id: run.id, status: run.status, error: run.error, finished: run.finished }; item.assess = this._assessment(p, run, pr.number); items.push(item); }
+      await this._annotateReviews(p, items.slice(first).filter((i) => i.kind === 'review'));
+      const h = this.planHealth(p.id); if (h?.stuck) items.push({ project: p.id, id: `plan-${p.id}`, kind: 'plan', state: 'stuck', title: 'The plan is waiting on you', reasons: h.reasons, progress: { total: h.total, done: h.done, review: h.review, failed: h.failed, planned: h.planned }, updatedAt: new Date().toISOString() });
     }
     for (const f of await this.deployFailures()) items.push({ ...f, id: `deploy-${f.runId}`, kind: 'deploy', state: 'failed', title: `${f.workflow} is failing on ${f.base}`, updatedAt: f.at });
-    const rank = { deploy: 0, decision: 1, review: 2 };
-    items.sort((a, b) => (a.kind === b.kind ? String(b.updatedAt).localeCompare(String(a.updatedAt)) : (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3)));
+    const rank = { deploy: 0, decision: 1, plan: 2, review: 3 };
+    items.sort((a, b) => (a.kind === b.kind ? (a.kind === 'review' && a.project === b.project && a.planOrder != null && b.planOrder != null ? a.planOrder - b.planOrder : String(b.updatedAt).localeCompare(String(a.updatedAt))) : (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3)));
     return { items, errors, counts: { deploys: items.filter((i) => i.kind === 'deploy').length, decisions: items.filter((i) => i.kind === 'decision').length, reviews: items.filter((i) => i.kind === 'review').length } };
   }
   // What happens after a merge: workflows on a project's base branch whose latest finished run failed (see deploywatch.mjs). GitHub projects only, and a
@@ -282,7 +292,7 @@ export class Engine {
     }));
     return out;
   }
-  async inboxCount() { const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures(false)).length; return { count: n }; }
+  async inboxCount() { const inb = await this._cached('inbox-count', 8000, () => this.inbox()).catch(() => null); if (inb) return { count: inb.items.filter((i) => i.kind !== 'plan').length + 0 }; const ov = await this.overview(); let n = 0; for (const p of ov) n += (p.queue.review ?? 0) + (p.queue.failed ?? 0) + (p.queue['needs-info'] ?? 0) + (p.queue['needs-human'] ?? 0); n += (await this.deployFailures(false)).length; return { count: n }; }
 
   // Act on a ticket from the inbox. Everything is validated; re-queueing re-runs the clarity gate so a vague ticket cannot just bounce back.
   async ticketAction(projectId, ticketId, action, payload = {}) {
@@ -368,10 +378,10 @@ export class Engine {
   }
   // ---- the local forge: review, merge and publish. Human actions only (UI, REST, CLI): none of these is an agent operation.
   _forge(p) { const a = this.f.hostAdapter?.(p) ?? buildHost(p, { stateDir: this.cfg.stateDir, env: this.env, fetchImpl: this.f.fetch, exec: this.f.exec }); if (!a.forge) throw Object.assign(new Error('This project does not use the local forge'), { status: 400 }); return a; }
-  prDetail(id, n) { return this._forge(this.project(id)).diff(n); }
+  prDetail(id, n) { const f = this._forge(this.project(id)); return f.diff(n).then(async (d) => { d.merge = await f.mergeCheck(n).catch(() => null); return d; }); }   // _forge throws at once for a project that is not on the local forge
   async prAction(id, n, action, body = {}) {
     const f = this._forge(this.project(id)); this.cache.delete(`p:${id}`);
-    if (action === 'merge') return this.mergePr(id, n); if (action === 'close') return this.rejectPr(id, n, body); if (action === 'comment') return f.comment(n, body.text);
+    if (action === 'merge') return this.mergePr(id, n); if (action === 'close') return this.rejectPr(id, n, body); if (action === 'rebuild') return this.rebuildPr(id, n, body); if (action === 'comment') return f.comment(n, body.text);
     throw Object.assign(new Error('Unknown action'), { status: 400 });
   }
   async setPublishTarget(id, { kind, repo: input, fields = {}, token }) {
@@ -602,12 +612,20 @@ export class Engine {
     const dir = this._packDir(id); const pack = pk.loadPack(dir); if (!['launched', 'complete'].includes(pack.plan?.status)) return pack;   // a complete plan is re-checked too: unmerged work reopens it
     // fresh read: dependents are released the moment a ticket closes
     this.cache.delete(`t:${id}`); const live = await this.listTickets(id).catch(() => null); if (!live) return pack; const byId = new Map(live.map((t) => [String(t.id), t])); let changed = false;
-    // On a local forge a ticket can be closed while its pull request is still open (closed by hand). That is not done: the code is not in the base branch, so nothing that depends on it may start.
-    const openBranches = hostKind(this.project(id)) === 'local' ? (await this.deps(this.project(id)).host.listAgentPrs().catch(() => [])).map((x) => String(x.branch ?? '')) : [];   // asked of the forge directly, not the cached list
+    // A ticket can be closed while its pull request is still open, or after the PR was closed WITHOUT merging. Neither is done: the code is not in the base branch, so nothing that depends on it may start.
+    // Asked of the host itself (not the cached list), for every kind of host. A ticket confirmed merged is remembered (t.merged) so the host is not asked again.
+    const openBranches = (await this._openAgentPrs(this.project(id))).map((x) => String(x.branch ?? '')); this._prTry ??= new Map();
     for (const e of pack.plan.epics) for (const t of e.tickets) {
       if (!t.ticketId) continue; const tk = byId.get(String(t.ticketId)); if (!tk) continue;
-      const unmerged = tk.state === 'CLOSED' && openBranches.some((b) => b.startsWith(`agent/${t.ticketId}-`));
-      const next = unmerged ? 'review' : tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels); const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
+      let next = tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels);
+      if (tk.state === 'CLOSED' && !t.merged) {
+        if (openBranches.some((b) => b.startsWith(`agent/${t.ticketId}-`))) next = 'review';
+        else { const key = `${id}:${t.ticketId}`; const last = this._prTry.get(key) ?? 0;
+          if (Date.now() - last > 60000) { const out = await this._ticketPrOutcome(this.project(id), t.ticketId); this._prTry.set(key, Date.now());
+            if (out === 'closed') next = 'failed'; else if (out === 'open') next = 'review'; else if (out === 'merged') { t.merged = true; changed = true; } }
+          else if (t.status === 'failed' || t.status === 'review') next = t.status; }
+      }
+      const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
     }
     const allDone = pack.plan.epics.every((e) => e.tickets.every((t) => t.status === 'done'));
     if (allDone && pack.plan.status !== 'complete') { pack.plan.status = 'complete'; changed = true; }
@@ -627,7 +645,7 @@ export class Engine {
     if (released) pk.savePack(dir, pack); return { released };
   }
   planProgress(plan) { const all = pk.planTickets(plan); const n = (s) => all.filter((t) => t.status === s).length; return { total: all.length, planned: n('planned'), queued: n('queued'), working: n('working'), review: n('review'), done: n('done'), failed: n('failed') + n('needs-info') }; }
-  async getPlan(id) { const pack = await this.syncPlan(id); return { plan: pack.plan, progress: pack.plan ? this.planProgress(pack.plan) : null, job: this.planJobs.get(id) ?? { state: 'idle' } }; }
+  async getPlan(id) { const pack = await this.syncPlan(id); return { plan: pack.plan, progress: pack.plan ? this.planProgress(pack.plan) : null, health: pack.plan ? this.planHealth(id) : null, job: this.planJobs.get(id) ?? { state: 'idle' } }; }
 
   // Publish the pack into the repo as a reviewable PR under .factory/ (the factory's copy stays the working copy).
   async publishPack(id) {

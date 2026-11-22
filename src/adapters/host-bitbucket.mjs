@@ -26,6 +26,7 @@ export function bitbucketHost({ repo, username, token, allowedAuthors = [], fetc
     async openPr({ branch, base, title, body }) { return (await call('POST', `/repositories/${repo}/pullrequests`, { title: `[Draft] ${title}`, description: body, source: { branch: { name: branch } }, destination: { branch: { name: base } } })).links.html.href; },
     pr: {
       async listAgentPrs() { return (await call('GET', `/repositories/${repo}/pullrequests?state=OPEN&pagelen=50`)).values.filter((p) => p.source.branch.name.startsWith('agent/')).map((p) => ({ number: p.id, branch: p.source.branch.name, sha: p.source.commit?.hash, title: p.title.replace(/^\[Draft\]\s*/i, '') })); },
+      async prState(n) { const m = await call('GET', `/repositories/${repo}/pullrequests/${Number(n)}`).catch(() => null); return ({ OPEN: 'open', MERGED: 'merged', DECLINED: 'closed', SUPERSEDED: 'closed' })[m?.state] ?? null; },
       async getFeedback(pr) {
         const statuses = (await call('GET', `/repositories/${repo}/pullrequests/${pr.number}/statuses?pagelen=50`)).values ?? [];
         const failedChecks = statuses.filter((s) => s.state === 'FAILED').map((s) => ({ name: s.name, log: `${s.description ?? ''}\n${s.url ?? ''}`.trim() })); // Bitbucket exposes no build log through this API

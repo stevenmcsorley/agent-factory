@@ -16,8 +16,8 @@ export function codeBlock(text, opts = {}) {
   const head = h('div', { class: 'cb-head' }, h('span', { class: 'cb-name' }, lab), h('span', { class: 'cb-meta' }), copy);
   const scroll = h('div', { class: 'cb-scroll', ...(o.maxHeight ? { style: `max-height:${o.maxHeight}px` } : {}), tabindex: '0', role: 'region', 'aria-label': `${lab} code` });
   const draw = () => {
-    const lines = current.replace(/\n$/, '').split('\n'); const shown = lines.slice(0, MAX); const tb = h('tbody', {});
-    shown.forEach((l, i) => tb.append(h('tr', { class: 'dr' }, o.numbers ? h('td', { class: 'dn', 'data-n': o.start + i }) : null, h('td', { class: 'dc' }, ...tokens(l, lang), l ? null : '\u200b'))));
+    const lines = current.replace(/\n$/, '').split('\n'); const shown = lines.slice(0, MAX); const tb = h('tbody', {}); const st = {};   // st: syntax state carried down the file
+    shown.forEach((l, i) => tb.append(h('tr', { class: 'dr' }, o.numbers ? h('td', { class: 'dn', 'data-n': o.start + i }) : null, h('td', { class: 'dc' }, ...tokens(l, lang, st), l ? null : '\u200b'))));
     if (lines.length > MAX) tb.append(h('tr', { class: 'dr' }, o.numbers ? h('td', { class: 'dn' }) : null, h('td', { class: 'dc cb-more' }, `… ${(lines.length - MAX).toLocaleString()} more lines not shown`)));
     scroll.replaceChildren(h('table', { class: 'dtab cb-tab' }, tb)); head.querySelector('.cb-meta').textContent = `${lines.length} line${lines.length === 1 ? '' : 's'}`;
   };

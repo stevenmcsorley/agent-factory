@@ -266,3 +266,10 @@ test('autonomous merge on GitLab and Bitbucket: drop the Draft prefix, squash, d
   assert.deepEqual(calls.map((c) => `${c[0]} ${c[1]}`), ['GET /repositories/w/app/pullrequests/3', 'PUT /repositories/w/app/pullrequests/3', 'POST /repositories/w/app/pullrequests/3/merge']);
   assert.equal(calls[1][2].title, 'Add x'); assert.equal(calls[2][2].merge_strategy, 'squash'); assert.equal(calls[2][2].close_source_branch, true);
 });
+
+test('GitLab and Bitbucket: prState tells merged from closed-without-merging, so a plan never treats a declined change as done', async () => {
+  const gl = gitlabHost({ repo: 'grp/app', token: 't', fetchImpl: fake([['GET /api/v4/projects/grp%2Fapp/merge_requests/1', () => res(200, { state: 'merged' })], ['GET /api/v4/projects/grp%2Fapp/merge_requests/2', () => res(200, { state: 'closed' })], ['GET /api/v4/projects/grp%2Fapp/merge_requests/3', () => res(200, { state: 'opened' })], ['GET /api/v4/projects/grp%2Fapp/merge_requests/4', () => res(404, 'nope')]]) });
+  assert.deepEqual([await gl.pr.prState(1), await gl.pr.prState(2), await gl.pr.prState(3), await gl.pr.prState(4)], ['merged', 'closed', 'open', null]);
+  const bb = bitbucketHost({ repo: 'ws/app', username: 'u', token: 't', fetchImpl: fake([['GET /2.0/repositories/ws/app/pullrequests/1', () => res(200, { state: 'MERGED' })], ['GET /2.0/repositories/ws/app/pullrequests/2', () => res(200, { state: 'DECLINED' })], ['GET /2.0/repositories/ws/app/pullrequests/3', () => res(200, { state: 'OPEN' })]]) });
+  assert.deepEqual([await bb.pr.prState(1), await bb.pr.prState(2), await bb.pr.prState(3)], ['merged', 'closed', 'open']);
+});

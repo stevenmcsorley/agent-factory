@@ -179,14 +179,32 @@ function assessPanel(a) {
   if (a.held?.length) bits.push(h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, h('b', {}, 'Autonomous mode is holding this back: '), a.held.join('; '))));
   return bits.length ? h('div', { class: 'assess' }, ...bits) : null;
 }
+// Would this merge cleanly right now, and who else touches the same files? Computed from the repository.
+function mergePanel(it) {
+  const m = it.merge; const bits = [];
+  if (m?.clean === false) bits.push(h('div', { class: 'note bad' }, icon('alert', 14), h('div', {}, h('b', {}, 'Conflicts with the main branch'), m.conflicts?.length ? [' in ', ...m.conflicts.flatMap((f, i) => [i ? ', ' : '', h('code', {}, f)])] : null, '. It cannot merge as it is. Usually this means it recreated a file that is already merged. ', h('b', {}, 'Rebuild it on current main.'))));
+  else if (m?.behind) bits.push(h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, `The main branch has moved on by ${m.behind} commit${m.behind === 1 ? '' : 's'} since this was built. It still merges cleanly.`)));
+  if (it.mergeAfter?.length) bits.push(h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, h('b', {}, `Sort out ${it.mergeAfter.map((n) => `#${n}`).join(', ')} first. `), 'This touches the same files, and the plan builds it afterwards. Merge the earlier one (or rebuild it if it conflicts), then check this one.')));
+  else if (it.overlaps?.length) bits.push(h('div', { class: 'note' }, icon('alert', 14), h('div', {}, `Touches the same files as ${it.overlaps.map((o) => `#${o.pr}`).join(', ')}${it.overlaps[0].files?.length ? ` (${it.overlaps[0].files.slice(0, 3).join(', ')})` : ''}. Merge one, then check the other.`)));
+  return bits.length ? h('div', { class: 'stack-s' }, ...bits) : null;
+}
+// A plan with nothing running that is waiting on a person: one place that says so, instead of leaving it to be noticed across several PRs.
+function planCard(it) {
+  return h('article', { class: 'slip warn' },
+    h('div', { class: 'slip-top' }, h('span', { class: 'stamp warn' }, 'Plan is waiting'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, `${it.progress.done}/${it.progress.total} done`)),
+    h('h3', {}, 'Nothing is running: the plan needs you'), h('ul', { class: 'reasons' }, it.reasons.map((r) => h('li', {}, r))),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => { projTab = 'prs'; location.hash = `#/project/${it.project}`; } }, 'Open the pull requests')));
+}
 function reviewCard(it, ctx) {
   const base = `/projects/${it.project}/tickets/${it.id}`; const reason = h('input', { placeholder: 'Why? (optional; it goes on the ticket)', maxlength: 300, 'aria-label': 'Reason for rejecting' });
   const prBase = it.pr ? `/projects/${it.project}/prs/${it.pr.number}` : null; const local = it.local && it.pr;
   return h('article', { class: 'slip ok' },
     h('div', { class: 'slip-top' }, h('span', { class: 'stamp ok' }, 'Ready to review'), ext(it.url, `#${it.id}`, 'tid'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, ago(it.updatedAt)), it.run?.id ? h('a', { class: 'small', href: `#/run/${it.run.id}` }, 'Work order →') : null),
-    h('h3', {}, it.title), assessPanel(it.assess),
+    h('h3', {}, it.title), it.ticketClosed ? h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, h('b', {}, 'The ticket was closed, but this change was never merged. '), 'Until it is merged the code is not in the main branch.')) : null, mergePanel(it), assessPanel(it.assess),
     local ? h('div', {}, h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => goPr(it.project, it.pr.number) }, icon('pr', 13), `Review the changes (PR #${it.pr.number})`),
-      h('button', { class: 'btn', title: 'Merge it into the main branch. The ticket closes with it, and whatever was waiting on it can start.', onclick: async () => { if (confirm(`Merge #${it.pr.number} “${it.title}” into the main branch? The ticket closes with it.`)) await act(() => api(`${prBase}/merge`, { method: 'POST', body: {} }), 'Merged. The ticket is closed.', ctx.rerender)(); } }, 'Merge'),
+      h('button', { class: 'btn', disabled: it.merge?.clean === false, title: it.merge?.clean === false ? 'This conflicts with the main branch. Rebuild it on top of main instead.' : 'Merge it into the main branch. The ticket closes with it, and whatever was waiting on it can start.', onclick: async () => { if (confirm(`Merge #${it.pr.number} “${it.title}” into the main branch? The ticket closes with it.`)) await act(() => api(`${prBase}/merge`, { method: 'POST', body: {} }), 'Merged. The ticket is closed.', ctx.rerender)(); } }, 'Merge'),
+      it.merge?.clean === false || it.merge?.behind || it.mergeAfter?.length ? h('button', { class: `btn ${it.merge?.clean === false ? 'primary' : ''}`, title: 'Throw this attempt away and have the factory build the ticket again on the current main branch, told which files conflict and what the reviewers found.', onclick: async () => { if (confirm(`Rebuild “${it.title}” on the current main branch? This attempt (#${it.pr.number}) is closed and the ticket goes back to the factory.`)) await act(() => api(`${prBase}/rebuild`, { method: 'POST', body: { reason: reason.value } }), 'Sent back to the factory to build on the current main.', ctx.rerender)(); } }, icon('refresh', 13), 'Rebuild on current main') : null,
+      h('button', { class: 'btn', title: 'Close without merging and send the ticket straight back to the factory with your reason and what the reviewers found.', onclick: async () => { if (confirm(`Reject #${it.pr.number} and send it back to the factory to try again?`)) await act(() => api(`${prBase}/close`, { method: 'POST', body: { reason: reason.value, requeue: true } }), 'Rejected and sent back to the factory.', ctx.rerender)(); } }, 'Reject and try again'),
       h('button', { class: 'btn danger', title: 'Close the pull request without merging. The ticket is NOT done: it goes back to failed, and anything waiting on it keeps waiting.', onclick: async () => { if (confirm(`Reject #${it.pr.number} “${it.title}”? It is closed without merging and the ticket goes back to failed.`)) await act(() => api(`${prBase}/close`, { method: 'POST', body: { reason: reason.value } }), 'Rejected. The ticket is marked failed; requeue it to try again.', ctx.rerender)(); } }, 'Reject')),
       h('div', { class: 'row nowrap gap-t' }, reason), h('p', { class: 'small muted' }, 'Merging closes the ticket. Rejecting does not: nothing that depends on this ticket starts until it is merged.'))
       : h('div', { class: 'row gap-t' }, it.pr ? ext(it.pr.url, [icon('pr', 13), ` Review PR #${it.pr.number}`], 'btn primary') : h('span', { class: 'muted small' }, 'PR link unavailable (it may have been merged or closed)'),
@@ -204,12 +222,13 @@ function deployCard(it) {
 export const inboxPage = {
   async load() { return { inbox: await api('/inbox') }; },
   draw({ inbox }, ctx) {
-    const dec = inbox.items.filter((i) => i.kind === 'decision'), rev = inbox.items.filter((i) => i.kind === 'review'), dep = inbox.items.filter((i) => i.kind === 'deploy');
+    const pln = inbox.items.filter((i) => i.kind === 'plan'), dec = inbox.items.filter((i) => i.kind === 'decision'), rev = inbox.items.filter((i) => i.kind === 'review'), dep = inbox.items.filter((i) => i.kind === 'deploy');
     const sec = (key, items, node) => keyed(node, key, items);
     return [head('Inbox', dec.length || rev.length || dep.length ? `${dep.length ? `${dep.length} failing after merge · ` : ''}${dec.length} need${dec.length === 1 ? 's' : ''} a decision · ${rev.length} ready to review. Nothing here is merged for you.` : 'Nothing is waiting on you.'),
       inbox.errors.length ? h('div', { class: 'callout bad' }, icon('alert', 16), inbox.errors.map((e) => `${e.project}: ${e.error}`).join(' · ')) : null,
-      !dec.length && !rev.length && !dep.length ? card('reg', empty('All clear', 'No tickets are stuck and no PRs are waiting. Issue a work order from the control room.', h('a', { class: 'btn primary', href: '#/' }, 'Back to the control room'))) : null,
+      !dec.length && !rev.length && !dep.length && !pln.length ? card('reg', empty('All clear', 'No tickets are stuck and no PRs are waiting. Issue a work order from the control room.', h('a', { class: 'btn primary', href: '#/' }, 'Back to the control room'))) : null,
       dep.length ? sec('deploys', dep, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Failing after merge · ${dep.length}`)), dep.map((i) => deployCard(i)))) : null,
+      pln.length ? sec('plans', pln, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Plans waiting on you · ${pln.length}`)), pln.map((i) => planCard(i)))) : null,
       dec.length ? sec('decisions', dec, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Needs your decision · ${dec.length}`)), dec.map((i) => decisionCard(i, ctx)))) : null,
       rev.length ? sec('reviews', rev, h('section', { class: 'slips' }, h('div', { class: 'page-head slim' }, h('h2', {}, `Ready to review · ${rev.length}`)), rev.map((i) => reviewCard(i, ctx)))) : null];
   },

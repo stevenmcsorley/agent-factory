@@ -16,6 +16,8 @@ export function githubHost({ repo, allowedAuthors }) {
       const prs = json(await gh(['pr', 'list', '-R', repo, '--state', 'open', '--json', 'number,headRefName,headRefOid,title', '--limit', '50']), []);
       return prs.filter((p) => p.headRefName.startsWith('agent/')).map((p) => ({ number: p.number, branch: p.headRefName, sha: p.headRefOid, title: p.title }));
     },
+    // What became of a pull request: 'open', 'merged' or 'closed' (closed WITHOUT merging). Null when it cannot be read.
+    async prState(n) { const j = json(await gh(['pr', 'view', String(n), '-R', repo, '--json', 'state'], { allowFail: true }), null); return ({ OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' })[j?.state] ?? null; },
     async getFeedback(pr) {
       // `gh pr checks` exits non-zero when checks fail or are pending, so don't treat exit code as error.
       const checks = json(await gh(['pr', 'checks', String(pr.number), '-R', repo, '--json', 'name,bucket,link'], { allowFail: true }), []);

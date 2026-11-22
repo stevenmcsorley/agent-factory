@@ -24,6 +24,7 @@ export function gitlabHost({ baseUrl = 'https://gitlab.com', repo, token, allowe
     async openPr({ branch, base, title, body }) { return (await call('POST', `/projects/${pid}/merge_requests`, { source_branch: branch, target_branch: base, title: `Draft: ${title}`, description: body })).web_url; },
     pr: {
       async listAgentPrs() { return (await call('GET', `/projects/${pid}/merge_requests?state=opened&per_page=100`)).filter((m) => m.source_branch.startsWith('agent/')).map((m) => ({ number: m.iid, branch: m.source_branch, sha: m.sha, title: m.title.replace(/^Draft:\s*/i, '') })); },
+      async prState(n) { const m = await call('GET', `/projects/${pid}/merge_requests/${Number(n)}`).catch(() => null); return ({ opened: 'open', merged: 'merged', closed: 'closed', locked: 'open' })[m?.state] ?? null; },
       async getFeedback(pr) {
         const latest = (await call('GET', `/projects/${pid}/merge_requests/${pr.number}/pipelines`))[0];
         const failedChecks = []; const pending = !!latest && PENDING.has(latest.status);

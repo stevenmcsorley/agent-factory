@@ -26,32 +26,45 @@ export function parseDiff(text) {
 }
 
 // ---- the part of a line that really changed: strip the common start and end of a removed/added pair
-function inner(a, b) { let s = 0; const m = Math.min(a.length, b.length); while (s < m && a[s] === b[s]) s++; let e = 0; while (e < m - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++; return [[s, a.length - e], [s, b.length - e]]; }
-function pairUp(rows) {   // mark ranges on consecutive removed/added blocks of the same length
+function inner(a, b) { let s = 0; const m = Math.min(a.length, b.length); while (s < m && a[s] === b[s]) s++; let e = 0; while (e < m - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++; return { ranges: [[s, a.length - e], [s, b.length - e]], same: s + e }; }
+function pairUp(rows) {   // mark the changed part on a removed line and the added line that replaces it, when they are clearly the same line edited
   for (let i = 0; i < rows.length; i++) {
     if (rows[i].k !== 'del') continue; let j = i; while (rows[j]?.k === 'del') j++; let k = j; while (rows[k]?.k === 'add') k++;
-    const nd = j - i, na = k - j; if (nd === na) for (let x = 0; x < nd; x++) { const d = rows[i + x], a = rows[j + x]; if (d.t.length < 400 && a.t.length < 400 && d.t !== a.t) { const [rd, ra] = inner(d.t, a.t); if (rd[1] - rd[0] < d.t.length || ra[1] - ra[0] < a.t.length) { d.mark = rd; a.mark = ra; } } }
+    for (let x = 0; x < Math.min(j - i, k - j); x++) { const d = rows[i + x], a = rows[j + x]; if (d.t.length > 400 || a.t.length > 400 || d.t === a.t) continue;
+      const { ranges, same } = inner(d.t, a.t); if (same >= 0.3 * Math.min(d.t.length, a.t.length) && (ranges[0][1] - ranges[0][0] < d.t.length || ranges[1][1] - ranges[1][0] < a.t.length)) { d.mark = ranges[0]; a.mark = ranges[1]; } }
     i = k - 1;
   }
 }
 
 // ---- light syntax colouring: strings, comments, numbers, keywords (tag/attr for markup). Returns spans.
-export function tokens(line, lang) {
-  if (!line) return [''];
+// `st` is optional state carried from line to line so a block comment, template literal, docstring or HTML comment that spans lines stays coloured.
+// A diff passes none (its rows are not contiguous); a whole-file view passes one.
+const CLOSE = { c: '*/', t: '`', h: '-->' };
+export function tokens(line, lang, st) {
+  if (!line && !st?.in) return [''];
   if (!lang || lang === 'md' || line.length > 600) return [line];
   const kw = new Set((KW[lang] ?? '').split(' ').filter(Boolean)); const out = []; let i = 0;
   const push = (t, c) => { if (t) out.push(c ? h('span', { class: c }, t) : t); };
-  const re = lang === 'html' ? /(<!--.*?-->|<\/?[a-zA-Z][\w:-]*|\/?>|"[^"]*"|'[^']*'|\s[\w:-]+(?==))/y : lang === 'json' ? /("(?:[^"\\]|\\.)*"(?=\s*:)|"(?:[^"\\]|\\.)*"|-?\b\d[\d.eE+-]*\b|\b(?:true|false|null)\b)/y
-    : lang === 'css' ? /(\/\*.*?\*\/|"[^"]*"|'[^']*'|#[0-9a-fA-F]{3,8}\b|-?\d[\d.]*(?:px|rem|em|%|vh|vw|s|ms)?|--[\w-]+|@[\w-]+|[.#][\w-]+|[\w-]+(?=\s*:))/y
-    : /(\/\/.*|#.*|\/\*.*?\*\/|`(?:[^`\\]|\\.)*`|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b\d[\d._]*\b|[A-Za-z_$][\w$]*)/y;
+  if (st?.in) {   // still inside something opened on an earlier line
+    const end = st.in === 'p' ? st.q : CLOSE[st.in]; const cls = st.in === 'c' || st.in === 'h' ? 'sx-c' : 'sx-s'; const k = line.indexOf(end);
+    if (k < 0) return [h('span', { class: cls }, line || '​')];
+    push(line.slice(0, k + end.length), cls); st.in = null; i = k + end.length;
+  }
+  const re = lang === 'html' ? /(<!--.*?-->|<!--.*$|<\/?[a-zA-Z][\w:-]*|\/?>|"[^"]*"|'[^']*'|\s[\w:-]+(?==))/y : lang === 'json' ? /("(?:[^"\\]|\\.)*"(?=\s*:)|"(?:[^"\\]|\\.)*"|-?\b\d[\d.eE+-]*\b|\b(?:true|false|null)\b)/y
+    : lang === 'css' ? /(\/\*.*?\*\/|\/\*.*$|"[^"]*"|'[^']*'|#[0-9a-fA-F]{3,8}\b|-?\d[\d.]*(?:px|rem|em|%|vh|vw|s|ms)?|--[\w-]+|@[\w-]+|[.#][\w-]+|[\w-]+(?=\s*:))/y
+    : lang === 'py' ? /(#.*|"{3}.*?"{3}|'{3}.*?'{3}|"{3}.*$|'{3}.*$|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b\d[\d._]*\b|[A-Za-z_$][\w$]*)/y
+    : /(\/\/.*|#.*|\/\*.*?\*\/|\/\*.*$|`(?:[^`\\]|\\.)*`|`.*$|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b\d[\d._]*\b|[A-Za-z_$][\w$]*)/y;
   while (i < line.length) {
-    re.lastIndex = i; let m = re.exec(line); if (!m) { const nx = line.slice(i).search(re.source.includes('\\s[') ? /\S/ : /[\w"'`#/@.<-]/); const cut = nx > 0 ? i + nx : line.length; push(line.slice(i, cut)); i = cut; continue; }
-    // sticky regex matched at i exactly
+    re.lastIndex = i; const m = re.exec(line); if (!m) { const nx = line.slice(i).search(lang === 'html' ? /\S/ : /[\w"'`#/@.<-]/); const cut = nx > 0 ? i + nx : line.length; push(line.slice(i, cut)); i = cut; continue; }
     const t = m[0]; let c = '';
-    if (lang === 'html') c = t.startsWith('<!--') ? 'sx-c' : t[0] === '<' ? 'sx-t' : t[0] === '"' || t[0] === "'" ? 'sx-s' : /^[>/]/.test(t) ? 'sx-t' : 'sx-a';
-    else if (lang === 'json') c = t[0] === '"' ? (/"\s*:/.test(line.slice(i + t.length - 1, i + t.length + 3)) || line[i + t.length] === ':' ? 'sx-a' : 'sx-s') : /^-?\d/.test(t) ? 'sx-n' : 'sx-k';
-    else if (lang === 'css') c = t.startsWith('/*') ? 'sx-c' : /^["']/.test(t) ? 'sx-s' : /^[#]?[0-9a-f]{3,8}$/i.test(t.slice(1)) && t[0] === '#' ? 'sx-n' : /^-?\d/.test(t) ? 'sx-n' : t.startsWith('--') ? 'sx-a' : t[0] === '@' ? 'sx-k' : /^[.#]/.test(t) ? 'sx-t' : 'sx-a';
-    else c = t.startsWith('//') || t.startsWith('/*') || (t[0] === '#' && (lang === 'py' || lang === 'sh' || lang === 'yml')) ? 'sx-c' : /^["'`]/.test(t) ? 'sx-s' : /^\d/.test(t) ? 'sx-n' : kw.has(t) ? 'sx-k' : '';
+    if (lang === 'html') { c = t.startsWith('<!--') ? 'sx-c' : t[0] === '<' ? 'sx-t' : t[0] === '"' || t[0] === "'" ? 'sx-s' : /^[>/]/.test(t) ? 'sx-t' : 'sx-a'; if (st && t.startsWith('<!--') && !t.endsWith('-->')) st.in = 'h'; }
+    else if (lang === 'json') c = t[0] === '"' ? (line[i + t.length] === ':' || /^\s*:/.test(line.slice(i + t.length)) ? 'sx-a' : 'sx-s') : /^-?\d/.test(t) ? 'sx-n' : 'sx-k';
+    else if (lang === 'css') { c = t.startsWith('/*') ? 'sx-c' : /^["']/.test(t) ? 'sx-s' : t[0] === '#' && /^#[0-9a-f]{3,8}$/i.test(t) ? 'sx-n' : /^-?\d/.test(t) ? 'sx-n' : t.startsWith('--') ? 'sx-a' : t[0] === '@' ? 'sx-k' : /^[.#]/.test(t) ? 'sx-t' : 'sx-a'; if (st && t.startsWith('/*') && !t.endsWith('*/')) st.in = 'c'; }
+    else {
+      c = t.startsWith('//') || t.startsWith('/*') || (t[0] === '#' && (lang === 'py' || lang === 'sh' || lang === 'yml')) ? 'sx-c' : /^["'`]/.test(t) ? 'sx-s' : /^\d/.test(t) ? 'sx-n' : kw.has(t) ? 'sx-k' : '';
+      if (st) { if (t.startsWith('/*') && !t.endsWith('*/')) st.in = 'c'; else if (lang === 'js' && t[0] === '`' && !(t.length > 1 && t.endsWith('`') && !t.endsWith('\\`'))) st.in = 't';
+        else if (lang === 'py' && /^("{3}|'{3})/.test(t) && !(t.length >= 6 && t.endsWith(t.slice(0, 3)))) { st.in = 'p'; st.q = t.slice(0, 3); } }
+    }
     push(t, c); i += t.length || 1;
   }
   return out;
@@ -117,6 +130,6 @@ export function diffViewer(text) {
   const seg = (m, label) => h('button', { type: 'button', class: mode === m ? 'on' : '', 'aria-pressed': String(mode === m), onclick: () => { mode = m; try { localStorage.setItem('af-diff-mode', m); } catch { /* ok */ } segs.replaceChildren(seg('unified', 'Unified'), seg('split', 'Split')); render(); } }, label);
   const segs = h('div', { class: 'dv-seg', role: 'group', 'aria-label': 'Diff layout' }, seg('unified', 'Unified'), seg('split', 'Split'));
   const index = h('details', { class: 'dv-index' }, h('summary', {}, `${files.length} file${files.length === 1 ? '' : 's'} changed`), h('ul', {}, files.map((f, i) => h('li', {}, h('a', { href: `#f-${i}`, onclick: (e) => { e.preventDefault(); const d = sections[i]; d.open = true; d.scrollIntoView({ block: 'start' }); } }, f.path), h('span', { class: 'dv-count' }, f.binary ? 'binary' : [f.add ? h('span', { class: 'plus' }, `+${f.add}`) : null, f.del ? h('span', { class: 'minus' }, `−${f.del}`) : null])))));
-  wrap.append(h('div', { class: 'dv-bar' }, h('div', { class: 'dv-sum' }, h('b', {}, `${files.length} file${files.length === 1 ? '' : 's'}`), ' changed ', h('span', { class: 'plus' }, `+${total.add}`), ' ', h('span', { class: 'minus' }, `−${total.del}`)), h('div', { class: 'row nowrap' }, files.length > 1 ? h('button', { type: 'button', class: 'btn sm', onclick: () => setAll(false) }, 'Collapse all') : null, files.length > 1 ? h('button', { type: 'button', class: 'btn sm', onclick: () => setAll(true) }, 'Expand all') : null, segs)), files.length > 1 ? index : null, body);
+  wrap.append(h('div', { class: 'dv-bar' }, h('div', { class: 'dv-sum' }, h('b', {}, `${files.length} file${files.length === 1 ? '' : 's'}`), ' changed ', h('span', { class: 'plus' }, `+${total.add}`), ' ', h('span', { class: 'minus' }, `−${total.del}`)), h('div', { class: 'row nowrap' }, files.length > 1 ? h('button', { type: 'button', class: 'btn sm', onclick: () => setAll(false) }, 'Collapse all') : null, files.length > 1 ? h('button', { type: 'button', class: 'btn sm', onclick: () => setAll(true) }, 'Expand all') : null, segs)), ...(files.length > 1 ? [index] : []), body);
   render(); return wrap;
 }
