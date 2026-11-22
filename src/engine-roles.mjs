@@ -66,8 +66,19 @@ export const roleMethods = {
     let agent = this.f.agent; if (!agent) { if (viaOr) agent = this._orAgent(role, log, ctx); else { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; agent = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); } }
     // The one place every agent call passes through, whichever role: the first sign of the plan's usage limit pauses every agent (engine-limit.mjs), and the tokens used are logged (usage.mjs).
     return { ...agent, run: async (...args) => { const t0 = Date.now(); let r = await agent.run(...args); let lim = parseUsageLimit(r?.out); let swapped = false;
-      // the plan ran out in the middle of this call: say so, and (when OpenRouter is set to stand in) do the same job again on a free model instead of failing it
-      if (lim && agent.name !== 'openrouter' && !this.f.agent && this._fallbackCovers(role)) { this._noteLimit(lim); this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await this._orAgent(role, log, ctx).run(args[0], args[1], args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(role === 'reviewer' || role === 'security' ? { shot: true } : {}) } }); lim = parseUsageLimit(r?.out); swapped = true; } if (lim) this._noteLimit(lim);
+      // The two providers' limits stay SEPARATE: only the plan's own limit is the plan limit (it pauses the factory); OpenRouter running out never is, and each covers for the other.
+      if (lim) {
+        if (agent.name !== 'openrouter') {
+          // the plan ran out in the middle of this call: record it, and if OpenRouter stands in do the same job again on a free model instead of failing it
+          this._noteLimit(lim);
+          if (!this.f.agent && this._fallbackCovers(role)) { this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await this._orAgent(role, log, ctx).run(args[0], args[1], args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(role === 'reviewer' || role === 'security' ? { shot: true } : {}) } }); lim = parseUsageLimit(r?.out); swapped = true; }
+        } else if (!this.f.agent && !this.planLimit()) {
+          // the free models ran out (or the day's allowance is used) and the plan is fine: do this one on the plan
+          this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null }); const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; const plan = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log });
+          r = await plan.run(...args); lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim);
+        }
+        // else: OpenRouter is limited AND so is the plan: the factory waits on the plan's own limit (which is when it can next work), so nothing from OpenRouter is recorded as the plan limit
+      }
       const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via: r?.models || agent.name === 'openrouter' || swapped ? 'openrouter' : null, input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...(lim ? { limited: true } : {}) }); return r; } };
   },
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },

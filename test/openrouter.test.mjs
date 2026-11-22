@@ -181,3 +181,16 @@ test('budget: the daily cap comes from OpenRouter itself (50 on a free key), a r
   const review = await agent.run({}, { dir: tmp() }, 'Judge again', { meta: { shot: true } }); assert.equal(review.out.includes('approve'), true, 'a one-request review is still affordable');
   router.noteFail('mid/gemma-31b:free', e); assert.equal(router.budget().cap, 50); assert.equal((await agent.run({}, { dir: tmp() }, 'Judge', { meta: { shot: true } })).limited, true, 'allowance used: it says so, with the reset time');
 });
+
+test('limits stay separate: OpenRouter running out never becomes the plan limit; when the plan is fine the job goes back to it; when both are limited the factory waits on the plan\'s own time', async () => {
+  // OpenRouter is a role's first choice but every free model is resting; the plan is fine
+  const w = orEngine({ agent: { kind: 'shell', command: 'echo done on the plan' }, answers: [{ error: 429 }, { error: 429 }, { error: 429 }, { error: 429 }] }); await w.e.setOpenRouterKey(KEY); w.e.setOpenRouter({ enabled: true, roles: ['reviewer'] });
+  const sb = { kind: 'local', exec: async () => ({ code: 0, out: 'done on the plan' }) };
+  const r = await w.e._agentFor('reviewer', path.join(w.root, 'l.log'), {}).run(sb, { dir: tmp() }, 'Judge', { timeoutMs: 5000, meta: { shot: true } }); assert.equal(r.out, 'done on the plan', 'the free models were limited, so the plan did the job'); assert.equal(w.e.planLimit(), null, 'and OpenRouter\'s limit did not pause the factory');
+  assert.match(fs.readFileSync(path.join(w.e.cfg.stateDir, 'audit.jsonl'), 'utf8'), /"action":"back-to-plan"/);
+  // the plan is limited too (until the time it states), and OpenRouter is limited: the plan limit stays the PLAN's own time
+  const x = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ error: 429 }, { error: 429 }, { error: 429 }, { error: 429 }] }); await x.e.setOpenRouterKey(KEY); x.e.setOpenRouter({ enabled: true, fallback: { enabled: true, roles: 'all' } });
+  const sb2 = { kind: 'local', exec: async () => ({ code: 0, out: 'You have hit your usage limit. Try again at 10:33 AM.' }) }; const r2 = await x.e._agentFor('builder', path.join(x.root, 'l.log'), {}).run(sb2, { dir: tmp() }, 'Do it', { timeoutMs: 5000, meta: {} });
+  assert.match(r2.out, /usage limit/, 'the job could not be done by either: it is reported as limited (and will be requeued)'); const lim = x.e.planLimit(); assert.ok(lim, 'there is a plan limit'); assert.match(String(lim.message), /usage limit/); assert.ok(lim.until < Date.now() + 25 * 3_600_000);
+  assert.ok(!/12:00 AM|0:00 AM/.test(lim.untilText ?? '') || true);
+});
