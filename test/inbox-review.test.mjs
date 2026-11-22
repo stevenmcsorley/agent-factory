@@ -111,7 +111,7 @@ test('rebuild: the conflicting attempt is thrown away, its ticket goes back to t
   const prs = await w.e.listPrs('app'); await w.e.prAction('app', prs.find((x) => x.branch.startsWith(`agent/${a}-`)).number, 'merge', {}); w.e.cache.clear();
   const pb = (await w.e.listPrs('app')).find((x) => x.branch.startsWith(`agent/${b}-`)); const r = await w.e.prAction('app', pb.number, 'rebuild', {});
   assert.equal(r.requeued, true, r.requeueError ?? ''); const t = await labelsOf(w, b); assert.ok(t.labels.includes('agent-ready'), 'ready to be built again');
-  const d = await w.e.deps(w.e.project('app')).tickets.get(b); assert.match(d.body, /index\.html/); assert.match(d.body, /already contains/); assert.equal((await w.e.listPrs('app')).some((x) => x.number === pb.number), false, 'the old PR is closed');
+  const d = await w.e.deps(w.e.project('app')).tickets.get(b); assert.match(d.body, /index\.html/); assert.match(d.body, /already contains/); assert.equal((await w.e.listPrs('app')).some((x) => x.number === pb.number), false, 'the old PR is closed'); assert.throws(() => bare(w.repo(), 'rev-parse', '--verify', '--quiet', `refs/heads/${pb.branch}`), 'its old branch is gone, so a new attempt can push the same name');
 });
 
 test('reject with requeue sends the ticket straight back, carrying the reason', async () => {

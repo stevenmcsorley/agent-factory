@@ -107,6 +107,11 @@ export function localHost({ project, dir, base = 'main', exec = run }) {
       const mt = await g(['merge-tree', '--write-tree', '--name-only', baseSha, head]); const lines = mt.out.split('\n').slice(1); const blank = lines.indexOf(''); const conflicts = mt.code === 0 ? [] : [...new Set((blank < 0 ? lines : lines.slice(0, blank)).map((x) => x.trim()).filter(Boolean))];   // after the tree id: the conflicted file names, then a blank line, then messages
       return { state: 'open', clean: mt.code === 0, conflicts: conflicts.slice(0, 20), files, behind: Number((await g(['rev-list', '--count', `${head}..${baseSha}`])).out) || 0 };
     },
+    // After a pull request is closed WITHOUT merging, drop its branch so a fresh attempt at the same ticket can push a branch of the same name (otherwise git rejects it as a non-fast-forward).
+    async deleteBranch(n) {
+      const p = find(load(), n); if (p.state === 'open') throw bad('Close the pull request first'); if (!p.branch.startsWith('agent/')) throw bad('Only the factory\'s own branches are removed');
+      const head = await sha(p.branch); if (!head) return { deleted: false }; const r = await g(['update-ref', '-d', `refs/heads/${p.branch}`, head]); return { deleted: r.code === 0 };
+    },
     async close(n) { const d = load(); const p = find(d, n); if (p.state !== 'open') throw bad(`That pull request is already ${p.state}`); p.state = 'closed'; p.updatedAt = now(); save(d); return view(p); },
     // Merge by building objects, never by checking out. Fast-forward when the branch is simply ahead; otherwise a clean merge commit; conflicts refuse.
     async merge(n) {

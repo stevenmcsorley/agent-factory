@@ -31,6 +31,7 @@ export const reviewMethods = {
   // With requeue:true the ticket is also sent straight back to the factory with your reason AND what the reviewers found, so the next attempt starts from that feedback.
   async rejectPr(id, n, { reason, requeue, extra } = {}) {
     const p = this.project(id); const f = this._forge(p); const link = await this._ticketOfPr(p, n); const out = await f.close(n); let marked = false, requeued = false, requeueError = null;
+    if (requeue) await f.deleteBranch?.(n).catch(() => {});   // so the next attempt can push a branch of the same name
     if (link) {
       const why = [reason ? clip(reason, 800) : '', extra ?? '', requeue ? this._findingsText(this._assessment(p, link.run, Number(n))) : ''].filter(Boolean).join('\n\n');
       try { const t = this.deps(p).tickets; await t.comment?.(link.ticket, `The pull request (#${n}) was closed without merging${reason ? `: ${clip(reason, 500)}` : ''}. This ticket is not done.${requeue ? ' It is going back to the factory.' : ' Requeue it (with more detail) to try again, or close it yourself if you no longer want it.'}`); await t.label?.(link.ticket, ['agent-failed'], ['agent-review', 'agent-working', 'agent-ready']); marked = true; } catch { /* best effort */ }
