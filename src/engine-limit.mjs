@@ -16,7 +16,10 @@ export const limitMethods = {
   planLimit() {
     if (this._limit === undefined) {
       this._limit = null; try { this._limit = JSON.parse(fs.readFileSync(this._limitFile(), 'utf8')); } catch { /* none saved */ }
-      if (!this._limit) { const last = readRuns(this.cfg.stateDir).filter((r) => r.status === 'rate-limited' && r.retryAt).at(-1); const until = last ? retryAtMs(last.retryAt, Date.parse(last.finished ?? last.started ?? new Date().toISOString())) : null; if (until && until > Date.now()) this._limit = { until, message: last.error ?? 'The agent hit its usage limit', at: last.finished ?? new Date().toISOString(), derived: true }; }
+      if (!this._limit) { const runs = readRuns(this.cfg.stateDir); const last = runs.filter((r) => r.status === 'rate-limited' && r.retryAt).at(-1);
+        // a run that reached the agent AFTER that one (and was not itself rate-limited) proves the limit has lifted (you reset it, or it was a shorter window than announced)
+        const lifted = last && runs.some((r) => r.status !== 'rate-limited' && Date.parse(r.started ?? r.finished ?? 0) > Date.parse(last.finished ?? last.started ?? 0));
+        if (lifted) { /* stale: ignore */ } else { const until = last ? retryAtMs(last.retryAt, Date.parse(last.finished ?? last.started ?? new Date().toISOString())) : null; if (until && until > Date.now()) this._limit = { until, message: last.error ?? 'The agent hit its usage limit', at: last.finished ?? new Date().toISOString(), derived: true }; } }
     }
     const l = this._limit; if (l && Date.now() >= l.until) { this._expireLimit(); return null; }
     return l ? { ...l, untilText: when(l.until), autoResume: this.autoResume() } : null;

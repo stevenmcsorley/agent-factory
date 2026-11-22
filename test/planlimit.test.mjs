@@ -60,3 +60,11 @@ test('any role reporting the limit (here the reviewer) pauses every agent', asyn
   assert.equal(e.planLimit(), null); await e._agentFor('reviewer').run({}, {}, 'prompt', {}); assert.ok(e.planLimit(), 'the limit is now recorded'); assert.deepEqual(e._dueProjects(), []);
   const ok = boot().e; ok.f.agent = { name: 'fake', run: async () => ({ out: 'all good', code: 0 }) }; await ok._agentFor('builder').run({}, {}, 'p', {}); assert.equal(ok.planLimit(), null, 'ordinary output does not trip it');
 });
+
+test('a limit read back from history is ignored once a LATER run reached the agent (you reset it): no phantom banner after a restart', () => {
+  const { e } = boot(); const t = new Date(Date.now() - 600_000); const future = new Date(Date.now() + 2 * 3_600_000); const hh = future.getHours() % 12 || 12; const clock = `${hh}:${String(future.getMinutes()).padStart(2, '0')} ${future.getHours() >= 12 ? 'PM' : 'AM'}`;
+  recordRun(e.cfg.stateDir, { project: 'a', ticket: 1, status: 'rate-limited', error: 'You have hit your usage limit', retryAt: clock, started: t.toISOString(), finished: t.toISOString() });
+  assert.ok(new Engine(e.cfg, { configPath: e.configPath, factories: {} }).planLimit(), 'with nothing after it, the limit still stands');
+  recordRun(e.cfg.stateDir, { project: 'a', ticket: 2, status: 'ok', started: new Date(Date.now() - 60_000).toISOString(), finished: new Date().toISOString() });
+  assert.equal(new Engine(e.cfg, { configPath: e.configPath, factories: {} }).planLimit(), null, 'a run that went through proves it lifted');
+});
