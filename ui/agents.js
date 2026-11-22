@@ -72,7 +72,7 @@ function policyTab(d, rerender) {
     const seg = h('div', { class: 'segctl small', role: 'group', 'aria-label': `Who does ${ROLE[role]?.[0] ?? role}` }, [['default', 'Default'], ['codex', 'Codex'], ['openrouter', 'Free'], ...(p.localEnabled || cur === 'local' ? [['local', 'Local']] : []), ['auto', 'Free, then Codex']].map(([v, l]) => h('button', { type: 'button', class: cur === v ? 'on' : '', 'aria-pressed': String(cur === v), title: v === 'default' ? `Use the default for this agent: ${({ codex: 'Codex', openrouter: 'free models', auto: 'free models first, then Codex' })[r.default]}` : v === 'auto' ? 'Free models first. Codex when the job is big, is a retry, or the free models cannot answer.' : `Always ${v === 'codex' ? 'Codex' : 'free models'}`, onclick: set({ routes: { [role]: v } }, `${ROLE[role]?.[0] ?? role}: saved`) }, l)));
     return h('tr', {}, h('td', {}, h('b', {}, ROLE[role]?.[0] ?? role), h('div', { class: 'muted small' }, ROLE[role]?.[1] ?? '')), h('td', {}, seg, h('div', { class: 'muted small' }, r.source === 'you' ? 'Your choice' : (r.defaultWhy ?? ''))),
       h('td', {}, chip(r.first === 'openrouter' || r.first === 'local' ? 'ok' : r.first === 'none' ? 'warn' : 'off', PROV[r.first] ?? r.first), r.firstWhy && r.firstWhy !== r.defaultWhy ? h('div', { class: 'muted small' }, r.firstWhy) : null), h('td', { class: 'splitcell' }, u ? splitBar([{ label: 'Codex', value: u.codex.weighted, cls: 'codex' }, { label: 'Free', value: u.openrouter.weighted, cls: 'free' }, ...(u.local.weighted ? [{ label: 'Local', value: u.local.weighted, cls: 'local' }] : [])], { empty: 'Not used this week' }) : h('span', { class: 'muted small' }, 'Not used this week'))); });
-  return [card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Which provider does the work')),
+  return [ladderCard(d, rerender), card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Which provider does the work')),
       h('div', { class: 'modegrid' }, p.modes.filter((m) => m !== 'local' || p.localEnabled || p.mode === 'local').map((m) => h('button', { type: 'button', class: `modebtn ${p.mode === m ? 'on' : ''}`, 'aria-pressed': String(p.mode === m), onclick: set({ mode: m }, `${MODES[m][0]}: saved`) }, h('b', {}, MODES[m][0], p.mode === m ? h('em', {}, 'In use') : null, m === 'mix' ? h('em', { class: 'rec' }, 'Recommended') : null), h('span', {}, MODES[m][1])))),
       !p.localEnabled && p.mode !== 'local' ? h('p', { class: 'muted small' }, 'Want to use models on your own computer as well? ', h('a', { href: '#/agents/local' }, 'Set up local models'), '.') : null,
       p.mode === 'local' && !p.localReady ? h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, 'Local models are chosen, but none is ready, so nothing will run. ', h('a', { href: '#/agents/local' }, 'Check them'))) : null,
@@ -80,6 +80,18 @@ function policyTab(d, rerender) {
     card(h('div', { class: 'card-h' }, h('h2', {}, 'Choose for each agent'), h('span', { class: 'muted small' }, p.mode === 'mix' ? 'Anything you pick here beats the default' : 'These apply when you choose "Both"')),
       h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Agent', 'Who does it', 'First choice right now', 'This week'].map((x) => h('th', {}, x)))), h('tbody', {}, ...rows))),
       h('p', { class: 'muted small' }, 'When Codex runs out, the free models take over automatically (and the local models, if they are switched on and the free models are not available), except for an agent you set to Codex. When a free or local model cannot give a usable answer, the next one in line does that job, ending with Codex.'))];
+}
+
+// ---- start on an older, cheaper Codex model and step up when an attempt fails
+function ladderCard(d, rerender) {
+  const models = d.codexModels ?? []; const cur = d.policy.tiers?.builder ?? []; const opt = (v, t, sel) => h('option', { value: v, ...(sel ? { selected: 'selected' } : {}) }, t);
+  const first = h('select', { 'aria-label': 'Model to start with' }, opt('', 'The usual model (no steps)', !cur[0]), ...models.map((m) => opt(m.id, m.name, cur[0] === m.id)));
+  const next = h('select', { 'aria-label': 'Model to step up to' }, opt('', 'Nothing more', !cur[1]), ...models.map((m) => opt(m.id, m.name, cur[1] === m.id)));
+  const save = act(async () => { const tiers = first.value ? [first.value, next.value].filter(Boolean) : []; await post('/agents/policy', { tiers: { builder: tiers, fixer: tiers } }); }, 'Saved', rerender);
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Start cheaper, step up if it fails'), cur.length ? chip('ok', 'On') : chip('off', 'Off')),
+    h('p', { class: 'muted small' }, 'Builders can start on an older Codex model, which uses less of your plan, and move to a stronger one only when an attempt fails its checks. The checks decide: the tests, the reviewer and the screens. The Improvements page tells you whether the cheaper model is doing as well.'),
+    models.length ? h('div', { class: 'fieldgrid' }, h('label', {}, h('span', {}, 'Start with'), first), h('label', {}, h('span', {}, 'If it fails, step up to'), next)) : h('p', { class: 'muted' }, 'Could not read the list of Codex models.'),
+    models.length ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: save }, icon('check', 13), 'Save'), h('span', { class: 'muted small' }, 'Applies to building and fixing. A retry always uses the next step.')) : null);
 }
 
 // ---- free models
@@ -153,8 +165,8 @@ function codexTab(d, rerender) {
 export const agentsPage = {
   async load(arg) {
     const tab = TABS.some(([k]) => k === arg) ? arg : 'overview';
-    const [policy, or, local, settings, status, acc, activity, roles, setups] = await Promise.all([api('/agents/policy'), api('/openrouter'), api('/local'), api('/settings').catch(() => null), api('/status').catch(() => null), tab === 'overview' || tab === 'policy' ? api('/accounts?days=7&calls=1').catch(() => null) : null, tab === 'overview' ? api('/activity').catch(() => null) : null, tab === 'codex' ? api('/roles').catch(() => null) : null, tab === 'codex' ? api('/setups').catch(() => null) : null]);
-    const lim = status?.limit ?? null; return { tab, policy, or, local, settings, status, acc, agents: activity?.agents ?? [], roles, setups, codex: { limited: lim, backIn: lim ? dur(Math.max(0, lim.until - Date.now())) : null } };
+    const [policy, or, local, codexModels, settings, status, acc, activity, roles, setups] = await Promise.all([api('/agents/policy'), api('/openrouter'), api('/local'), tab === 'policy' ? api('/codex/models').catch(() => []) : [], api('/settings').catch(() => null), api('/status').catch(() => null), tab === 'overview' || tab === 'policy' ? api('/accounts?days=7&calls=1').catch(() => null) : null, tab === 'overview' ? api('/activity').catch(() => null) : null, tab === 'codex' ? api('/roles').catch(() => null) : null, tab === 'codex' ? api('/setups').catch(() => null) : null]);
+    const lim = status?.limit ?? null; return { tab, policy, or, local, codexModels, settings, status, acc, agents: activity?.agents ?? [], roles, setups, codex: { limited: lim, backIn: lim ? dur(Math.max(0, lim.until - Date.now())) : null } };
   },
   draw(d, ctx) {
     d.openrouterReady = d.policy.openrouterReady; const body = d.tab === 'policy' ? policyTab(d, ctx.rerender) : d.tab === 'free' ? modelsTab(d, ctx.rerender) : d.tab === 'local' ? localTab(d, ctx.rerender) : d.tab === 'codex' ? codexTab(d, ctx.rerender) : overview(d);

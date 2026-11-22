@@ -28,7 +28,7 @@ function effectLine(i) {
 function ideaCard(i, rerender) {
   const isSkill = i.kind === 'skill'; const ta = isSkill ? h('textarea', { rows: '4', 'aria-label': 'What the agents will be told', spellcheck: 'true' }, i.change.skill.text) : null;
   const who = isSkill ? `Given to ${String(i.change.skill.roles).split(',').map((r) => ROLES[r.trim()] ?? r).join(', ').replace(/, ([^,]*)$/, ' and $1')}, on every project.` : null;
-  const route = !isSkill ? `This would send building and fixing to ${i.change.routes.builder === 'codex' ? 'Codex' : 'the free models first, then Codex'}.` : null;
+  const route = i.kind === 'tier' ? `This would start building and fixing on ${i.change.tiers.builder[0]}, and step up to ${i.change.tiers.builder[1]} only when an attempt fails.` : !isSkill ? `This would send building and fixing to ${i.change.routes.builder === 'codex' ? 'Codex' : 'the free models first, then Codex'}.` : null;
   return h('div', { class: `idea ${i.status}` }, h('div', { class: 'card-h' }, h('h3', {}, i.title), i.status === 'applied' ? chip('ok', 'Applied') : i.status === 'dismissed' ? chip('off', 'Not now') : chip('warn', 'New')),
     h('p', {}, i.why),
     i.examples?.length ? h('ul', { class: 'examples' }, i.examples.map((x) => h('li', {}, h('a', { href: `#/run/${x.run}` }, x.title ?? x.run), h('span', { class: 'muted small' }, ` · ${x.project} · ${String(x.detail).slice(0, 140)}`)))) : null,
@@ -46,10 +46,11 @@ function problemsCard(d) {
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'What keeps going wrong'), h('span', { class: 'muted small' }, `In the last ${d.days} days`)),
     h('ul', { class: 'problems' }, d.problems.slice(0, 8).map((p) => h('li', {}, h('div', { class: 'prow' }, h('b', {}, p.label), h('span', { class: 'muted small' }, `${p.count} job${p.count === 1 ? '' : 's'} · ${percent(p.share)}`)), meter(p.count, max, p.share > 0.3 ? 'bad' : p.share > 0.15 ? 'warn' : 'ok', `${p.count} jobs`), p.examples[0] ? h('div', { class: 'muted small' }, 'For example: ', h('a', { href: `#/run/${p.examples[0].run}` }, p.examples[0].title ?? p.examples[0].run), ` · ${String(p.examples[0].detail).slice(0, 120)}`) : null))));
 }
+function modelsRows(d) { return (d.byModel ?? []).length > 1 ? d.byModel.map((m) => h('tr', {}, h('td', {}, h('b', {}, m.model), h('div', { class: 'muted small' }, 'Codex model')), h('td', { class: 'tnum' }, String(m.jobs)), h('td', {}, h('div', { class: 'row nowrap' }, meter(m.average, 100, tone(m.average), `${m.average} out of 100`), h('b', { class: 'tnum' }, String(m.average)))), h('td', { class: 'tnum' }, percent(m.cleanFirstTime)))) : []; }
 function providersCard(d) {
-  const rows = Object.entries(d.byProvider).filter(([, v]) => v.jobs); if (rows.length < 2) return null;
+  const rows = Object.entries(d.byProvider).filter(([, v]) => v.jobs); if (rows.length < 2 && modelsRows(d).length < 2) return null;
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'Who builds better'), h('span', { class: 'muted small' }, 'Same kind of job, compared by score')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Built by', 'Jobs', 'Average score', 'Right first time'].map((x) => h('th', {}, x)))),
-    h('tbody', {}, ...rows.map(([k, v]) => h('tr', {}, h('td', {}, h('b', {}, PROVIDER[k])), h('td', { class: 'tnum' }, String(v.jobs)), h('td', {}, h('div', { class: 'row nowrap' }, meter(v.average, 100, tone(v.average), `${v.average} out of 100`), h('b', { class: 'tnum' }, String(v.average)))), h('td', { class: 'tnum' }, percent(v.cleanFirstTime))))))),
+    h('tbody', {}, ...modelsRows(d), ...rows.map(([k, v]) => h('tr', {}, h('td', {}, h('b', {}, PROVIDER[k])), h('td', { class: 'tnum' }, String(v.jobs)), h('td', {}, h('div', { class: 'row nowrap' }, meter(v.average, 100, tone(v.average), `${v.average} out of 100`), h('b', { class: 'tnum' }, String(v.average)))), h('td', { class: 'tnum' }, percent(v.cleanFirstTime))))))),
     h('p', { class: 'muted small' }, 'Treat small numbers with care: a few jobs prove little. A suggestion to change who builds only appears when both sides have at least 6 jobs.'));
 }
 function jobRow(r) {

@@ -7,6 +7,8 @@ import { loadRepoConfig, detectVerify, protectedViolations } from './repoconfig.
 import { leaseStore, recover } from './leases.mjs';
 import { overBudget, recordRun } from './budget.mjs';
 import { startRun, tail, changedFiles } from './trace.mjs';
+import { checkClaims, claimsFeedback } from './claims.mjs';
+import { peekDiff } from './review.mjs';
 import { parseNeedsInfo, parseAssumptions } from './triage.mjs';
 import { changeQuality, feedbackFor } from './quality.mjs';
 import { makeIgnore } from './ignore.mjs';
@@ -147,6 +149,11 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
           if (a < (cfg.maxAttempts ?? 2)) { feedback = `This ticket allows changes ONLY to: ${allowed.join(', ')}. You also changed: ${outside.slice(0, 8).join(', ')}. Put those files back exactly as they were and keep the rest.`; continue; }
           break;
         }
+      }
+      // Does the summary match the diff? (a test switched off, deleted or loosened, or "I added tests" with none changed): free, deterministic, and cheaper than a test run that would pass anyway
+      if (cfg.claimsCheck !== false) {
+        let cl; try { cl = checkClaims({ summary: r.out, files: changedFiles(status), diff: await peekDiff(ws.dir), ticketText: `${t.title}\n${t.body ?? ''}` }); } catch { cl = null; }
+        if (cl) { if (cl.findings.length) run.note('claims', cl); else delete rec.claims; if (!cl.ok && a < (cfg.maxAttempts ?? 2)) { rec.status = 'claims-failed'; feedback = claimsFeedback(cl); continue; } }
       }
       if (cfg.verify) {
         run.phase('verify', cfg.verify);

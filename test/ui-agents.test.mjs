@@ -94,3 +94,9 @@ test('local models: the tab says what this machine can run, lists the models wit
   const po = text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })); assert.match(po, /Local only/); assert.match(po, /Local\b/);
   e.setAgentPolicy({ mode: 'local' }); const po2 = agentsPage.draw(await load(e, 'policy'), { rerender() {} }); assert.match(text(po2), /Local models are chosen/);
 });
+
+test('start cheaper, step up if it fails: the card explains it in plain words and offers the Codex models by name', async () => {
+  const e = await world(); const d = await load(e, 'policy'); d.codexModels = [{ id: 'gpt-6-luna', name: 'GPT-6-Luna' }, { id: 'gpt-6.2-astra', name: 'GPT-6.2-Astra' }]; const t = text(agentsPage.draw(d, { rerender() {} }));
+  for (const re of [/Start cheaper, step up if it fails/, /older Codex model/, /uses less of your plan/, /Start with/, /step up to/, /GPT-6-Luna/, /The checks decide/]) assert.match(t, re, String(re)); for (const j of JARGON) assert.doesNotMatch(t, j);
+  e.setAgentPolicy({ tiers: { builder: ['gpt-6-luna', 'gpt-6.2-astra'] } }); const d2 = await load(e, 'policy'); d2.codexModels = d.codexModels; assert.match(text(agentsPage.draw(d2, { rerender() {} })), /\bOn\b/);
+});

@@ -20,6 +20,7 @@ export const TAGS = {
   'finding-bug': { label: 'It introduced a bug or a regression', penalty: 6 },
   'visual-regression': { label: 'It looked wrong in the screenshots', penalty: 15 },
   'quality-gate': { label: 'It failed the code-quality check', penalty: 20 },
+  'claims-failed': { label: 'Its summary or its tests did not match what it did', penalty: 12 },
   'fix-round': { label: 'Needed an automatic fix round', penalty: 8 },
   conflicts: { label: 'Clashed with other work', penalty: 4 },
   expensive: { label: 'Used far more than a usual job', penalty: 5 },
@@ -42,6 +43,7 @@ export function scoreRun(rec, { fixRounds = 0, medianWeighted = null } = {}) {
   if (rec.status === 'verify-failed') add('verify-failed', String(rec.verifyTail ?? '').slice(-160) || null);
   const rv = rec.review; if (rv?.verdict === 'changes') add('review-changes', String(rv.summary ?? '').slice(0, 200));
   for (const f of rv?.findings ?? []) { const t = classifyFinding(f); if (t) add(t, String(f.issue ?? '').slice(0, 200)); }
+  if (rec.claims && rec.claims.ok === false) add('claims-failed', String(rec.claims.findings?.find((f) => f.blocking)?.detail ?? '').slice(0, 200));
   if (rec.visual?.status === 'fail') add('visual-regression', String(rec.visual.summary ?? '').slice(0, 160));
   if (rec.quality && rec.quality.passed === false) add('quality-gate', (rec.quality.blockers ?? []).slice(0, 2).join('; ').slice(0, 160) || null);
   if (fixRounds > 0) add('fix-round', `${fixRounds} fix round${fixRounds === 1 ? '' : 's'}`);
@@ -56,10 +58,10 @@ const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((p,
 export function scoreRuns(runs, usage = [], { now = Date.now(), days = 14 } = {}) {
   const from = now - days * DAY; const rows = runs.filter((r) => Date.parse(r.started) >= from);
   const fixes = new Map(); for (const r of runs) if (r.fixRound > 0 || r.round > 0) { const k = `${r.project}/${r.ticket ?? r.prNumber}`; fixes.set(k, (fixes.get(k) ?? 0) + 1); }
-  const byRun = new Map(); for (const u of usage) if (u.run && (u.role === 'builder' || u.role === 'fixer') && u.via !== 'none') { const m = byRun.get(u.run) ?? {}; m[u.via ?? 'codex'] = (m[u.via ?? 'codex'] ?? 0) + 1; byRun.set(u.run, m); }
+  const byRun = new Map(); const firstModel = new Map(); for (const u of usage) if (u.run && (u.role === 'builder' || u.role === 'fixer') && u.via !== 'none') { const m = byRun.get(u.run) ?? {}; m[u.via ?? 'codex'] = (m[u.via ?? 'codex'] ?? 0) + 1; byRun.set(u.run, m); if (u.role === 'builder' && u.model && !firstModel.has(u.run)) firstModel.set(u.run, u.model); }
   const med = median(rows.filter((r) => r.tokens).map((r) => W(r.tokens)));
   return rows.filter((r) => !(r.fixRound > 0) && !(r.round > 0)).map((r) => { const s = scoreRun(r, { fixRounds: fixes.get(`${r.project}/${r.ticket}`) ?? 0, medianWeighted: med }); const v = byRun.get(r.id); const provider = v ? Object.entries(v).sort((a, b) => b[1] - a[1])[0][0] : 'codex';
-    return { id: r.id, project: r.project, ticket: r.ticket ?? null, title: r.title ?? null, at: r.started, provider, attempts: r.attempts ?? 1, ...s }; }).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+    return { id: r.id, project: r.project, ticket: r.ticket ?? null, title: r.title ?? null, at: r.started, provider, model: firstModel.get(r.id) ?? r.agent?.model ?? null, attempts: r.attempts ?? 1, ...s }; }).sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
 // ---- what to do about it
@@ -88,6 +90,9 @@ export function buildImprovements({ scored, decisions = {}, skillNames = [], pol
   const count = new Map(); for (const s of real) for (const t of s.tags) { const e = count.get(t.id) ?? { tag: t.id, label: TAGS[t.id]?.label ?? t.id, count: 0, examples: [], projects: {} }; e.count++; e.projects[s.project] = (e.projects[s.project] ?? 0) + 1; if (e.examples.length < 3 && t.detail) e.examples.push({ run: s.id, project: s.project, title: s.title, detail: t.detail }); count.set(t.id, e); }
   const problems = [...count.values()].map((e) => ({ ...e, share: n ? e.count / n : 0 })).sort((a, b) => b.count - a.count);
   const byProvider = {}; for (const p of ['codex', 'openrouter', 'local']) { const xs = real.filter((s) => s.provider === p); byProvider[p] = { jobs: xs.length, average: avg(xs), cleanFirstTime: xs.length ? xs.filter((s) => !s.tags.length).length / xs.length : null }; }
+  // the same, by the model that STARTED each job (a job a cheaper model started and a stronger one finished still counts against the cheaper one: that is what is being tested)
+  const byModel = {}; for (const s of real.filter((x) => x.provider === 'codex' && x.model)) { const e = (byModel[s.model] ??= { model: s.model, jobs: 0, total: 0, clean: 0, retried: 0 }); e.jobs++; e.total += s.score; if (!s.tags.length) e.clean++; if (s.attempts > 1) e.retried++; }
+  const models = Object.values(byModel).map((e) => ({ model: e.model, jobs: e.jobs, average: Math.round(e.total / e.jobs), cleanFirstTime: e.clean / e.jobs, retried: e.retried / e.jobs })).sort((a, b) => b.jobs - a.jobs);
   const ideas = [];
   const effect = (tag, d) => { if (!d?.at) return null; const t0 = Date.parse(d.at); const after = real.filter((s) => Date.parse(s.at) > t0); if (after.length < 4) return { runsAfter: after.length, enough: false }; const had = after.filter((s) => s.tags.some((t) => t.id === tag)).length / after.length; return { runsAfter: after.length, enough: true, before: d.baseline?.share ?? null, after: had }; };
   if (n >= MIN_JOBS) for (const pr of problems) { const sk = SKILLS[pr.tag]; if (!sk || ideas.some((i) => i.change?.skill?.name === sk.name)) continue; const id = hashId(`skill:${sk.name}`); const d = decisions[id]; const exists = skillNames.includes(sk.name);
@@ -97,9 +102,12 @@ export function buildImprovements({ scored, decisions = {}, skillNames = [], pol
   const cx = byProvider.codex; for (const alt of ['openrouter', 'local']) { const a = byProvider[alt]; if (cx.jobs < 6 || a.jobs < 6) continue; const gap = cx.average - a.average; const route = policy.routes?.builder ?? null; const name = alt === 'local' ? 'local models' : 'free models';
     if (gap >= 15 && route !== 'codex') { const id = hashId(`route:builder:codex:${alt}`); const d = decisions[id]; ideas.push({ id, kind: 'route', tag: `provider-${alt}`, title: `Stop giving building jobs to the ${name}`, why: `Jobs built by the ${name} scored ${a.average} on average (${a.jobs} jobs), against ${cx.average} for Codex (${cx.jobs} jobs).`, count: a.jobs, share: null, examples: [], change: { routes: { builder: 'codex', fixer: 'codex' } }, status: d?.status ?? 'new', appliedAt: d?.at ?? null, effect: null }); }
     if (gap <= 3 && route === 'codex') { const id = hashId(`route:builder:auto:${alt}`); const d = decisions[id]; ideas.push({ id, kind: 'route', tag: `provider-${alt}`, title: `Let the ${name} build too`, why: `Jobs built by the ${name} scored ${a.average} (${a.jobs} jobs), as well as Codex (${cx.average}, ${cx.jobs} jobs). That would save your Codex plan.`, count: a.jobs, share: null, examples: [], change: { routes: { builder: 'auto', fixer: 'auto' } }, status: d?.status ?? 'new', appliedAt: d?.at ?? null, effect: null }); } }
+  // an older, cheaper Codex model that does as well as the one in use on the same jobs: let it go first, with the stronger one as the step up
+  const main = models[0]; if (main && main.jobs >= 6) for (const m of models.slice(1)) { if (m.jobs < 6 || main.average - m.average > 3) continue; const cur = policy.tiers?.builder; if (cur?.[0] === m.model) continue; const id = hashId(`tier:builder:${m.model}`); const d = decisions[id];
+    ideas.push({ id, kind: 'tier', tag: `model-${m.model}`, title: `Start building on ${m.model}`, why: `Jobs started on ${m.model} scored ${m.average} (${m.jobs} jobs), as well as ${main.model} (${main.average}, ${main.jobs} jobs). It would go first, and ${main.model} would take over only when an attempt fails. That saves Codex plan.`, count: m.jobs, share: null, examples: [], change: { tiers: { builder: [m.model, main.model], fixer: [m.model, main.model] } }, status: d?.status ?? 'new', appliedAt: d?.at ?? null, effect: null }); }
   // a fix you applied whose problem has since vanished is the best news: keep it visible with its effect
   for (const [id, d] of Object.entries(decisions)) if (!ideas.some((i) => i.id === id) && d.title) ideas.push({ id, kind: d.kind, tag: d.tag, title: d.title, why: d.why ?? '', count: d.baseline?.count ?? 0, share: d.baseline?.share ?? null, examples: [], change: d.change, status: d.status, appliedAt: d.at ?? null, effect: d.status === 'applied' && d.kind === 'skill' ? effect(d.tag, d) : null });
   // ones already decided stay visible (so you can see the effect), the rest newest first
   ideas.sort((a, b) => (a.status === 'new' ? 0 : 1) - (b.status === 'new' ? 0 : 1) || b.count - a.count);
-  return { health, problems, byProvider, ideas, enough: n >= MIN_JOBS };
+  return { health, problems, byProvider, byModel: models, ideas, enough: n >= MIN_JOBS };
 }

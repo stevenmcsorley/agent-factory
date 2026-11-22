@@ -10,6 +10,7 @@ import { ROLE_KEYS } from './presets.mjs';
 import { MODES, ROUTES, DEFAULT_ROUTES, JUDGES, decide, effectiveRoute } from './delegation.mjs';
 import { buildAccounts, accountsCsv } from './accounts.mjs';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
@@ -40,6 +41,11 @@ export const delegationMethods = {
   },
   // Can local models stand in for this role when the plan runs out in the middle of a call? Never in codex-only mode, and never for a role you pinned to Codex.
   _localCovers(role) { const pol = this._policy(); if (pol.mode === 'codex' || pol.mode === 'openrouter' || pol.routes[role] === 'codex') return false; return this._localState(role, JUDGES.has(role)).ready; },
+  // Model steps inside Codex: tiers = { role: [first model, then the next on a retry, ...] }, ending with the strongest.
+  _tiers() { const t = this.cfg.agents?.tiers; return t && typeof t === 'object' ? Object.fromEntries(Object.entries(t).filter(([r, v]) => ROLE_KEYS.includes(r) && Array.isArray(v) && v.length)) : {}; },
+  _tierModel(role, attempt = 1) { const t = this._tiers()[role]; return t ? t[Math.min(Math.max(1, attempt), t.length) - 1] : null; },
+  // The Codex models this login offers (from Codex's own list), so a step can be chosen by name.
+  codexModels() { const home = this.cfg.agent?.codexHome; for (const f of [home && path.join(home, 'models_cache.json'), path.join(os.homedir(), '.codex', 'models_cache.json')].filter(Boolean)) { try { const d = JSON.parse(fs.readFileSync(f, 'utf8')); const list = (d.models ?? []).filter((m) => m.visibility === 'list').map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, description: m.description ?? '', context: m.context_window ?? null })); if (list.length) return list; } catch { /* try the next */ } } return []; },
   _fallbackAny() { return ROLE_KEYS.some((r) => this._fallbackCovers(r)); },
   _shotPrompt(prompt) { return String(prompt).replace(SHOT_LINE, 'No checkout is available: judge from the diff and context below.'); },
   // Did the free models give something the factory can use? A verdict must parse; a task must not have stopped on a limit or come back empty.
@@ -54,8 +60,8 @@ export const delegationMethods = {
 
   // The agent the factory uses for a role: a wrapper that decides, per call, who does it.
   _delegatedAgent(role, log, ctx = {}) {
-    const plan = () => { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; return agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }; const base = plan();
-    const onPlan = async (args) => { const r = await plan().run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim); return { r, lim }; };
+    const plan = (model) => { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}), ...(model ? { model } : {}) }; return agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }; const base = plan();
+    const onPlan = async (args, model) => { const r = await plan(model).run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim); return { r, lim }; };
     const onFree = (args, shot) => this._orAgent(role, log, ctx).run(args[0], args[1], shot ? this._shotPrompt(args[2]) : args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(shot ? { shot: true } : {}) } });
     const onLocal = (args, shot) => this._localAgent(role, log, ctx).run(args[0], args[1], shot ? this._shotPrompt(args[2]) : args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(shot ? { shot: true } : {}) } });
     return { name: base.name, info: base.info, run: async (...args) => {
@@ -64,12 +70,13 @@ export const delegationMethods = {
       if (dec.provider === 'local') {
         r = await onLocal(args, dec.shot); via = 'local';
         // the local models could not give a usable answer: the next provider in line does the job (free models, then Codex)
-        for (const next of dec.chain ?? []) { if (!this._orUnusable(role, r)) break; this._audit({ what: 'local', action: 'next', role, project: ctx.project ?? null, to: next, why: r?.limited ? 'the local models were resting' : 'the local models gave no usable answer' }); if (next === 'openrouter') { r = await onFree(args, dec.shot); via = 'openrouter'; } else { const o = await onPlan(args); r = o.r; via = 'codex'; } escalated = true; why = `${why} → ${next === 'codex' ? 'Codex' : 'free models'} took over`; }
+        for (const next of dec.chain ?? []) { if (!this._orUnusable(role, r)) break; this._audit({ what: 'local', action: 'next', role, project: ctx.project ?? null, to: next, why: r?.limited ? 'the local models were resting' : 'the local models gave no usable answer' }); if (next === 'openrouter') { r = await onFree(args, dec.shot); via = 'openrouter'; } else { const o = await onPlan(args, this._tierModel(role, 99)); r = o.r; via = 'codex'; } escalated = true; why = `${why} → ${next === 'codex' ? 'Codex' : 'free models'} took over`; }
       } else if (dec.provider === 'openrouter') {
         r = await onFree(args, dec.shot);
-        if (dec.escalate && call.codexUsable && this._orUnusable(role, r)) { this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null, why: r?.limited ? 'the free models were limited' : 'the free models gave no usable answer' }); const o = await onPlan(args); r = o.r; via = 'codex'; escalated = true; why = `${why} The free models could not give a usable answer, so Codex did it.`; if (o.lim) this._recordUse(role, ctx, args, r, t0, via, why, { limited: true, escalated }); }
+        if (dec.escalate && call.codexUsable && this._orUnusable(role, r)) { this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null, why: r?.limited ? 'the free models were limited' : 'the free models gave no usable answer' }); const o = await onPlan(args, this._tierModel(role, 99)); r = o.r; via = 'codex'; escalated = true; why = `${why} The free models could not give a usable answer, so Codex did it.`; if (o.lim) this._recordUse(role, ctx, args, r, t0, via, why, { limited: true, escalated }); }
       } else {
-        const o = await onPlan(args); r = o.r;
+        // a role may start on an older, cheaper Codex model and step up on each retry (cfg.agents.tiers); the model that did the work is what gets recorded
+        const tier = this._tierModel(role, call.attempt); const o = await onPlan(args, tier); r = o.r; if (tier && r) { r = { ...r, model: r.model ?? tier }; const t = this._tiers()[role]; why = `${why}; model ${tier}${t.length > 1 ? ` (step ${Math.min(call.attempt, t.length)} of ${t.length})` : ''}`; }
         // the plan ran out in the middle of this call: if the free models may stand in, do the same job on them instead of failing it
         if (o.lim && this._fallbackCovers(role)) { this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await onFree(args, JUDGES.has(role)); via = 'openrouter'; escalated = true; why = `${why} → Codex limit: the free models carried on`; }
         else if (o.lim && this._localCovers(role)) { this._audit({ what: 'local', action: 'fallback', role, project: ctx.project ?? null }); r = await onLocal(args, JUDGES.has(role)); via = 'local'; escalated = true; why = `${why} → Codex limit: local models carried on`; }
@@ -84,12 +91,13 @@ export const delegationMethods = {
     const pol = this._policy(); const or = this._orConf(); const key = !!this._orKey(); const limited = !!this.planLimit();
     const ls = this._localState('builder', false);
     const roles = Object.fromEntries(ROLE_KEYS.map((role) => { const eff = effectiveRoute(role, pol); const d = decide({ role, mode: pol.mode, routes: pol.routes, size: 'S', attempt: 1, orUsable: or.enabled && key, orReady: true, orRemaining: null, planLimited: limited, codexUsable: !limited, localUsable: ls.usable, localReady: ls.ready }); return [role, { route: eff.route, source: eff.source, why: eff.why ?? null, default: DEFAULT_ROUTES[role]?.route ?? 'codex', defaultWhy: DEFAULT_ROUTES[role]?.why ?? null, judge: JUDGES.has(role), first: d.provider, firstWhy: d.why }]; }));
-    return { mode: pol.mode, modes: MODES, routes: pol.routes, roles, openrouterReady: or.enabled && key, localEnabled: this._localConf().enabled, localReady: ls.ready, codexLimited: limited, usage: this.usageByProvider(7) };
+    return { mode: pol.mode, modes: MODES, routes: pol.routes, roles, tiers: this._tiers(), openrouterReady: or.enabled && key, localEnabled: this._localConf().enabled, localReady: ls.ready, codexLimited: limited, usage: this.usageByProvider(7) };
   },
   setAgentPolicy(patch = {}) {
     const next = { ...(this.cfg.agents ?? {}) }; const before = JSON.stringify(this._policy());
     if (patch.mode !== undefined) { if (!MODES.includes(patch.mode)) throw bad(`mode must be one of ${MODES.join(', ')}`); next.mode = patch.mode; }
     if (patch.routes !== undefined) { if (!patch.routes || typeof patch.routes !== 'object') throw bad('routes must map a role to codex, openrouter or auto'); const routes = { ...(next.routes ?? {}) }; for (const [r, v] of Object.entries(patch.routes)) { if (!ROLE_KEYS.includes(r)) throw bad(`Unknown role "${r}"`); if (v === null || v === '' || v === 'default') delete routes[r]; else if (ROUTES.includes(v)) routes[r] = v; else throw bad(`The route for ${r} must be codex, openrouter, auto (or default to clear it)`); } next.routes = routes; }
+    if (patch.tiers !== undefined) { if (!patch.tiers || typeof patch.tiers !== 'object') throw bad('tiers must map a role to a list of Codex models'); const tiers = { ...(next.tiers ?? {}) }; for (const [r, v] of Object.entries(patch.tiers)) { if (!ROLE_KEYS.includes(r)) throw bad(`Unknown role "${r}"`); if (v === null || (Array.isArray(v) && !v.length)) { delete tiers[r]; continue; } if (!Array.isArray(v) || v.length > 3 || v.some((m) => !/^[A-Za-z0-9._-]{1,60}$/.test(String(m)))) throw bad('Each role takes up to three Codex model names, cheapest first'); tiers[r] = v.map(String); } next.tiers = tiers; }
     this.cfg.agents = next; this._persist(); this._audit({ what: 'agent-policy', from: JSON.parse(before), to: this._policy() }); return this.agentPolicy();
   },
   // The accounting for the Usage page: what each agent and model used and when, what the limits did, and the credit position.

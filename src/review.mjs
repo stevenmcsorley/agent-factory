@@ -34,6 +34,9 @@ export async function changeDiff(dir, max = 60_000) {
   return r.out.length > max ? `${r.out.slice(0, max)}\n…(diff truncated at ${max} characters; read the files for the rest)` : r.out;
 }
 
+// The same diff, read without leaving anything staged (other steps look at the working tree as the agent left it).
+export async function peekDiff(dir, max = 400_000) { try { return await changeDiff(dir, max); } finally { await run('git', ['reset', '-q'], { cwd: dir }).catch(() => null); } }
+
 // A throwaway copy for the reviewer (dependencies and build output left out).
 export function copyWorkspace(ws) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-review-'));
