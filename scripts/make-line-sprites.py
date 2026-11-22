@@ -45,9 +45,26 @@ pr = paint(SRC, (1272, 300, 1352, 357), BG_DARK); emit('press', key(pr.crop((122
 emit('parcel', key(SRC.crop((1274, 304, 1350, 362)), lo=30, hi=52), (1274, 304, 1350, 362))
 # hopper with its front panel cut away so parcels can pile up from the bottom inside it
 hop = key(SRC.crop((18, 194, 264, 402))); hop = hole(hop, [(48, 254), (212, 254), (173, 338), (87, 338)], (18, 194)); emit('hopper', hop, (18, 194, 264, 402))
-# robot: the base stays; the arm is cut away above the shoulder so it can swing
-emit('robot-base', key(SRC.crop((708, 336, 812, 394))), (708, 336, 812, 394))
-emit('robot-arm', key(SRC.crop((704, 196, 842, 340))), (704, 196, 842, 340))
+# robot: cut into its real parts so each bends at its own joint: the base (with the shoulder's stalk), the lower arm (shoulder ball to elbow ball), the upper arm (to the wrist ball) and the wrist with its gripper.
+# Joints in artwork pixels: shoulder (772, 317), elbow (731, 263), wrist (804, 227).
+from PIL import ImageDraw
+def part(box, shapes_in, shapes_out=()):
+    """Key the crop, then keep only what lies inside the shapes (polygons or circles, artwork coordinates) and not inside the ones to cut out; the edge is feathered by a pixel."""
+    rgba = key(SRC.crop(box)); w, h = rgba.size; m = Image.new('L', (w * 4, h * 4), 0); d = ImageDraw.Draw(m)
+    def draw(sh, fill):
+        if sh[0] == 'c': _, cx, cy, r = sh; d.ellipse([(cx - r - box[0]) * 4, (cy - r - box[1]) * 4, (cx + r - box[0]) * 4, (cy + r - box[1]) * 4], fill=fill)
+        else: d.polygon([((x - box[0]) * 4, (y - box[1]) * 4) for x, y in sh[1]], fill=fill)
+    for sh in shapes_in: draw(sh, 255)
+    for sh in shapes_out: draw(sh, 0)
+    m = m.resize((w, h), Image.LANCZOS); a = np.asarray(rgba).copy(); a[..., 3] = (a[..., 3].astype(np.float32) * np.asarray(m).astype(np.float32) / 255).astype(np.uint8); return Image.fromarray(a)
+S1, S2, S3 = (772, 317), (731, 263), (804, 227)
+wrist_poly = ('p', [(797, 238), (830, 238), (848, 262), (848, 312), (798, 312), (797, 262)])
+lower_in = [('c', S1[0], S1[1], 14), ('c', S2[0], S2[1], 15), ('p', [(716, 262), (746, 252), (752, 268), (786, 300), (786, 318), (758, 322), (724, 292), (716, 280)])]
+upper_in = [('p', [(738, 226), (770, 218), (794, 206), (818, 206), (822, 232), (800, 240), (762, 254), (744, 262)]), ('c', S3[0], S3[1], 17)]
+emit('robot-base', part((708, 316, 812, 394), [('p', [(708, 316), (812, 316), (812, 394), (708, 394)])], [('c', S1[0], S1[1], 14)]), (708, 316, 812, 394))
+emit('robot-lower', part((700, 244, 800, 334), lower_in), (700, 244, 800, 334))
+emit('robot-upper', part((730, 200, 830, 266), upper_in, [('c', S2[0], S2[1], 15)]), (730, 200, 830, 266))
+emit('robot-wrist', part((790, 226, 856, 316), [wrist_poly], [('c', S3[0], S3[1], 17)]), (790, 226, 856, 316))
 # shipped bin: frame (interior painted dark so it becomes see-through) and the stack of trays on their own
 bn = paint(SRC, (1462, 224, 1628, 388), BG_DARK); emit('bin-frame', key(bn.crop((1436, 198, 1652, 414))), (1436, 198, 1652, 414))
 emit('bin-trays', key(SRC.crop((1462, 232, 1630, 386)), lo=26, hi=50), (1462, 232, 1630, 386))

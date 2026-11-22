@@ -44,15 +44,27 @@ export const SPRITES = {
  ],
  "robot-base": [
   708,
-  336,
+  316,
   812,
   394
  ],
- "robot-arm": [
-  704,
-  196,
-  842,
-  340
+ "robot-lower": [
+  700,
+  244,
+  800,
+  334
+ ],
+ "robot-upper": [
+  730,
+  200,
+  830,
+  266
+ ],
+ "robot-wrist": [
+  790,
+  226,
+  856,
+  316
  ],
  "bin-frame": [
   1436,
