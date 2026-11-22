@@ -583,3 +583,7 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 .modegrid.four { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .hwnote { display: flex; gap: 10px; align-items: flex-start; } .remote-tag { color: var(--amber); }
 .fieldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; } .fieldgrid label { display: grid; gap: 4px; } .fieldgrid label > span { font: 600 12px var(--mono); letter-spacing: .04em; color: var(--muted); } .fieldgrid input, .fieldgrid select { width: 100%; }
 .note.hwnote { display: flex; gap: 10px; align-items: flex-start; } .note.hwnote > svg { flex: none; margin-top: 2px; }
+
+/* improvements */
+.idea { border: 1px solid var(--line-2); background: var(--panel); padding: 14px 16px; margin: 0 0 12px; } .idea.applied { border-left: 3px solid var(--green); } .idea.dismissed { opacity: .65; } .idea h3 { margin: 0; font-size: 16px; } .idea textarea { width: 100%; box-sizing: border-box; margin: 6px 0 2px; font: 13px/1.5 var(--mono); }
+.examples { margin: 6px 0; padding-left: 18px; display: grid; gap: 4px; } .problems { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; } .problems .prow { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 4px; } .good { color: var(--green); } .row.wrap { flex-wrap: wrap; gap: 6px; }

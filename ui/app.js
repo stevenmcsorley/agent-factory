@@ -1,6 +1,7 @@
 import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim, openStream } from './lib.js';
 import { agentsPage } from './agents.js';
 import { usagePage } from './usage.js';
+import { improvePage } from './improve.js';
 import { overview, inboxPage, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 import { library } from './library.js';
 import { portfolio } from './portfolio.js';
@@ -10,12 +11,12 @@ import { settings } from './settings.js';
 import { skillsPage } from './skills.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^agents(?:\/([a-z]+))?$/, agentsPage, 'agents'], [/^usage$/, usagePage, 'usage'], [/^openrouter$/, { load: async () => { location.hash = '#/agents/free'; return {}; }, draw: () => [] }, 'agents'], [/^skills$/, skillsPage, 'settings'], [/^new$/, newProject, 'studio']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^agents(?:\/([a-z]+))?$/, agentsPage, 'agents'], [/^usage$/, usagePage, 'usage'], [/^improve$/, improvePage, 'improve'], [/^openrouter$/, { load: async () => { location.hash = '#/agents/free'; return {}; }, draw: () => [] }, 'agents'], [/^skills$/, skillsPage, 'settings'], [/^new$/, newProject, 'studio']];
 // The menu is grouped so the top bar stays calm: three things you use all day, then three menus. A narrow screen shows everything in one scrolling row.
 const NAV_GROUPS = [
   { k: 'overview', href: '#/', name: 'Control room' }, { k: 'inbox', href: '#/inbox', name: 'Inbox' }, { k: 'runs', href: '#/runs', name: 'Orders' },
   { group: 'projects', name: 'Projects', items: [['portfolio', '#/portfolio', 'Portfolio', 'All projects at a glance'], ['studio', '#/studio', 'Studio', 'Start a new project'], ['library', '#/library', 'Library', 'Code shared between projects'], ['scenarios', '#/scenarios', 'Scenarios', 'Ready-made workflows']] },
-  { group: 'agents', name: 'Agents', items: [['agents', '#/agents', 'Agents and models', 'Who does the work, and the settings'], ['usage', '#/usage', 'Usage', 'What was used, when, and limits']] },
+  { group: 'agents', name: 'Agents', items: [['agents', '#/agents', 'Agents and models', 'Who does the work, and the settings'], ['usage', '#/usage', 'Usage', 'What was used, when, and limits'], ['improve', '#/improve', 'Improvements', 'What keeps going wrong, and fixes to approve']] },
   { group: 'system', name: 'System', items: [['connect', '#/connect', 'Connect', 'Link Claude and other tools'], ['health', '#/health', 'Health', 'Checks that everything works'], ['settings', '#/settings', 'Settings', 'Limits, alerts and autonomy']] },
 ];
 const NAV = NAV_GROUPS.flatMap((g) => (g.group ? g.items.map(([k, href, name]) => [k, href, name]) : [[g.k, g.href, g.name]]));
