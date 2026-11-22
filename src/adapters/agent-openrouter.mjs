@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const LOCAL_NOTE = ['Every request counts against a small daily allowance, so work efficiently:', 'Every request is slow on this machine, so work efficiently:'];
 const SYSTEM = `You are an autonomous software engineer working in a git repository checked out in the current directory. Use the tools to look around, read and search files, edit files and run commands (for example the project's tests). Paths are relative to the repository root.
 Every request counts against a small daily allowance, so work efficiently: you may make SEVERAL tool calls in one reply (for example read several files at once), and combine shell commands. Keep going until the task is done. Do not run git commit or git push (the harness does that). Never print or write secrets. When the task is finished, reply with a short plain-text summary and NO tool call. If the task asks for a specific reply format (for example a JSON object), your final reply must be exactly that.`;
 const TOOLS = [
@@ -36,9 +37,9 @@ export async function runTool(name, args, { root, sandbox, ws, timeoutMs, image 
   return `Unknown tool: ${name}`;
 }
 
-const limitedResult0 = (until) => ({ out: `You've hit your usage limit: every OpenRouter free model is resting right now. Try again at ${clockOf(until ?? Date.now() + 10 * 60_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true });
-export function openrouterAgent({ router, client, role = 'builder', project = null, maxSteps = 40, minGapMs = 3200, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), onEvent } = {}) {
-  return { name: 'openrouter', info: { model: 'auto (OpenRouter free models)', reasoningEffort: null },
+const limitedResult0 = (until, label = 'OpenRouter free model') => ({ out: `You've hit your usage limit: every ${label} is resting right now. Try again at ${clockOf(until ?? Date.now() + 10 * 60_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true });
+export function openrouterAgent({ router, client, role = 'builder', project = null, maxSteps = 40, minGapMs = 3200, name = 'openrouter', local = false, label = 'OpenRouter free model', modelLabel = 'auto (OpenRouter free models)', sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), onEvent } = {}) {
+  return { name, info: { model: modelLabel, reasoningEffort: null },
     async run(sandbox, ws, prompt, { timeoutMs = 900_000, meta = {} } = {}) {
       const deadline = now() + timeoutMs; const budget = router.budget?.(); const free = !router.config?.().allowPaid;
       // One request, no tools: the whole job is in the prompt (a review of a diff). Cheap, and all a free allowance can afford many times a day.
@@ -49,12 +50,12 @@ export function openrouterAgent({ router, client, role = 'builder', project = nu
           const res = await client.chat({ model: pick.id, messages: [{ role: 'system', content: 'You are a careful reviewer. No tools or files are available: judge only from what the user message contains. Reply exactly in the format asked for.' }, { role: 'user', content: String(prompt) }], maxTokens: 2500 });
           if (!res.ok) { router.noteFail(pick.id, res.error, { ms: res.ms, role, project, ref: meta.ref }); onEvent?.({ type: 'fail', model: pick.id, kind: res.error.kind, message: res.error.message }); skip1.add(pick.id); if (res.error.kind === 'auth') break; continue; }
           router.noteOk(pick.id, { ms: res.ms, usage: res.usage, role, project, ref: meta.ref }); used1.push(pick.id); for (const x of ['input', 'output', 'cached', 'reasoning']) tk[x] += res.usage[x]; return { out: stripThink(text(res.message.content)), costUsd: 0, tokens: tk, model: pick.id, models: used1 }; }
-        return limitedResult0(router.nextReady({ role, need: { tools: false } }));
+        return limitedResult0(router.nextReady({ role, need: { tools: false } }), label);
       }
       // a tool-using task needs a fair number of requests: do not start one the allowance cannot finish (it would die half-way)
       if (free && budget?.remaining !== null && budget?.remaining < 8) return { out: `You've hit your usage limit: too little of today's free OpenRouter allowance is left to finish a task (${budget.remaining} requests). Try again at ${clockOf(router.nextReady({ role, need: { tools: true } }) ?? now() + 3_600_000)}.`, costUsd: 0, tokens: { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }, model: null, models: [], limited: true };
-      const messages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: String(prompt) }]; const tok = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }; const used = []; const tried = new Set(); let lastModel = null; let badRun = 0; let nudged = false;
-      const need = { tools: true }; const limitedResult = (until) => ({ out: `You've hit your usage limit: every OpenRouter free model is resting right now. Try again at ${clockOf(until ?? now() + 10 * 60_000)}.`, costUsd: 0, tokens: tok, model: lastModel, models: used, limited: true });
+      const messages = [{ role: 'system', content: local ? SYSTEM.replace(LOCAL_NOTE[0], LOCAL_NOTE[1]) : SYSTEM }, { role: 'user', content: String(prompt) }]; const tok = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 }; const used = []; const tried = new Set(); let lastModel = null; let badRun = 0; let nudged = false;
+      const need = { tools: true }; const limitedResult = (until) => ({ out: `You've hit your usage limit: every ${label} is resting right now. Try again at ${clockOf(until ?? now() + 10 * 60_000)}.`, costUsd: 0, tokens: tok, model: lastModel, models: used, limited: true });
       for (let step = 0; step < maxSteps + 5; step++) {
         if (now() > deadline) return { out: 'Stopped: the time limit was reached.', costUsd: 0, tokens: tok, model: lastModel, models: used, timedOut: true };
         // a model for this step: the best one that is ready; on a failure the next one, until one answers or none is left

@@ -29,13 +29,13 @@ export function splitBar(parts, { empty = 'Nothing yet' } = {}) {
 }
 
 // Stacked columns, one per day. days: [{ day, a, b }] where a and b are numbers; classes name the two series.
-export function dayBars(days, { height = 150, aClass = 'a', bClass = 'b', aLabel = 'A', bLabel = 'B', format = compact } = {}) {
-  const w = 640, pad = { l: 40, r: 8, t: 10, b: 24 }; const max = Math.max(1, ...days.map((d) => d.a + d.b)); const bw = (w - pad.l - pad.r) / Math.max(1, days.length); const ih = height - pad.t - pad.b;
+export function dayBars(days, { height = 150, aClass = 'a', bClass = 'b', cClass = 'c', aLabel = 'A', bLabel = 'B', cLabel = null, format = compact } = {}) {
+  const w = 640, pad = { l: 40, r: 8, t: 10, b: 24 }; const max = Math.max(1, ...days.map((d) => d.a + d.b + (d.c ?? 0))); const bw = (w - pad.l - pad.r) / Math.max(1, days.length); const ih = height - pad.t - pad.b;
   const ticks = [0, 0.5, 1].map((f) => ({ y: pad.t + ih * (1 - f), v: max * f }));
   return s('svg', { viewBox: `0 0 ${w} ${height}`, class: 'daybars', role: 'img', 'aria-label': `${aLabel} and ${bLabel} per day` }, s('title', {}, `${aLabel} and ${bLabel} per day`),
     ...ticks.map((t) => s('g', {}, s('line', { x1: pad.l, x2: w - pad.r, y1: t.y, y2: t.y, class: 'grid' }), s('text', { x: pad.l - 6, y: t.y + 3, class: 'axis', 'text-anchor': 'end' }, format(t.v)))),
-    ...days.map((d, i) => { const x = pad.l + i * bw + bw * 0.18, ww = bw * 0.64; const hb = (d.b / max) * ih, ha = (d.a / max) * ih; const yb = pad.t + ih - hb, ya = yb - ha; const label = dayLabel(d.day);
-      return s('g', { class: 'daycol' }, s('title', {}, `${label}: ${aLabel} ${format(d.a)}, ${bLabel} ${format(d.b)}`), s('rect', { x, y: pad.t, width: ww, height: ih, class: 'hit', fill: 'transparent' }), hb > 0 ? s('rect', { x, y: yb, width: ww, height: hb, class: bClass, rx: 2 }) : null, ha > 0 ? s('rect', { x, y: ya, width: ww, height: ha, class: aClass, rx: 2 }) : null,
+    ...days.map((d, i) => { const x = pad.l + i * bw + bw * 0.18, ww = bw * 0.64; const hb = (d.b / max) * ih, ha = (d.a / max) * ih, hc = ((d.c ?? 0) / max) * ih; const yb = pad.t + ih - hb, ya = yb - ha, yc = ya - hc; const label = dayLabel(d.day);
+      return s('g', { class: 'daycol' }, s('title', {}, `${label}: ${aLabel} ${format(d.a)}, ${bLabel} ${format(d.b)}${cLabel ? `, ${cLabel} ${format(d.c ?? 0)}` : ''}`), s('rect', { x, y: pad.t, width: ww, height: ih, class: 'hit', fill: 'transparent' }), hb > 0 ? s('rect', { x, y: yb, width: ww, height: hb, class: bClass, rx: 2 }) : null, ha > 0 ? s('rect', { x, y: ya, width: ww, height: ha, class: aClass, rx: 2 }) : null, hc > 0 ? s('rect', { x, y: yc, width: ww, height: hc, class: cClass, rx: 2 }) : null,
         s('text', { x: x + ww / 2, y: height - 8, class: 'axis', 'text-anchor': 'middle' }, days.length > 14 ? (i % 3 === 0 ? label.split(' ')[1] : '') : label)); }).filter(Boolean));
 }
 

@@ -541,7 +541,7 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 .lineart .ln-title { font: 800 31px var(--display); letter-spacing: .14em; fill: #f3f0e9; } .lineart .ln-name { font: 800 29px var(--display); letter-spacing: .12em; fill: #ebe8e0; transition: fill .3s; } .lineart .ln-name.on { fill: #ffb08a; }
 .lineart .ln-big { font: 900 112px var(--display); fill: #f6f3ec; letter-spacing: -.01em; } .lineart .ln-big.ship { fill: #3be0a1; filter: drop-shadow(0 0 12px rgba(59,224,161,.35)); } .lineart .ln-label { font: 700 21px var(--display); letter-spacing: .12em; fill: #d9d6cf; } .lineart .ln-sep { stroke: #34363b; stroke-width: 2; }
 .lineart .ln-glyph { color: #cfccc5; transition: color .3s; } .lineart .ln-glyph.on { color: #ff8a4c; } .lineart .ln-glyph.ic, .lineart .ln-glyph.ic * { stroke-width: 1.5; }
-.lineart .ln-part-label { font: 700 15px var(--mono); fill: #f6f2e8; paint-order: stroke; stroke: #0e0f11; stroke-width: 4px; stroke-linejoin: round; } .lineart .ln-pausewash { fill: rgba(240,180,41,.18); } .lineart .ln-paused { font: 900 44px var(--display); letter-spacing: .2em; fill: #f0b429; }
+.lineart .ln-part-label { font: 700 14px var(--mono); fill: #f6f2e8; paint-order: stroke; stroke: #0e0f11; stroke-width: 4px; stroke-linejoin: round; } .lineart .ln-pausewash { fill: rgba(240,180,41,.18); } .lineart .ln-paused { font: 900 44px var(--display); letter-spacing: .2em; fill: #f0b429; }
 .lineart .ln-pile { opacity: 0; transition: opacity .5s; } .lineart .ln-pile.show { opacity: 1; } .lineart .ln-bin-glow { fill: none; stroke: #3be0a1; stroke-width: 3; stroke-opacity: 0; transition: stroke-opacity .6s; } .lineart.shipping .ln-bin-glow { stroke-opacity: .45; filter: drop-shadow(0 0 10px #3be0a1); }
 .lineart .ln-station image { transition: filter .4s; } .lineart .ln-station.on image { filter: brightness(1.13); }
 .lineart .l-part-g .bob { transform-box: fill-box; transform-origin: 50% 100%; } .lineart .l-labels .l-part-g { transition: transform .95s cubic-bezier(.45, 0, .2, 1), opacity .5s ease; }
@@ -577,3 +577,8 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 .lineart .at-pr.bob { animation: ln-squash 2.8s ease-in-out .9s infinite; } @keyframes ln-squash { 0%, 26% { transform: scaleY(1); } 34%, 52% { transform: scaleY(.9); } 66%, 100% { transform: scaleY(1); } }
 .lineart .at-pr .p-tape { animation: ln-tape 2.8s linear .9s infinite; } @keyframes ln-tape { 0%, 40% { opacity: 0; } 52%, 100% { opacity: .85; } }
 @media (prefers-reduced-motion: reduce) { .lineart *, .lineart { animation: none !important; } }
+
+/* local models: a third provider colour, and a three-card overview */
+:root { --local: #b48cf2; } .splitbar i.local, .splitlegend i.local, .daybars .local { background: var(--local); fill: var(--local); } .threecol { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; } .threecol > .card { margin: 0; }
+.modegrid.four { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } .hwnote { display: flex; gap: 10px; align-items: flex-start; } .remote-tag { color: var(--amber); }
+.fieldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0; } .fieldgrid label { display: grid; gap: 4px; } .fieldgrid label > span { font: 600 12px var(--mono); letter-spacing: .04em; color: var(--muted); } .fieldgrid input, .fieldgrid select { width: 100%; }

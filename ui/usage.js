@@ -5,7 +5,7 @@ import { gauge, splitBar, dayBars, timeline, chip, compact, percent, money, cloc
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
 const head = (title, sub, ...right) => h('div', { class: 'page-head between' }, h('div', {}, h('h1', {}, title), sub ? h('p', { class: 'sub' }, sub) : null), right.length ? h('div', { class: 'row' }, ...right) : null);
-const PROVIDER = { codex: 'Codex', openrouter: 'Free models', none: 'Not run' };
+const PROVIDER = { codex: 'Codex', openrouter: 'Free models', local: 'Local models', none: 'Not run' };
 const OUTCOME = { ok: ['solid', 'Done'], escalated: ['warn', 'Handed to Codex'], limited: ['bad', 'Hit a limit'], 'not run': ['', 'Could not run'] };
 const EVENT_ICON = { 'codex-limit': 'alert', 'codex-resume': 'play', fallback: 'spark', escalation: 'refresh', policy: 'plug', 'free-rest': 'clock', 'free-daily': 'alert', 'free-down': 'alert' };
 const RANGES = [[1, 'Last 24 hours'], [7, '7 days'], [30, '30 days']];
@@ -24,13 +24,14 @@ function tiles(a) {
   const cells = [[t.calls, 'jobs run', 'Every time an agent was asked to do something.'], [compact(t.input), 'tokens read', 'Tokens are the small pieces of text (about three quarters of a word) an AI model reads or writes. Providers measure usage in tokens. "Read" is what the agent was shown, including what it re-read.'],
     [compact(t.output), 'tokens written', 'What the agents wrote back: code, reviews, plans.'], [percent(t.freeShare), 'done by free models', 'Share of the work, measured by cost. Free models cost nothing but count towards the share so you can see how much Codex usage they save.'],
     [a.events.filter((e) => e.kind === 'codex-limit').length, 'times Codex ran out', 'How often the Codex plan hit its usage limit in this period.'], [t.escalated, 'jobs a free model could not do', 'The free model could not give a usable answer, so Codex did the job instead.']];
+  if (a.byProvider.local.calls) cells.splice(4, 0, [percent(t.localShare), 'done on this machine', 'Share of the work done by local models: free and private, but slower.']);
   return h('div', { class: 'kpis' }, cells.map(([n, label, help]) => h('div', { class: 'kpi', title: help }, h('b', {}, String(n)), h('span', {}, label))));
 }
 
 function daysCard(a) {
-  const days = a.byDay.map((d) => ({ day: d.day, a: d.codex.input + d.codex.output, b: d.openrouter.input + d.openrouter.output }));
-  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Day by day'), h('div', { class: 'splitlegend' }, h('span', {}, h('i', { class: 'codex' }), 'Codex'), h('span', {}, h('i', { class: 'free' }), 'Free models'))),
-    dayBars(days, { aClass: 'codex', bClass: 'free', aLabel: 'Codex', bLabel: 'Free models', height: 170 }), h('p', { class: 'muted small' }, 'Tokens read and written each day. A quiet day shows as an empty slot.'));
+  const days = a.byDay.map((d) => ({ day: d.day, a: d.codex.input + d.codex.output, b: d.openrouter.input + d.openrouter.output, c: d.local.input + d.local.output })); const local = a.byProvider.local.calls > 0;
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('pulse', 17), 'Day by day'), h('div', { class: 'splitlegend' }, h('span', {}, h('i', { class: 'codex' }), 'Codex'), h('span', {}, h('i', { class: 'free' }), 'Free models'), local ? h('span', {}, h('i', { class: 'local' }), 'Local models') : null)),
+    dayBars(days, { aClass: 'codex', bClass: 'free', cClass: 'local', aLabel: 'Codex', bLabel: 'Free models', cLabel: local ? 'Local models' : null, height: 170 }), h('p', { class: 'muted small' }, 'Tokens read and written each day. A quiet day shows as an empty slot.'));
 }
 
 // Zoom the strip to where the events are (padded), so a week with one busy day is not a row of overlapping dots in the last corner.
@@ -52,17 +53,17 @@ function limitsCard(a) {
 
 function modelsCard(a) {
   if (!a.byModel.length) return null;
-  const rows = a.byModel.map((m) => { const reread = m.input ? m.cached / m.input : 0; return h('tr', {}, h('td', {}, chip(m.provider === 'openrouter' ? 'ok' : 'off', PROVIDER[m.provider]), h('div', { class: 'small mono' }, m.model.length > 34 ? `${m.model.slice(0, 33)}…` : m.model)), h('td', { class: 'tnum' }, String(m.calls)), h('td', { class: 'tnum' }, compact(m.input)), h('td', { class: 'tnum' }, compact(m.output)),
+  const rows = a.byModel.map((m) => { const reread = m.input ? m.cached / m.input : 0; return h('tr', {}, h('td', {}, chip(m.provider === 'openrouter' || m.provider === 'local' ? 'ok' : 'off', PROVIDER[m.provider]), h('div', { class: 'small mono' }, m.model.length > 34 ? `${m.model.slice(0, 33)}…` : m.model)), h('td', { class: 'tnum' }, String(m.calls)), h('td', { class: 'tnum' }, compact(m.input)), h('td', { class: 'tnum' }, compact(m.output)),
     h('td', { class: 'tnum' }, m.input ? percent(reread) : '–'), h('td', { class: 'tnum' }, m.steps ? String(m.avgSteps) : '–'), h('td', { class: 'tnum' }, m.tokensPerStep != null ? compact(m.tokensPerStep) : '–'), h('td', { class: 'tnum' }, m.toolFailures ? h('span', { class: 'bad' }, String(m.toolFailures)) : '0'), h('td', { class: 'tnum' }, m.avgMs ? `${(m.avgMs / 1000).toFixed(1)}s` : '–'), h('td', { class: 'tnum' }, m.limited ? String(m.limited) : '–'), h('td', { class: 'small muted' }, m.last ? ago(m.last) : '–')); });
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'By model'), h('span', { class: 'muted small' }, 'Use the tool-call columns to see which models work efficiently')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('Model'), th('Jobs'), th('Read', 'Tokens the model was shown, including text it re-read.'), th('Written', 'Tokens the model wrote.'), th('Re-read', 'The share of what was read that the provider had already seen and charges a tenth for. High is good.'), th('Steps per job', 'Steps are actions an agent takes with its tools: read a file, search, edit, run a command. Fewer steps for the same result means a more efficient model.'), th('Read per step', 'How much text is read on each step. High numbers mean each step re-reads a lot.'), th('Bad tool calls', 'Times the model asked to use a tool in a way that could not be run.'), th('Avg time', 'Average time per job.'), th('Limited', 'Jobs that stopped because of a limit.'), th('Last used')]))
     , h('tbody', {}, ...rows))));
 }
 
 function rolesCard(a) {
-  if (!a.byRole.length) return null; const maxW = Math.max(1, ...a.byRole.map((r) => r.codex.weighted + r.openrouter.weighted));
-  return card(h('div', { class: 'card-h' }, h('h2', {}, 'By agent'), h('span', { class: 'muted small' }, 'Which provider each agent used')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('Agent'), th('Codex jobs'), th('Codex tokens'), th('Free jobs'), th('Free tokens'), th('Split', 'Blue is Codex, green is free models, measured by cost.')])),
-    h('tbody', {}, ...a.byRole.map((r) => { const w = r.codex.weighted + r.openrouter.weighted; return h('tr', {}, h('td', {}, h('b', {}, r.role)), h('td', { class: 'tnum' }, String(r.codex.calls)), h('td', { class: 'tnum' }, compact(r.codex.input + r.codex.output)), h('td', { class: 'tnum' }, String(r.openrouter.calls)), h('td', { class: 'tnum' }, compact(r.openrouter.input + r.openrouter.output)),
-      h('td', { class: 'splitcell' }, splitBar([{ label: 'Codex', value: r.codex.weighted, cls: 'codex' }, { label: 'Free', value: r.openrouter.weighted, cls: 'free' }]), h('i', { class: 'scale', style: { width: `${(100 * w) / maxW}%` } }))); })))));
+  if (!a.byRole.length) return null; const maxW = Math.max(1, ...a.byRole.map((r) => r.codex.weighted + r.openrouter.weighted + r.local.weighted));
+  return card(h('div', { class: 'card-h' }, h('h2', {}, 'By agent'), h('span', { class: 'muted small' }, 'Which provider each agent used')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, [th('Agent'), th('Codex jobs'), th('Codex tokens'), th('Free jobs'), th('Free tokens'), th('Split', 'Blue is Codex, green is free models, purple is local models, measured by cost.')])),
+    h('tbody', {}, ...a.byRole.map((r) => { const w = r.codex.weighted + r.openrouter.weighted + r.local.weighted; return h('tr', {}, h('td', {}, h('b', {}, r.role)), h('td', { class: 'tnum' }, String(r.codex.calls)), h('td', { class: 'tnum' }, compact(r.codex.input + r.codex.output)), h('td', { class: 'tnum' }, String(r.openrouter.calls)), h('td', { class: 'tnum' }, compact(r.openrouter.input + r.openrouter.output)),
+      h('td', { class: 'splitcell' }, splitBar([{ label: 'Codex', value: r.codex.weighted, cls: 'codex' }, { label: 'Free', value: r.openrouter.weighted, cls: 'free' }, ...(r.local.weighted ? [{ label: 'Local', value: r.local.weighted, cls: 'local' }] : [])]), h('i', { class: 'scale', style: { width: `${(100 * w) / maxW}%` } }))); })))));
 }
 
 function projectsCard(a) {

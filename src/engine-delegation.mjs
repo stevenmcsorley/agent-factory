@@ -31,13 +31,15 @@ export const delegationMethods = {
     const pol = this._policy(); const or = this._orConf(); const key = !!this._orKey(); const r = this.router(); const orUsable = or.enabled && key && !r.s.authFailed; const judge = JUDGES.has(role);
     const orReady = orUsable && !!r.pick({ role, need: { tools: !judge } }); const budget = r.budget(); const limited = !!this.planLimit();
     let attempt = 1; if (meta.run && (role === 'builder' || role === 'fixer')) { this._attempts ??= new Map(); attempt = (this._attempts.get(meta.run) ?? 0) + 1; this._attempts.set(meta.run, attempt); if (this._attempts.size > 500) this._attempts.delete(this._attempts.keys().next().value); }
-    return { role, mode: pol.mode, routes: pol.routes, size: this._ticketSize(ctx.project ?? meta.project, meta.ticket), attempt, orUsable, orReady, orRemaining: budget.remaining, planLimited: limited, codexUsable: !limited };
+    const ls = this._localState(role, judge); return { role, mode: pol.mode, routes: pol.routes, size: this._ticketSize(ctx.project ?? meta.project, meta.ticket), attempt, orUsable, orReady, orRemaining: budget.remaining, planLimited: limited, codexUsable: !limited, localUsable: ls.usable, localReady: ls.ready };
   },
   // Can OpenRouter stand in for this role while the plan is limited? Never in codex-only mode, and never for a role you pinned to Codex.
   _fallbackCovers(role) {
     const pol = this._policy(); if (pol.mode === 'codex') return false; if (pol.routes[role] === 'codex') return false; const or = this._orConf(); if (!or.enabled || !or.fallback.enabled || !this._orKey()) return false;
     const r = this.router(); const need = { tools: !JUDGES.has(role) }; return !r.s.authFailed && (!!r.pick({ role, need }) || !!r.nextReady({ role, need }));
   },
+  // Can local models stand in for this role when the plan runs out in the middle of a call? Never in codex-only mode, and never for a role you pinned to Codex.
+  _localCovers(role) { const pol = this._policy(); if (pol.mode === 'codex' || pol.mode === 'openrouter' || pol.routes[role] === 'codex') return false; return this._localState(role, JUDGES.has(role)).ready; },
   _fallbackAny() { return ROLE_KEYS.some((r) => this._fallbackCovers(r)); },
   _shotPrompt(prompt) { return String(prompt).replace(SHOT_LINE, 'No checkout is available: judge from the diff and context below.'); },
   // Did the free models give something the factory can use? A verdict must parse; a task must not have stopped on a limit or come back empty.
@@ -55,16 +57,22 @@ export const delegationMethods = {
     const plan = () => { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; return agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }; const base = plan();
     const onPlan = async (args) => { const r = await plan().run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim); return { r, lim }; };
     const onFree = (args, shot) => this._orAgent(role, log, ctx).run(args[0], args[1], shot ? this._shotPrompt(args[2]) : args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(shot ? { shot: true } : {}) } });
+    const onLocal = (args, shot) => this._localAgent(role, log, ctx).run(args[0], args[1], shot ? this._shotPrompt(args[2]) : args[2], { ...(args[3] ?? {}), meta: { ...(args[3]?.meta ?? {}), ...(shot ? { shot: true } : {}) } });
     return { name: base.name, info: base.info, run: async (...args) => {
-      const t0 = Date.now(); const meta = args[3]?.meta ?? {}; const call = this._delegationCtx(role, ctx, meta); const dec = decide(call); let why = dec.why; let via = dec.provider; let r; let escalated = false;
+      await this._localEnsure().catch(() => null); const t0 = Date.now(); const meta = args[3]?.meta ?? {}; const call = this._delegationCtx(role, ctx, meta); const dec = decide(call); let why = dec.why; let via = dec.provider; let r; let escalated = false;
       if (dec.provider === 'none') { r = this._noProviderResult(dec); this._recordUse(role, ctx, args, r, t0, 'none', why, { limited: true }); return r; }
-      if (dec.provider === 'openrouter') {
+      if (dec.provider === 'local') {
+        r = await onLocal(args, dec.shot); via = 'local';
+        // the local models could not give a usable answer: the next provider in line does the job (free models, then Codex)
+        for (const next of dec.chain ?? []) { if (!this._orUnusable(role, r)) break; this._audit({ what: 'local', action: 'next', role, project: ctx.project ?? null, to: next, why: r?.limited ? 'the local models were resting' : 'the local models gave no usable answer' }); if (next === 'openrouter') { r = await onFree(args, dec.shot); via = 'openrouter'; } else { const o = await onPlan(args); r = o.r; via = 'codex'; } escalated = true; why = `${why} → ${next === 'codex' ? 'Codex' : 'free models'} took over`; }
+      } else if (dec.provider === 'openrouter') {
         r = await onFree(args, dec.shot);
         if (dec.escalate && call.codexUsable && this._orUnusable(role, r)) { this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null, why: r?.limited ? 'the free models were limited' : 'the free models gave no usable answer' }); const o = await onPlan(args); r = o.r; via = 'codex'; escalated = true; why = `${why} The free models could not give a usable answer, so Codex did it.`; if (o.lim) this._recordUse(role, ctx, args, r, t0, via, why, { limited: true, escalated }); }
       } else {
         const o = await onPlan(args); r = o.r;
         // the plan ran out in the middle of this call: if the free models may stand in, do the same job on them instead of failing it
         if (o.lim && this._fallbackCovers(role)) { this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await onFree(args, JUDGES.has(role)); via = 'openrouter'; escalated = true; why = `${why} → Codex limit: the free models carried on`; }
+        else if (o.lim && this._localCovers(role)) { this._audit({ what: 'local', action: 'fallback', role, project: ctx.project ?? null }); r = await onLocal(args, JUDGES.has(role)); via = 'local'; escalated = true; why = `${why} → Codex limit: local models carried on`; }
       }
       // OpenRouter's own limit is never recorded as the plan limit: only the plan's text reaches _noteLimit (in onPlan)
       this._recordUse(role, ctx, args, r, t0, via, why, { ...(parseUsageLimit(r?.out) ? { limited: true } : {}), ...(escalated ? { escalated: true } : {}), ...(r?.models?.length ? { models: r.models } : {}) }); return r;
@@ -74,8 +82,9 @@ export const delegationMethods = {
   // ---- the policy for the UI and MCP
   agentPolicy() {
     const pol = this._policy(); const or = this._orConf(); const key = !!this._orKey(); const limited = !!this.planLimit();
-    const roles = Object.fromEntries(ROLE_KEYS.map((role) => { const eff = effectiveRoute(role, pol); const d = decide({ role, mode: pol.mode, routes: pol.routes, size: 'S', attempt: 1, orUsable: or.enabled && key, orReady: true, orRemaining: null, planLimited: limited, codexUsable: !limited }); return [role, { route: eff.route, source: eff.source, why: eff.why ?? null, default: DEFAULT_ROUTES[role]?.route ?? 'codex', defaultWhy: DEFAULT_ROUTES[role]?.why ?? null, judge: JUDGES.has(role), first: d.provider, firstWhy: d.why }]; }));
-    return { mode: pol.mode, modes: MODES, routes: pol.routes, roles, openrouterReady: or.enabled && key, codexLimited: limited, usage: this.usageByProvider(7) };
+    const ls = this._localState('builder', false);
+    const roles = Object.fromEntries(ROLE_KEYS.map((role) => { const eff = effectiveRoute(role, pol); const d = decide({ role, mode: pol.mode, routes: pol.routes, size: 'S', attempt: 1, orUsable: or.enabled && key, orReady: true, orRemaining: null, planLimited: limited, codexUsable: !limited, localUsable: ls.usable, localReady: ls.ready }); return [role, { route: eff.route, source: eff.source, why: eff.why ?? null, default: DEFAULT_ROUTES[role]?.route ?? 'codex', defaultWhy: DEFAULT_ROUTES[role]?.why ?? null, judge: JUDGES.has(role), first: d.provider, firstWhy: d.why }]; }));
+    return { mode: pol.mode, modes: MODES, routes: pol.routes, roles, openrouterReady: or.enabled && key, localEnabled: this._localConf().enabled, localReady: ls.ready, codexLimited: limited, usage: this.usageByProvider(7) };
   },
   setAgentPolicy(patch = {}) {
     const next = { ...(this.cfg.agents ?? {}) }; const before = JSON.stringify(this._policy());
@@ -93,9 +102,9 @@ export const delegationMethods = {
   async accountsCsv(days) { return accountsCsv(await this.accounts({ days, calls: 1000 })); },
   // Where the tokens went: by provider and by role, over the last few days (the number that tells you whether delegation is paying off).
   usageByProvider(days = 7) {
-    const since = Date.now() - days * 86_400_000; const sum = () => ({ calls: 0, input: 0, cached: 0, output: 0, weighted: 0, escalated: 0 }); const prov = { codex: sum(), openrouter: sum() }; const byRole = {};
-    for (const u of readUsage(this.cfg.stateDir)) { if (Date.parse(u.at) < since || u.via === 'none') continue; const p = u.via === 'openrouter' ? 'openrouter' : 'codex'; const w = (u.input - u.cached) + u.cached * 0.1 + u.output * 6;
-      for (const s of [prov[p], ((byRole[u.role] ??= { codex: sum(), openrouter: sum() })[p])]) { s.calls++; s.input += u.input; s.cached += u.cached; s.output += u.output; s.weighted += w; if (u.escalated) s.escalated++; } }
+    const since = Date.now() - days * 86_400_000; const sum = () => ({ calls: 0, input: 0, cached: 0, output: 0, weighted: 0, escalated: 0 }); const prov = { codex: sum(), openrouter: sum(), local: sum() }; const byRole = {};
+    for (const u of readUsage(this.cfg.stateDir)) { if (Date.parse(u.at) < since || u.via === 'none') continue; const p = u.via === 'openrouter' ? 'openrouter' : u.via === 'local' ? 'local' : 'codex'; const w = (u.input - u.cached) + u.cached * 0.1 + u.output * 6;
+      for (const s of [prov[p], ((byRole[u.role] ??= { codex: sum(), openrouter: sum(), local: sum() })[p])]) { s.calls++; s.input += u.input; s.cached += u.cached; s.output += u.output; s.weighted += w; if (u.escalated) s.escalated++; } }
     return { days, byProvider: prov, byRole };
   },
 };

@@ -16,7 +16,8 @@ const { Engine } = await import('../src/engine.mjs'); const { withDefaults } = a
 const KEY = 'sk-or-v1-0123456789abcdef0123456789abcdef';
 const M = (id, o = {}) => ({ id, name: id, context: 262144, free: true, tools: true, input: ['text'], output: ['text'], reasoning: true, pricing: { prompt: 0, completion: 0 }, ...o });
 async function world({ key = true, limited = false } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ua-')); const f = async (url, o) => { const ok = (b) => ({ ok: true, status: 200, text: async () => JSON.stringify(b), headers: new Map() });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ua-')); const f = async (url, o) => { const ok = (b) => ({ ok: true, status: 200, text: async () => JSON.stringify(b), headers: new Map() }); const pth = new URL(url).pathname;
+    if (pth === '/api/tags') return ok({ models: [{ name: 'llama3.1:8b', size: 4.9e9, details: { parameter_size: '8.0B' } }, { name: 'gemma3n:e4b', size: 7.5e9, details: { parameter_size: '6.9B' } }, { name: 'glm-5.1:cloud', size: 0, details: {} }] }); if (pth === '/api/show') return ok({ capabilities: ['completion', 'tools'] });
     if (url.endsWith('/models')) return ok({ data: [M('big/ultra-550b:free', { context: 1e6 }), M('mid/gemma-31b:free', { input: ['text', 'image'] }), M('acme/lfm-1.7b:free')].map((m) => ({ id: m.id, context_length: m.context, pricing: { prompt: '0', completion: '0' }, supported_parameters: ['tools', 'reasoning'], architecture: { input_modalities: m.input, output_modalities: ['text'] } })) });
     if (url.endsWith('/key')) return ok({ data: { is_free_tier: false, usage: 0, limit: 50, limit_remaining: 50 } }); if (url.endsWith('/credits')) return ok({ data: { total_credits: 10.2, total_usage: 0.15 } }); return ok({}); };
   const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [] }), { configPath: path.join(root, 'c.json'), env: {}, factories: { fetch: f } }); if (key) await e.setOpenRouterKey(KEY);
@@ -26,7 +27,7 @@ async function world({ key = true, limited = false } = {}) {
   e._audit({ what: 'openrouter', action: 'fallback', role: 'builder', project: 'close-joinery' }); e.router().noteFail('mid/gemma-31b:free', { kind: 'rate-limit', message: 'upstream' });
   return e;
 }
-const load = async (e, tab) => ({ tab, policy: e.agentPolicy(), or: e.openrouterStatus(), settings: e.settings(), status: e.status(), acc: await e.accounts({ days: 7, calls: 50 }), agents: [{ role: 'builder', project: 'close-joinery', what: 'writing the code' }], roles: e.roles(), setups: e.presets(), codex: { limited: e.planLimit(), backIn: e.planLimit() ? '3 h' : null } });
+const load = async (e, tab) => ({ tab, policy: e.agentPolicy(), or: e.openrouterStatus(), local: e.localStatus(), settings: e.settings(), status: e.status(), acc: await e.accounts({ days: 7, calls: 50 }), agents: [{ role: 'builder', project: 'close-joinery', what: 'writing the code' }], roles: e.roles(), setups: e.presets(), codex: { limited: e.planLimit(), backIn: e.planLimit() ? '3 h' : null } });
 const text = (nodes) => nodes.map((n) => n.textContent).join(' ').replace(/\s+/g, ' ');
 const JARGON = [/weighted/i, /escalat/i, /tool call/i, /\bshot\b/i, /\bprior\b/i, /is fine right now/i, /\bdelegat/i, /OpenRouter agent/, /\bwrapper\b/i, /\bpolicy\b/i];
 
@@ -79,4 +80,17 @@ test('usage: the accounting page draws with its numbers, limits and resets in wo
 test('usage with nothing yet draws without error and says so', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ue-')); const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [] }), { configPath: path.join(root, 'c.json'), env: {}, factories: {} });
   const t = text(usagePage.draw({ a: await e.accounts({ days: 7, calls: 50 }) }, { rerender() {} })); assert.match(t, /No agent has run in this period yet/);
+});
+
+test('local models: the tab says what this machine can run, lists the models with plain states (ready, resting, too big, cloud-hosted), and the rest of the pages offer them once switched on', async () => {
+  const e = await world(); const off = text(agentsPage.draw(await load(e, 'local'), { rerender() {} })); assert.match(off, /Switched off/); assert.match(off, /Use local models/); assert.doesNotMatch(off, /llama3\.1/, 'no models are listed until they are switched on');
+  const ov = text(agentsPage.draw(await load(e, 'overview'), { rerender() {} })); assert.match(ov, /Local models/); assert.match(ov, /Switched off/); assert.match(ov, /Set up/);
+  assert.doesNotMatch(text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })), /Local only/, 'no local choice before they are switched on'); assert.match(text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })), /Set up local models/);
+  e.setLocal({ enabled: true, maxGb: 6 }); await e.refreshLocal(); e.localRouter().noteFail('llama3.1:8b', { kind: 'memory', message: 'Not enough memory to run this model' });
+  const d = await load(e, 'local'); const t = text(agentsPage.draw(d, { rerender() {} }));
+  for (const re of [/Connected/, /Largest model to run/, /Also use cloud-hosted models/, /memory and \d+ processor cores/, /llama3\.1:8b/, /Resting/, /Not enough memory to run this model/, /Too big for this machine/, /Runs on Ollama's servers, not on this machine/, /Check again/]) assert.match(t, re, String(re));
+  for (const j of JARGON) assert.doesNotMatch(t, j, `developer wording: ${j}`); assert.doesNotMatch(t, /num_ctx|ollama pull|tokens\/s|quantiz/i);
+  const ov2 = text(agentsPage.draw(await load(e, 'overview'), { rerender() {} })); assert.match(ov2, /Local models/); assert.match(ov2, /Manage local models/);
+  const po = text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })); assert.match(po, /Local only/); assert.match(po, /Local\b/);
+  e.setAgentPolicy({ mode: 'local' }); const po2 = agentsPage.draw(await load(e, 'policy'), { rerender() {} }); assert.match(text(po2), /Local models are chosen/);
 });

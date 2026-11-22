@@ -42,5 +42,5 @@ test('mix: Codex limited or missing, the free models stand in (except where you 
 });
 
 test('constants: modes and routes are what the settings accept, and every role has a default with a reason', () => {
-  assert.deepEqual(MODES, ['mix', 'codex', 'openrouter']); assert.deepEqual(ROUTES, ['codex', 'openrouter', 'auto']); for (const [r, v] of Object.entries(DEFAULT_ROUTES)) { assert.ok(ROUTES.includes(v.route), r); assert.ok(v.why.length > 10, r); }
+  assert.deepEqual(MODES, ['mix', 'codex', 'openrouter', 'local']); assert.deepEqual(ROUTES, ['codex', 'openrouter', 'local', 'auto']); for (const [r, v] of Object.entries(DEFAULT_ROUTES)) { assert.ok(ROUTES.includes(v.route), r); assert.ok(v.why.length > 10, r); }
 });

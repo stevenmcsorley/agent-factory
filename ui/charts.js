@@ -231,7 +231,7 @@ export function createLine3D(stages) {
       const x = stX(si) + (OFF[key] ?? 0) - k * 84, y = lane(key); let p = parts.get(a.run);
       if (!p) { p = makePart(); parts.set(a.run, p); for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? BELT0 + 40 : x, LANE); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } }
       const cls = `bob at-${key} s${si}`; if (p.inner.getAttribute('class') !== cls) p.inner.setAttribute('class', cls);
-      const t = a.title ?? ''; const short = t.length > 24 ? `${t.slice(0, 23)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; place(p.g, x, y); place(p.lab, stX(si), 214); }
+      const t = a.title ?? ''; const short = t.length > 19 ? `${t.slice(0, 18)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; place(p.g, x, y); place(p.lab, stX(si), 204); p.lab.style.display = k > 0 ? 'none' : ''; }
     for (const [id, p] of parts) if (!seen.has(id)) { parts.delete(id); place(p.g, slotX(7) - 40, 340); p.g.style.opacity = '0'; p.lab.style.opacity = '0'; setTimeout(() => { p.g.remove(); p.lab.remove(); }, 1400); }
     stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(Math.floor(i / 2)))); names.forEach((n, i) => n.classList.toggle('on', lit.has(i))); glyphs.forEach((n, i) => n.classList.toggle('on', lit.has(i))); field.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'sandbox'))); lift.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'push'))); ready = true;
   }
