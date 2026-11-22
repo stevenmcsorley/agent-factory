@@ -100,3 +100,10 @@ test('engine: the harness report brings it together and is available over MCP', 
   e._audit({ what: 'harness', action: 'step-up', role: 'reviewer', from: 'gpt-6-luna', to: 'gpt-6.2-astra', why: 'it did not give a clear verdict', project: 'p' }); recordUsage(e.cfg.stateDir, { run: 'a1', role: 'builder', via: null, model: 'gpt-6.2-astra', input: 1000, output: 10, at: new Date(now).toISOString() });
   const r = await callOp(e, 'harness_report', { days: 7 }); assert.equal(r.claims.caught, 1); assert.match(r.claims.recent[0].findings[0], /switched off/); assert.equal(r.stepUps.count, 1); assert.equal(r.stepUps.byRole.reviewer, 1); assert.equal(r.verdict.state, 'early'); assert.ok(r.since && r.models.length >= 0);
 });
+
+test('a minor note is not counted as a problem with how the job was done (security and accessibility notes still are)', () => {
+  const rec = (sev, issue) => run({ review: { verdict: 'approve', findings: [{ severity: sev, issue }] } });
+  assert.deepEqual(scoreRun(rec('minor', 'Test file missing newline at end of file')).tags, [], 'a formatting nit is not weak tests'); assert.deepEqual(scoreRun(rec('minor', 'Changes shared styles outside the ticket scope')).tags, []);
+  assert.deepEqual(scoreRun(rec('major', 'Test file would still pass if the heading were removed')).tags.map((t) => t.id), ['finding-tests']); assert.deepEqual(scoreRun(rec('minor', 'The new image has no alt text')).tags.map((t) => t.id), ['finding-a11y'], 'accessibility counts at any size');
+  assert.deepEqual(scoreRun(rec('minor', 'The key is hard-coded: a secret in the source')).tags.map((t) => t.id), ['finding-security']);
+});

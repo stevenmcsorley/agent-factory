@@ -42,7 +42,8 @@ export function scoreRun(rec, { fixRounds = 0, medianWeighted = null } = {}) {
   if ((rec.attempts ?? 1) > 1) { const why = retryCauses(rec.phases); add('retry', `${rec.attempts} attempts${why.length ? `: ${why.map((w) => RETRY_WORDS[w]).join(' and ')}` : ''}`); if (why.includes('verify')) add('retry-verify', 'a retry that followed a failed test run'); }
   if (rec.status === 'verify-failed') add('verify-failed', String(rec.verifyTail ?? '').slice(-160) || null);
   const rv = rec.review; if (rv?.verdict === 'changes') add('review-changes', String(rv.summary ?? '').slice(0, 200));
-  for (const f of rv?.findings ?? []) { const t = classifyFinding(f); if (t) add(t, String(f.issue ?? '').slice(0, 200)); }
+  // only findings that mattered count as a problem with how the job was done: a minor note (a missing newline, a naming nit) is not "weak tests" or "out of scope". Security and accessibility notes count at any size.
+  for (const f of rv?.findings ?? []) { const t = classifyFinding(f); if (!t) continue; const big = ['major', 'blocker', 'critical'].includes(String(f?.severity ?? '').toLowerCase()); if (big || t === 'finding-security' || t === 'finding-a11y') add(t, String(f.issue ?? '').slice(0, 200)); }
   if (rec.claims && rec.claims.ok === false) add('claims-failed', String(rec.claims.findings?.find((f) => f.blocking)?.detail ?? '').slice(0, 200));
   if (rec.visual?.status === 'fail') add('visual-regression', String(rec.visual.summary ?? '').slice(0, 160));
   if (rec.quality && rec.quality.passed === false) add('quality-gate', (rec.quality.blockers ?? []).slice(0, 2).join('; ').slice(0, 160) || null);

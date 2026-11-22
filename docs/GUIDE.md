@@ -4,6 +4,8 @@
 
 # Agent Factory — the illustrated guide
 
+<sub>Updated for the newest interface: the tour in section 3 uses real screenshots. Some older diagrams elsewhere in this guide show the earlier design; the [README](../README.md) is always current.</sub>
+
 **Write a ticket. Get a reviewed pull request. You stay in charge of the merge button.**
 
 [Quick start](#2-install-and-first-run) · [Tour](#3-a-tour-of-the-control-room) · [First work order](#4-your-first-work-order) · [Connect your tools](#5-connect-your-own-tools) · [Inbox](#6-the-inbox) · [Drive it by prompt](#8-drive-it-by-prompt-mcp) · [Safety](#9-how-it-keeps-you-safe) · [Running it](#10-running-it-for-real) · [Is it production ready?](#11-is-it-production-ready)
@@ -58,40 +60,55 @@ Done. Start the factory:  npm start
 
 ## 3. A tour of the control room
 
-<img src="guide/img/control-room.svg" alt="The control room with numbered callouts" width="100%">
+<img src="img/control-room.jpg" alt="The Control room: the Line with its six machines, the agent bench and the flow metrics" width="100%">
 
 | | |
 |---|---|
-| **1** | **Header.** Navigation (the **Inbox** badge counts what is waiting on you), the line's status lamp, **Run** (check for work now), **Pause**, the light/dark switch, and the command palette (`Ctrl`/`⌘` + `K`). |
-| **2** | **Ticker.** A live stream of what the line is doing, newest first. |
-| **3** | **Work-order intake.** Type what you want built or fixed. A live check tells you if it is too short to act on; the agent handles the rest. |
-| **4** | **The line.** Queued tickets wait in the **hopper**; each running job rides the belt through six stations. A station lights up and its icon animates while it is working: *claim* (a check draws itself), *sandbox* (the crate opens), *agent* (the chip pulses), *verify* (a magnifier scans), *push* (an arrow rises), *ship* (a plane takes off). |
-| **5** | **Spec strip.** Shipped today, success rate, median time to PR, **waiting on you** (click it to open your inbox) and today's remaining capacity. |
-| **6** | **Cells.** One per project, with a status lamp (green fine, orange working, red needs you), a 14-day history and queue tallies. |
-| **7** | **Shipped chute.** Pull requests opened today. |
+| **1** | **Header.** A grouped menu (**Control room**, **Inbox**, **Orders**, then **Projects**, **Agents** and **System** menus), the line's status lamp, a green dot that shows the page is receiving live updates, **Run** (check for work now), **Pause**, the light/dark switch, and the command palette (`Ctrl`/`⌘` + `K`). The Inbox badge counts what is waiting on you. |
+| **2** | **Ticker.** A live stream of what the line is doing, in plain words ("writing the change", "running the tests", "being reviewed"). |
+| **3** | **The Line.** Queued tickets wait in the **hopper** as parcels. A running job travels through every machine in order and stays at each long enough to see it work: **Claim** (a label is stamped on it), **Sandbox** (sealed in a blue field), **Agent** (a robot arm writes code onto it), **Verify** (scanned, then a green check), **Push** (lifted up the ramp), **Ship** (pressed and strapped), then along the belt into the **shipped bin**. A job that stops without shipping (it needs an answer, or it failed) drops off the belt where it stopped. When nothing is running, the machines still glow and breathe faintly. |
+| **4** | **Agent bench.** A tile per agent (spec writer, builder, tester, reviewer, security reviewer, designer, planner, fixer): it lights up while that agent works and says on what, for how long and with which model. |
+| **5** | **Flow strip.** Shipped today, success rate, median time to PR, **waiting on you** (click it to open your inbox) and today's remaining capacity. |
+| **6** | **Quick ticket and projects.** Type what you want built or fixed (a live check says if it is specific enough), and see every project with its status lamp and queue. |
 
-<details>
-<summary><b>More screens</b>: command palette, health, light theme</summary>
+**Other pages**
 
-| Command palette | Health |
-|---|---|
-| <img src="guide/img/palette.jpg" alt="Command palette"> | <img src="guide/img/health.jpg" alt="Health checks"> |
+| Menu | Page | What it is for |
+|---|---|---|
+| Header | **Inbox** | Everything waiting on a human, with the reason: pull requests to review (GitHub-style diff viewer; merge, reject, rebuild, resolve conflicts), tickets that need detail, plans waiting |
+| Header | **Orders** | Every run as a work order (see section 4) |
+| **Projects** | **Portfolio** | Every project from *brief → plan → build → ship* on one screen, with flow metrics, the next step for each and a "Needs you" list. Start here when you have several projects |
+| **Projects** | **Studio** | Start things: a project from a brief (with a prototype-or-deploy target and an optional house style), an existing repo plus tracker, a scenario, or a quick ticket |
+| **Projects** | **Library**, **Scenarios** | The reuse library; your workflows with human approval gates (always run one as a **dry run** first) |
+| **Agents** | **Agents and models** | Who does each job: Codex, free models or local models, the model steps each agent goes through, and what each agent is held to (its *harness*) |
+| **Agents** | **Usage** | What every agent and model used, when, and what happened when a limit was hit or lifted. Downloadable as CSV |
+| **Agents** | **Improvements** | Scores for every finished job, suggested fixes you approve, and a plain answer to "is the harness working?" |
+| **System** | **Connect**, **Health**, **Settings** | Copy-paste setup for Claude and other MCP clients; the same checks as `npm run doctor`; limits and autonomy |
 
-<img src="guide/img/light.jpg" alt="The control room in the light theme" width="100%">
+A project has its own page with tabs: *Board, Plan, Brief, Pull requests, Work orders, Code, Log*.
 
-</details>
+### The newer pages: agents, usage and improvements
 
----
+<table>
+<tr>
+<td width="50%"><img src="img/agents-harness.jpg" alt="Agents page"></td>
+<td width="50%"><img src="img/improvements.jpg" alt="Improvements page"></td>
+</tr>
+<tr>
+<td><sub><b>Agents → Who does what.</b> Pick the provider per agent. Each row shows the model steps (a cheaper model first, a stronger one if a check fails) and, under <i>What it is held to</i>, the checks the factory enforces outside the model.</sub></td>
+<td><sub><b>Improvements.</b> Every finished job is scored. A problem that keeps coming back becomes a suggested fix you can edit and approve; the harness panel says whether the cheaper models are holding up.</sub></td>
+</tr>
+<tr>
+<td><img src="img/usage.jpg" alt="Usage page"></td>
+<td><img src="img/portfolio.jpg" alt="Portfolio page"></td>
+</tr>
+<tr>
+<td><sub><b>Usage.</b> Tokens by day, model, agent and project; the Codex limit and the free-model allowance; every limit and when it lifted.</sub></td>
+<td><sub><b>Portfolio.</b> Every project with flow metrics: time to merge, right first time, how many PRs were machine-checked.</sub></td>
+</tr>
+</table>
 
-**Other pages in the header**
-
-| Page | What it is for |
-|---|---|
-| **Studio** | Where you start things: a new project (brief, sources, **target**, plan), an existing repo plus tracker, a scenario, or a quick ticket. Shows the path a project takes: idea → prototype → build → staging → production → maintain |
-| **Portfolio** | Every project from *brief → plan → build → ship* on one screen, with the next step for each and a "Needs you" list. Start here when you have several projects |
-| **Library** | The reuse library: parts, repeated code, upgrades |
-| **Scenarios** | Your own workflows with human approval gates (prototype only, ship to production, deploy to Cloudflare…). Run one as a **dry run** first; a real run stops at each approval until you press **Approve**. The Extensions tab shows plugins. See [EXTENDING.md](EXTENDING.md) |
-| **Cells** → a project | Tabs: *Board, Plan, Brief, Pull requests, Work orders, Code, Log* |
+More on delegation, the harness and the improvement loop is in the [README](../README.md) and [AUTOPILOT.md](AUTOPILOT.md).
 
 > **Seeing the old interface after an upgrade?** An open browser tab keeps the old code in memory. The factory now notices an update and shows an orange bar, *"The factory was updated. Reload to get the new interface."* Press **Reload now** (or Ctrl/⌘+Shift+R).
 
@@ -254,7 +271,7 @@ Not everyone deploys the same way, so nothing about deployment is built in. A **
 
 ## 5. Connect your own tools
 
-Open **Cells → Add project**. You make two independent choices, so you can mix freely (for example *Jira tickets with a Bitbucket repo*):
+Open **Projects → Portfolio → New project**. You make two independent choices, so you can mix freely (for example *Jira tickets with a Bitbucket repo*):
 
 <img src="guide/img/wizard.svg" alt="The add-project wizard with numbered callouts" width="100%">
 
@@ -376,12 +393,12 @@ Each cell has a board with the same four stages:
 
 | I want to… | Do this |
 |---|---|
-| Queue a change | Intake box on the control room, or **Cells → (project) → New ticket**, or just label an issue `agent-ready` in your tracker |
+| Queue a change | Intake box on the control room, or **Projects → Portfolio → (project) → New ticket**, or just label an issue `agent-ready` in your tracker |
 | Rescue a stuck ticket | **Inbox**, add the missing detail, **Requeue** |
 | Stop everything right now | **Pause** in the header (or `touch state/STOP`) |
-| Stop one project | **Cells → (project) → Pause** |
+| Stop one project | **Projects → Portfolio → (project) → Pause** |
 | See why something failed | Open its **work order**: the route sheet shows the station it stopped at, and the output shows why |
-| Add another repo | **Cells → Add project** |
+| Add another repo | **Projects → Portfolio → New project** |
 | Limit usage | `limits.maxRunsPerDay` (and `dailyBudgetUsd` for API keys) in `agent-factory.json` |
 | Use it from my phone/laptop | See [Running it for real](#10-running-it-for-real): keep it on loopback and use a tunnel or reverse proxy with TLS |
 

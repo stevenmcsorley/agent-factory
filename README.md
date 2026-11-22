@@ -1,138 +1,214 @@
+<div align="center">
+
 # Agent Factory
 
-<p align="center"><img src="docs/guide/img/hero-line.svg" alt="A ticket rides the assembly line from the hopper through six stations to the shipped chute" width="100%"></p>
+**Tickets in. Reviewed pull requests out. On your own machine.**
 
-**Self-hosted software delivery on autopilot: tickets in, reviewed pull requests out.**
+A self-hosted software factory: it claims a ticket, builds it with a coding agent in a locked-down sandbox, checks the work itself, and hands you a reviewed pull request. Mix Codex, free cloud models and local models, and watch every job ride the line.
 
-🤖 **Driving it with Claude or Codex?** Hand your agent [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) (or run `agent-factory agents-md`).
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node 22+](https://img.shields.io/badge/node-%E2%89%A522-339933.svg)](docs/setup.md)
+[![Tests](https://img.shields.io/badge/tests-518%20passing-brightgreen.svg)](#development)
+[![Zero runtime deps](https://img.shields.io/badge/runtime%20deps-0%20required-orange.svg)](#development)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-no%20telemetry-lightgrey.svg)](#security-model)
 
-🛡️ **Evaluating the AI workflow?** Read [docs/WORKFLOW.md](docs/WORKFLOW.md) (stages, trust boundaries, guardrails, failure modes, open risks) run `npm run drill` to watch each guardrail hold against a scripted misbehaving agent, and `npm run drill:real` to see a real model on adversarial tickets.
+<img src="docs/img/hero-line.jpg" alt="The Line: a ticket leaves the hopper, passes the claim, sandbox, agent, verify, push and ship machines, and lands in the shipped bin" width="100%">
 
-🧭 **Known gaps and what is next:** [docs/gaps-and-roadmap.md](docs/gaps-and-roadmap.md) (what a real 17-ticket run exposed, what is built and what is not).
+<sub>The Control room. Every job is a parcel: out of the hopper, through six machines, into the bin. Real screenshot, live data.</sub>
 
-📖 **New here? Read the [illustrated guide](docs/GUIDE.md)**: install in five minutes, a tour of every screen, connecting your tools, safety, and an honest production-readiness checklist.
+</div>
 
-Label a GitHub issue `agent-ready` (or queue one from the web UI). Agent Factory claims it, runs a coding agent in a locked-down Docker sandbox, runs your tests, and opens a **draft pull request**. If CI fails or you leave review comments, it goes back and pushes fixes. **It never merges: you do.**
+---
 
-It can also run **entirely on your machine**: a built-in issue tracker and a local git repository with its own pull requests, so you can go from an idea to reviewed, merged code with no account anywhere, then publish to GitHub (or any git remote) when you decide it is worth sharing. See [Local-first](#local-first-no-accounts-needed).
+> **Status: early, and used by one person so far.** It works end to end on real repositories, and [What's verified](#whats-verified) says plainly what has and has not been proven. Review every pull request it opens.
 
-- **Bring your own agent**: Claude Code or Codex, on a subscription or an API key. Others can be added behind a small adapter.
-- **Runs on your machine**: no hosted service, no telemetry.
-- **Prompt it, or click it**: a mission-control web UI *and* an MCP server, so you can say "create a project that…" or "fix the login bug" from Claude and watch it happen.
-- **Safe by default**: agents run in containers with no route to the internet except an allowlisted proxy, tickets from strangers are ignored, CI/config files are protected, and daily caps stop runaway use.
+## What it does
 
-> **Status: early, and used by one person so far.** It works end to end on real repositories (see [What's verified](#whats-verified), which also lists what is *not*), but it is young software that runs code written by an AI. Read [Security](#security-model) before pointing it at anything you care about, and start with a throwaway repo.
+Label a GitHub issue `agent-ready` (or write a ticket in the web UI). Agent Factory then:
+
+1. **Claims** the ticket and asks a question instead of burning a run if it is too vague.
+2. **Builds** it with a coding agent inside a Docker sandbox that has no route to the internet except an allowlisted proxy.
+3. **Checks** the work itself: your tests, an honesty check on what the agent claims, a code-quality gate, an optional screenshot check, and a second agent that reads the diff.
+4. **Opens a draft pull request** (or merges and fixes on its own, if you turn autonomy on).
+
+It can run **entirely on your machine**: a built-in issue tracker and a local git repository with its own pull requests, so you can go from an idea to merged code without an account anywhere.
+
+<table>
+<tr>
+<td width="50%"><img src="docs/img/cafe-home.jpg" alt="The Hillside Cafe home page: a full-screen looping video of coffee beans behind a serif headline, an illustrated window card and two buttons"></td>
+<td width="50%"><img src="docs/img/cafe-menu.jpg" alt="The Hillside Cafe menu page: items in a card grid with terracotta price tags"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub><b>Built by the factory from a one-paragraph brief:</b> a plan of tickets, designs and artwork made first, then 13 tickets built, reviewed and merged. The hero video is a CC-BY stock clip the factory was told to use; every credit is on the page.</sub></td>
+</tr>
+</table>
+
+## Why it is different
+
+| | |
+|---|---|
+| **Sandboxed and local-first** | Each run is a throwaway container on an internal network. No hosted service, no telemetry. Add a project with no GitHub account at all. |
+| **Design first, then build** | For a site or app with screens, the designer makes mockups and SVG artwork first; you approve them; the builders follow them. A restyle flow redoes an existing project the same way. |
+| **Any model mix** | **Codex**, **free OpenRouter models** and **local models** (Ollama and friends), chosen per agent. Free and local models take the jobs they do well; Codex does the rest and carries on when they cannot. |
+| **A harness around every model** | The model is the swappable part. Around it sit checks that do not take its word for anything, and cheaper models start first with a stronger one stepping in when a check fails. |
+| **It improves itself, with your say-so** | Every finished job is scored. Problems that keep coming back become suggested fixes you approve, and the page measures whether they helped. |
+| **Measured, not assumed** | Usage by model, agent and project; limits and when they reset; benchmarks for the cheaper-model defaults; a panel that answers "is the harness working?". |
+| **Autonomous when you say so** | One switch makes a project run unattended: reviewers on, fix rounds, conflict resolution, merging, with caps. |
+| **Drive it by prompt** | An MCP server with **144 operations**. In Code Mode the AI needs about **270 tokens** of context, not 21,000. |
+
+## See it work
+
+<table>
+<tr>
+<td width="50%"><a href="docs/img/agents-harness.jpg"><img src="docs/img/agents-harness.jpg" alt="Agents page: who does each job, which Codex models it starts on, and what each agent is held to"></a><br><sub><b>Agents.</b> Who does each job, the model steps it goes through, and the harness it is held to.</sub></td>
+<td width="50%"><a href="docs/img/improvements.jpg"><img src="docs/img/improvements.jpg" alt="Improvements page: scores, and the panel that says whether the harness is working, with what was caught and how each model compares"></a><br><sub><b>Improvements.</b> Job scores and a plain answer to "is the harness working?". Suggested fixes appear below when a problem keeps coming back.</sub></td>
+</tr>
+<tr>
+<td width="50%"><a href="docs/img/usage.jpg"><img src="docs/img/usage.jpg" alt="Usage page: tokens by day for Codex and the free models, with limits and resets"></a><br><sub><b>Usage.</b> What every agent and model used, when, and what happened at each limit.</sub></td>
+<td width="50%"><a href="docs/img/portfolio.jpg"><img src="docs/img/portfolio.jpg" alt="Portfolio page: every project from brief to shipped, with flow metrics"></a><br><sub><b>Portfolio.</b> Every project from brief to shipped, with flow metrics.</sub></td>
+</tr>
+</table>
 
 ## Look around first (no Docker, no accounts, no agent)
 
 ```bash
 git clone https://github.com/stevenmcsorley/agent-factory.git && cd agent-factory
 npm install
-npm run demo      # opens a populated factory in a throwaway folder; Ctrl-C deletes it
+npm run demo      # a populated factory in a throwaway folder; Ctrl-C deletes it
 npm run drill     # watches nine guardrails hold against a misbehaving scripted agent
 ```
 
-`npm run demo` builds two sample projects with real git branches and pull requests, a plan launched into tickets, the real code analysis, and sample run history. Open the PRs, read a diff, merge the one that is ready, and see the one that is **blocked because its branch changed after it was checked**. Only the agent runs and their history are pre-recorded; the header says so, and nothing will run. Needs only Node 22 and git (tested on a clean machine).
+`npm run demo` builds two sample projects with real git branches and pull requests, a plan launched into tickets, the real code analysis, and sample run history.
 
 ## Quickstart
 
-You need: **Node 22+**, **Docker** and **git**, plus a Codex (ChatGPT) or Claude login (the demo and the drill need only Node and git). The GitHub CLI (`gh auth login`) is only needed if you use GitHub; GitLab, Bitbucket and other hosts use a token you paste into the UI.
+You need **Node 22+**, **Docker** and **git**, plus a Codex (ChatGPT) or Claude login. The GitHub CLI (`gh auth login`) is only needed for GitHub projects. Per-OS steps are in [docs/setup.md](docs/setup.md).
 
 ```bash
 git clone https://github.com/stevenmcsorley/agent-factory.git
 cd agent-factory
 npm install       # one small optional dependency (QuickJS) for MCP Code Mode
-npm run init     # checks prerequisites, builds the sandbox image, logs the agent in, adds your first repo
-npm start        # prints the UI link
+npm run init      # checks prerequisites, builds the sandbox image, logs the agent in, adds your first repo
+npm start         # prints the UI link (it contains your UI token)
 ```
 
-Open the printed link (it contains your UI token). Then either label an issue `agent-ready` in your repo or use **Projects → New ticket** in the UI.
+Open the link, then label an issue `agent-ready` or use **Projects → New ticket**. `npm run doctor` re-checks everything and says how to fix what is wrong.
 
-`npm run doctor` re-checks everything and tells you how to fix what is wrong. Full walkthrough (per-OS prerequisites, creating each token, running it as a service, troubleshooting): **[docs/setup.md](docs/setup.md)**. No clone needed either: `mkdir my-factory && cd my-factory && npx github:stevenmcsorley/agent-factory init`.
-
-## Local-first (no accounts needed)
-
-You do not need GitHub, a tracker or a token to run the whole loop (you do still need Docker and a logged-in agent: `npm run init` sets those up; without them, use `npm run demo` above):
-
-```bash
-npm start                                 # open the printed link
-# Studio → New project → "On this machine", describe what to build, add a test command (e.g. npm test)
-```
-
-* **Built-in tracker** (`tickets.kind: "local"`): issues, epics, comments and states kept in `state/projects/<id>/tracker.json`. Plans create real epics there, an epic closes itself when its last ticket does, and webhooks, scenarios and the inbox work as they do with any tracker.
-* **Local forge** (`host.kind: "local"`): a bare git repository per project (`state/forge/<id>/repo.git`) with pull-request records. The agent builds into it exactly as it would on GitHub. You review the **diff**, comment, and press **Merge** (a fast-forward when possible, otherwise a clean merge commit; conflicts are refused and nothing changes). Merging is a human-only action: it is not an agent tool, and no scenario does it by itself.
-* **Publish when ready:** set a *publish target* (GitHub, GitLab, Bitbucket or any git remote) and push the base branch. It never force-pushes, refuses if the remote has commits you do not have, and is a deliberate step (a button, `agent-factory publish <project>`, or a `publish` scenario step that must come after a human approval). You can then switch the project to the real repository.
-* Or mix: local tracker with a GitHub repo, GitHub Issues with a local repo, whichever suits the project.
-
-CLI: `agent-factory add my-app --host=local --tracker=local` (add `--import=/path/or/url` to start from an existing repository), `agent-factory merge <project> <pr>`, `agent-factory publish <project>`.
-
-**Limits, stated plainly:** it is not a hosting server (nobody else can clone from it until you publish), it has no CI of its own (verification is your test command in the sandbox), and review is diff, comments, merge: no inline comments, approvals or branch rules. A new empty repository has nothing to auto-detect, so give the project a test command when you create it or PRs will say they were not machine-checked.
+**No GitHub at all?** In the UI choose **Studio → New project → On this machine**, describe what to build, add a test command (for example `npm test`), and go.
 
 ## How it works
 
-```
- ticket (GitHub issue / Ossicone)         ┌──────────────── Docker sandbox ────────────────┐
-   labelled agent-ready  ───►  gate  ───► │  clone → agent edits → tests run               │
-   (author must be allowlisted)  │        │  (no internet except the allowlisted proxy)    │
-                                 ▼        └───────────────────────┬────────────────────────┘
-                  too vague? ask a question                       ▼
-                                                       protected-path check → push branch
-                                                                  ▼
-                     CI fails / review comments  ◄───────  draft pull request  ───►  you review & merge
-                              │
-                              └──► agent pushes a fix (bounded rounds), then hands back to a human
+```mermaid
+flowchart LR
+    T["Ticket<br/>(GitHub, Jira, Linear,<br/>Ossicone or built-in)"] --> G{"Clear<br/>enough?"}
+    G -- no --> Q["Ask a question<br/>(agent-needs-info)"]
+    G -- yes --> D["Design first<br/>(screens + artwork)"]
+    D --> S["Docker sandbox<br/>clone, agent edits"]
+    S --> H["Harness checks<br/>claims, tests, quality,<br/>screens, second reader"]
+    H -- fails --> S
+    H -- passes --> PR["Draft pull request"]
+    PR --> M["You review and merge<br/>(or autonomy does)"]
+    M --> I["Scored by the<br/>improvement loop"]
 ```
 
-1. **Clarity gate.** A ticket with nothing concrete to build ("make it better") gets a question and the `agent-needs-info` label instead of burning an agent run.
-2. **Sandboxed run.** A fresh clone is mounted into a container. The agent can only reach its provider's API through an allowlisting proxy. It gets no GitHub credentials; pushing happens on the host afterwards.
-3. **Verify.** Your test command runs in the same sandbox, with a retry if it fails. The command comes from `.agent-factory.json` in the repo, or is auto-detected (npm, pytest, go, cargo, make).
-4. **Protected paths.** If the agent touched `.github/`, `.agent-factory.json` or other CI files, the run is rejected and nothing is pushed.
-5. **Draft PR**, with the ticket relabelled `agent-review` and a comment linking it.
-6. **Feedback loop.** Failing CI or comments from allowlisted users trigger follow-up commits on the same branch, up to a round limit, then `agent-needs-human`.
+Every stage is one of the machines on the Control room's line: **Claim → Sandbox → Agent → Verify → Push → Ship**, with the review and the screenshot check sitting at Verify.
+
+1. **Clarity gate.** A ticket with nothing concrete to build gets a question and the `agent-needs-info` label.
+2. **Sandboxed run.** A fresh clone is mounted into a container. The agent reaches only its provider's API, through an allowlisting proxy, and gets no GitHub credentials; pushing happens on the host afterwards.
+3. **The agent sees the whole ticket.** The text, the project brief, the approved designs, and any notes the owner added in the comments (from trusted authors only).
+4. **Verify.** Your test command runs in the same sandbox, with a retry on failure. It comes from `.agent-factory.json` in the repo, or is detected (npm, pytest, go, cargo, make).
+5. **The harness checks the claims.** A free, deterministic check compares what the agent says with what it did: a test switched off, or "I added tests" with no test file changed, goes back to the builder like a failing test.
+6. **Quality gate, screens, second reader.** Secrets and vulnerabilities in the changed lines, weakened tests, a screenshot check at three widths, and a second agent that reads the diff.
+7. **Protected paths.** If the agent touched CI files or the factory's own config, the run is rejected and nothing is pushed.
+8. **Draft PR**, with the ticket relabelled `agent-review`. Failing CI or reviewer findings trigger bounded fix rounds, then it hands back to a human.
 
 Ticket states are plain labels: `agent-ready` → `agent-working` → `agent-review` (or `agent-failed`, `agent-needs-info`, `agent-needs-human`).
 
+## Who does the work: Codex, free models, local models
+
+Pick the provider per agent, or for everything:
+
+| Mode | What it means |
+|---|---|
+| **Both** (default) | Free models take what they do well (reviews, short writing, small first attempts). Codex does the rest, and does any job a free model cannot answer. If Codex runs out of plan, the free models carry on. |
+| **Codex only** | Everything uses your Codex plan. Work waits if it runs out. |
+| **Free models only** | Everything uses free OpenRouter models. |
+| **Local only** | Everything runs on models on your own hardware (Ollama, LM Studio, llama.cpp, vLLM). Off until you switch it on. |
+
+- **Free models** are used at full capacity: a router ranks them, learns how long each rests after a limit, swaps to the next mid-task, and keeps a daily allowance gauge.
+- **Local models** are free and private, but a CPU-only laptop is slow. On a 4-core, 12 GB laptop the best small model tried (`qwen2.5:3b`) caught 3 of 8 planted defects, against 7 to 8 for Codex, so they suit short jobs and standing in when everything else is down. Models Ollama runs on its own servers (`:cloud`) are flagged as not local and kept out unless you allow them.
+
+### The harness: cheaper models, same checks
+
+Each agent has a written harness (Agents → Who does what → *What it is held to*). Codex agents start on an **older, cheaper Codex model** and step up to the usual one when a check fails:
+
+| Agent | Starts on | Held to | Evidence |
+|---|---|---|---|
+| Reviewer | `gpt-6-luna` | a clear verdict, or the next model does it | **Measured:** 8/8 planted defects, 0 false blocks (`gpt-6-luna`, `gpt-5.6-luna`, `gpt-6.1-sol`), against 7/8 for the usual model |
+| Security reviewer | `gpt-6-luna` | a clear verdict | **Measured:** 6/6 planted vulnerabilities, 0 false blocks |
+| Builder | `gpt-6-luna` on small tickets only | tests, claims check, quality gate, second reader | **Provisional:** 6/6 small hidden-test tickets on every model; says nothing about big ones |
+| Tester, spec writer, skill writer | cheaper models | output must be real, not empty | **Provisional**, labelled as such |
+| Designer, planner, fixer | the usual model | you approve designs and plans | not measured yet |
+
+Every step-up is logged with the reason, and a call that failed its check still counts its tokens. **Is it paying off?** The Improvements page has a panel that says so in plain words ("too early to say" until enough jobs have run), because token counts alone do not show how much of your Codex plan a cheaper model uses.
+
+Re-run the evidence yourself:
+
+```bash
+node scripts/review-bench.mjs --codex-model=gpt-6-luna --effort=low --strategies=shot_rules
+node scripts/role-bench.mjs --role=security --models=gpt-6-luna,gpt-6.2-astra
+node scripts/role-bench.mjs --role=builder  --models=gpt-6-luna,gpt-6.2-astra
+node scripts/harness-drill.mjs      # proves the step-up on the real Codex path
+```
+
+## Design first, then build
+
+For a project with pages, **design is stage zero**. The designer draws a screen per page and a set of SVG artwork (logo, hero, icons, dividers) from the brief; you approve them (or unattended mode does); only then are build tickets released, and every build is told to match the approved design. A page that falls behind its design is flagged as **drift**.
+
+For an existing project, **Restyle** takes a direction in a few sentences ("warm, characterful, forest green and terracotta"), designs it, and plans one ticket per page to make the real pages match.
+
+## It improves itself, with your approval
+
+- **Scores.** Every finished job is scored from what was recorded: retries, its own tests, what the reviewer found, the screenshot and quality checks. Retries are explained by their real cause.
+- **Suggested fixes.** A problem that appears in enough jobs becomes a concrete suggestion: an instruction the agents will be given (a *skill*), or a change of who builds. Each shows its evidence. You can edit the wording, apply it, or say not now.
+- **Did it help?** After a fix is applied the same problem is measured again on the jobs that follow.
+- **Which model builds better?** Jobs are scored by the model that started them, and a cheaper model is only suggested once it has earned it over enough jobs.
+
 ## The web UI
 
-![The control room: work-order intake, the live assembly line (hopper → six stations → shipped), spec strip, cells](docs/img/overview.jpg)
-
-![A work order: barcode, stamped result, route sheet with timed stations, operator notes, quality check](docs/img/run.jpg)
-
-| Page | What you get |
+| Where | What you get |
 |---|---|
-| **Control room** | **Work-order intake** (describe what you want; a live clarity check tells you if it is specific enough), and **the line**: an animated assembly line where queued tickets wait in the *hopper*, each job rides the belt through six stations (claim → sandbox → agent → verify → push → ship) and finished PRs drop into the *shipped* chute. Every station has its own monoline icon that animates only while that station is working: a check drawing itself, a crate lid lifting, a chip pulsing, a magnifier scanning, an arrow rising, a paper plane taking off. Below it a spec strip (shipped today, success rate, median time to PR, waiting on you, capacity left), your project *cells*, a 14-day output chart, the live line log and recent work orders. A ticker across the top streams events. |
-| **Studio** | Start things: a project from a brief (with a prototype-or-deploy target and an optional house style), an existing repo and tracker, a scenario, or a quick ticket |
-| **Portfolio** | Every project from brief to shipped on one screen: brief completeness, plan progress, queue, quality, library use, and the **next step** for each, plus a "Needs you" list |
-| **Inbox** | Everything waiting on a human, with the reason. **Needs your decision**: tickets the factory bounced for detail or gave up on, showing what it said, the ticket text and the failing run; add the missing detail and **Requeue** (the clarity check re-runs first), comment, open the tracker, or close. **Ready to review**: PRs with a button straight to the PR. **Failing after merge** (GitHub projects): a workflow on the base branch whose latest run failed, with the run's link and the PR it came from; it clears itself when the next run passes (`deployWatch: false` opts a project out). The *Waiting on you* tile and a badge on the nav lead here. |
-| **Cells** | One per project, with an andon lamp (green / orange / red), tally counts, and a **ticket board**: Hopper, On the line, In review, Faults. A project page has tabs for the board, the **Tracker** (epics with progress, ticket pages with comments; built-in tracker), plan, brief, **pull requests** (on the local forge: diff, comment, merge, close, publish), work orders, code health and log |
-| **Scenarios** | Your workflows with approval gates, their runs (dry run first), and the plugins that add steps |
-| **Library** | The reuse library: searchable parts with API, usage, source, tests and who uses them; **repeated code** found across projects with a one-click promote (as a PR); upgrades when a part changes |
-| **Work orders** | Every run as a work-order traveler: barcode, a stamped verdict (SHIPPED / REJECTED / HELD), a route sheet with a bar for each station's time, the agent's notes, files changed, and the verification output |
-| **Connect AI** | Copy-paste setup for Claude and other MCP clients, with the measured token cost of each mode |
-| **Health** | The same checks as `npm run doctor`, each with a fix |
+| **Control room** | The live **Line**, the agent bench (every agent, what it is doing and on which model), flow metrics, and a quick ticket form. Updates are pushed to the page, so it does not poll. |
+| **Inbox** | Everything waiting on a human, with the reason: pull requests to review (a GitHub-style diff viewer; merge, reject, rebuild, resolve conflicts), tickets that need detail, plans waiting. |
+| **Orders** | Every run as a work order: a stamped verdict, the route through each station with timings, the agent's notes, the files changed and the checks. |
+| **Projects ▾** | **Portfolio** (every project from brief to shipped, with flow metrics and the next step for each) · **Studio** (start a project from a brief, an existing repo, a scenario or a quick ticket) · **Library** (the reuse library) · **Scenarios** (workflows with approval gates). |
+| **Agents ▾** | **Agents and models** (who does what, the harness, free models, local models, Codex settings) · **Usage** (tokens by model, agent and project; limits and resets; CSV) · **Improvements** (scores, suggested fixes, is the harness working). |
+| **System ▾** | **Connect** (copy-paste setup for Claude and other MCP clients) · **Health** (the same checks as `npm run doctor`) · **Settings** (limits and autonomy). |
 
-Dark and light themes (toggle in the header). Self-hosted fonts (Archivo, IBM Plex Mono; SIL OFL), so it works offline.
+Dark and light themes, self-hosted fonts (works offline), and **Ctrl/⌘ K** for a command palette. It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
 
-Press **Ctrl/⌘ K** anywhere for a command palette (jump to a project, pause, run now, add a project).
+## Autopilot
 
-It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
+Schedules, agent roles (reviewer, security reviewer, tester, spec writer), editable skills, designs you approve, and an opt-in **unattended mode** that makes a project run start to finish: roles on, fix rounds on reviewer findings, automatic conflict resolution, merging behind caps. Full details in [docs/AUTOPILOT.md](docs/AUTOPILOT.md); all of it is controllable over MCP.
 
 ## Briefs, plans and a reuse library
 
-* **Project Pack**: each project has a *Brief* (goal, users, scope, out of scope, done criteria, constraints, conventions, decisions) plus source material (PRDs, research, designs as files, links or text). The agent turns it into a **plan** of epics and small tickets you approve; tickets are released as their dependencies merge. Every run receives the relevant context.
-* **Reuse library**: a git repo of tested parts shared by all projects (the first real parts came from the factory finding the same MCP protocol, auth and file-writing code hand-copied across the author's projects, where the copies had already drifted), including themes, UX patterns, forms and skills, grouped into **house styles** a project starts from. The factory finds repeated code across projects at the level of functions, classes, React components and API routes, ranked by what they do (calling an API, auth, caching, retry, streaming, hooks…), plus classes that share an interface but not code (adapters), promotes it as a PR, tells each build "you already have these", records reuse (`.factory/parts.lock.json`), flags rewrites of existing parts, and opens upgrade tickets when a part changes.
-* **Lifecycle**: each project aims at *prototype* or *deploy*; the Portfolio shows how many go-live checks pass; going live is a scenario with a human approval. Launching a plan also creates its **epics in Ossicone or Jira**. Several projects can build **in parallel lanes** (`limits.parallelProjects`).
-* **Honest verification**: the factory runs the checks itself, flags an agent that weakens, deletes or skips existing tests, refuses results from a run that lost its claim, can cap how many PRs wait for review (`maxOpenReviews`), and each PR names the brief revision and commit it was verified against.
-* **Agent-native**: `agent-factory portfolio | brief | source | plan | library … | op <name>` drive a running factory from any terminal or AI agent (same operations as MCP). Give your agent `docs/AGENT-GUIDE.md`.
+- **Project Pack.** Each project has a *Brief* (goal, users, scope, out of scope, done criteria, constraints, conventions, decisions) plus source material (PRDs, research, designs, links). The planner turns it into epics and tickets with sizes, and every build is given the relevant slice.
+- **Reuse library.** A git repo of tested parts shared by all projects. The factory finds code repeated across projects, promotes it to the library as a PR, and tells future builds what already exists.
+- **Lifecycle.** Each project aims at *prototype* or *deploy*; going live is a scenario behind a human approval.
+- **Honest verification.** The factory runs the checks itself, flags an agent that weakens, deletes or skips tests, refuses results from a run that lost its claim, and can cap how many PRs wait for review.
+- **Agent-native.** `agent-factory portfolio | brief | source | plan | library … | op <name>` drive a running factory from any terminal or AI agent, with the same operations as MCP. Give your agent [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md).
 
-See the [illustrated guide](docs/GUIDE.md) for the walkthrough.
+## Local-first (no accounts needed)
 
-## Autopilot
-Schedules, agent roles (a reviewer), editable skills, designs you approve, and an opt-in autonomous mode that merges and fixes on its own: see [docs/AUTOPILOT.md](docs/AUTOPILOT.md). All of it is controllable over MCP.
+- **Built-in tracker** (`tickets.kind: "local"`): issues, epics, comments and states kept in `state/projects/<id>/tracker.json`. Plans create real epics there, and an epic closes itself when its last ticket does.
+- **Local forge** (`host.kind: "local"`): a bare git repository per project (`state/forge/<id>/repo.git`) with pull-request records. The agent builds into it exactly as it would on GitHub, and you review the diff and merge in the UI.
+- **Publish when ready.** Set a publish target (GitHub, GitLab, Bitbucket or any git remote) and push. It never force-pushes, and refuses if the remote has commits you do not have.
+- Mix freely: local tracker with a GitHub repo, GitHub Issues with a local repo, whichever suits.
 
-## Make it yours
+CLI: `agent-factory add my-app --host=local --tracker=local` (add `--import=/path/or/url` to start from an existing repository), `agent-factory merge <project> <pr>`, `agent-factory publish <project>`.
 
-Everything is meant to be adapted: **scenarios** (JSON workflows with human approval gates: prototype only, ship to production, deploy to Cloudflare, your own), **plugins** (new deploy targets, trackers, hosts, rules, part kinds, operations; hash-pinned and enabled by you), **prompts** (a Markdown file replaces the agents' rules) and configuration. The factory can also manage its own repository, with its security core protected from self-edits. See [docs/EXTENDING.md](docs/EXTENDING.md).
+**Limits, stated plainly:** it is not a hosting server (nobody else can clone from it until you publish), it has no CI of its own (verification is your test command in the sandbox), and review is diff and comments only.
 
 ## Bring your own tools
 
@@ -150,17 +226,15 @@ Two independent choices per project, mixable freely (for example Jira tickets wi
 |---|---|---|
 | **Built-in tracker** | nothing | no account or token; epics, comments, states inside the factory |
 | **GitHub Issues** | the repo itself | label an issue `agent-ready` |
-| **Ossicone** | URL + API token. Use your existing account, or **sign up on any Ossicone server**: the UI checks whether sign-up is open and links you to register and generate a token | one project can fan out to several repos with a `repo:owner/name` label |
+| **Ossicone** | URL + API token (use your account, or sign up on any Ossicone server from the UI) | one project can fan out to several repos with a `repo:owner/name` label |
 | **Jira** (Cloud or Data Center) | URL + email + API token | state is kept in labels, so no workflow changes; optional status transitions |
 | **Linear** | personal API key | state is kept in labels, created automatically |
 
-Add them in the UI (**Add a project** has a guided flow with *Test connection* buttons and project pickers) or let an AI do it through MCP (`list_integrations`, `add_project`). Tokens you paste are checked against the real service **before** anything is saved, and stored only in an owner-only file (`state/secrets.env`), never in the config; each project can read only `AF_*` secrets, never arbitrary environment variables. Only tickets created by *you* (your Jira account, Linear user, Ossicone user, GitHub login) can queue work.
-
-Adding another tracker or host is a small adapter plus one registry entry (`src/sources.mjs`, `src/hosts.mjs`); it then appears in the UI, validation and MCP automatically.
+Add them in the UI (**Add a project** has a guided flow with *Test connection* buttons) or through MCP (`list_integrations`, `add_project`). Tokens are checked against the real service **before** anything is saved, and stored only in an owner-only file (`state/secrets.env`), never in the config. Only tickets created by *you* can queue work. Adding another tracker or host is a small adapter plus one registry entry (`src/sources.mjs`, `src/hosts.mjs`).
 
 ## Drive it by prompt (MCP)
 
-The factory is also an MCP server, so an AI can run it for you: *"create a project that does X"*, *"what is the factory doing?"*, *"queue a fix for the login bug and tell me when the PR is up"*.
+The factory is also an MCP server: *"create a project that does X"*, *"what is the factory doing?"*, *"put the reviewer on a cheaper model"*, *"is the harness working?"*
 
 ```bash
 # Claude Code (the UI's Connect page shows this with your token filled in)
@@ -169,28 +243,21 @@ claude mcp add --transport http agent-factory http://127.0.0.1:7777/mcp-code --h
 
 | Endpoint | Tools | Context cost per session |
 |---|---|---|
-| `/mcp-code` (recommended) | `search` + `execute`: the AI writes a few lines of JavaScript that run in a free in-process **QuickJS sandbox** (no network or filesystem) and calls `factory.*` | ~270 tokens |
-| `/mcp` | 19 direct tools (`create_ticket`, `inbox`, `requeue_ticket`, `create_project`, `get_run`, `activity`, `metrics`, …) | ~2,000 tokens |
+| `/mcp-code` (recommended) | `search` + `execute`: the AI writes a few lines of JavaScript that run in a free in-process **QuickJS sandbox** (no network or filesystem) and calls `factory.*` | about 270 tokens |
+| `/mcp` | all **144** operations as individual tools | about 21,000 tokens |
 
-Vague requests are refused with advice (`create_ticket` runs the clarity check), and the factory still never merges. Code Mode needs the optional `quickjs-emscripten` dependency (installed by `npm install`). Bearer-token auth only for now: ChatGPT connectors need a public HTTPS URL plus OAuth, which this local server does not provide.
+Settings are controllable too: delegation (`set_agent_policy`), local models (`set_local`), free models (`set_openrouter`), skills, unattended mode, and the improvement loop (`improvements`, `improvement_apply`, `harness_report`). Vague tickets are refused with advice, and the factory still never merges on its own unless you enable autonomy.
 
 ## Configuration
 
-`npm run init` writes `agent-factory.json`; you rarely need to edit it. Projects can be added from the UI or the CLI (`node src/cli.mjs add owner/repo`).
-
-### Settings page: choose the model, change the guardrails
-
-Open **Settings** in the UI (`#/settings`) to change, without editing the file or restarting:
-
-- **Model and reasoning effort** for the agent. The list comes from the models your Codex login can use (Codex's own cache), and the effort choices change with the model. Leave the model unpinned and Codex picks its own default, which can change when Codex updates; pin one to make runs repeatable. **Check what a run will use** sends one tiny prompt through the same container and login and shows what Codex reports (model, effort, version). Every run record also stores which agent and model it was asked for.
-- **Limits:** runs per day, attempts per ticket, time limit per run, projects in parallel, daily budget. Each is range-checked, and each change is saved to the config file and listed under *Recent changes*.
-
-Changes apply from the next run; a run in progress keeps what it started with. The agent type, sandbox, network allowlist and projects are deliberately not editable here (they are security boundaries). Settings can be changed from the UI, over REST (`GET/POST /api/settings`, `POST /api/settings/probe`) and over MCP (`get_settings`, `set_settings`), so the assistant that drives your factory can tune it. Every change is validated, applied from the next run and written to the audit log.
+`npm run init` writes `agent-factory.json`; you rarely need to edit it. Projects can be added from the UI or the CLI (`node src/cli.mjs add owner/repo`). The **Settings** and **Agents** pages change the model, reasoning effort, limits and delegation without editing the file or restarting; each change is range-checked, saved and listed under *Recent changes*. The agent type, sandbox, network allowlist and projects are deliberately not editable there (they are security boundaries).
 
 ```jsonc
 {
-  "agent":   { "kind": "codexContainer", "codexHome": "~/.agent-factory/codex", "model": "gpt-6.2-sol", "reasoningEffort": "medium" },   // or "claudeContainer"; model and effort are optional
+  "agent":   { "kind": "codexContainer", "codexHome": "~/.agent-factory/codex", "model": "gpt-6.2-astra", "reasoningEffort": "low" },   // or "claudeContainer"
   "limits":  { "maxRunsPerDay": 20, "dailyBudgetUsd": 5, "maxAttempts": 2, "timeoutMs": 900000 },
+  "agents":  { "mode": "mix", "routes": { "reviewer": "auto" }, "tiers": { "builder": ["gpt-6-luna", "gpt-6.2-astra"] } },   // optional: who does what
+  "local":   { "enabled": false, "baseUrl": "http://127.0.0.1:11434" },                                                    // optional: local models
   "projects": [
     { "id": "my-app", "repo": "me/my-app", "base": "main",
       "tickets": { "kind": "github", "allowedAuthors": ["me"] } }
@@ -204,17 +271,17 @@ Changes apply from the next run; a run in progress keeps what it started with. T
 { "verify": "npm ci && npm test", "image": "node:22-bookworm", "maxAttempts": 3, "protectedPaths": [".github/", "infra/"] }
 ```
 
-Project config selects a ticket `source` and a code `host` (see [Bring your own tools](#bring-your-own-tools)). One Ossicone project can fan out to several repos with a `repo:owner/name` label and an `allowedRepos` list.
+The OpenRouter key is a secret (`OPENROUTER_API_KEY` in `state/secrets.env`, mode 600), never in the config and never returned by any API.
 
 ## Security model
 
 Agent Factory runs code that a language model wrote, driven by text anyone with access to your tracker can type. Treat it like a CI system, not a toy.
 
-- **Who can queue work:** only issues authored by `allowedAuthors` (GitHub) / `allowedReporterIds` (Ossicone). Ticket text is treated as untrusted data in the agent's prompt.
-- **Sandbox:** each run is a throwaway container (`--user` = your uid, 2 GB / 2 CPU) on a Docker `--internal` network. The only way out is a tiny proxy that allows CONNECT to your agent's API hosts (and the npm registry) and denies everything else. The agent receives no GitHub token.
-- **Credentials:** Codex uses a **dedicated login directory** for the factory, never your personal `~/.codex` (a container refreshing tokens could invalidate your own session). Claude uses a long-lived token from `claude setup-token` or an API key, passed by name (`docker -e KEY`), never on a command line or in logs. Secrets live in `state/secrets.env` (mode 600), not in the config.
-- **Blast radius:** PRs only, never merges (on the local forge, merge and publish are human-only: a button, the CLI, or a scenario step behind an approval); protected paths (CI, its own config) are off limits; caps on runs per day, attempts, time and (for API keys) spend; `Pause` in the UI or `touch state/STOP` halts everything.
-- **Local forge:** everything pushed into the bare repo is untrusted. It is created with no hooks and configured to ignore them (pushes run `git-receive-pack`, which reads the repo's own config), objects are fsck-checked, sandboxes clone over `file://` so they copy objects rather than hard-link the repo's files, merging never checks code out (it builds the merge as git objects and moves the branch with a compare-and-swap), protected paths are checked again at merge time, and a branch that changed since the factory verified it cannot be merged.
+- **Who can queue work:** only issues authored by `allowedAuthors` (GitHub) / `allowedReporterIds` (Ossicone). Ticket text is treated as untrusted data in the agent's prompt, and only comments from trusted authors reach the agent.
+- **Sandbox:** each run is a throwaway container (`--user` = your uid, 2 GB / 2 CPU) on a Docker `--internal` network. The only way out is a tiny proxy that allows CONNECT to your agent's API hosts (and the npm registry) and denies everything else. The agent receives no GitHub token. Free and local model calls happen on the host, so those keys never enter a container.
+- **Credentials:** Codex uses a **dedicated login directory** for the factory, never your personal `~/.codex`. Claude uses a long-lived token from `claude setup-token` or an API key, passed by name (`docker -e KEY`), never on a command line or in logs. Secrets live in `state/secrets.env` (mode 600).
+- **Blast radius:** pull requests only, and merging only when you press the button, run the CLI, approve a scenario step, or switch on autonomy (which has caps); protected paths (CI, its own config) are off limits; caps on runs per day, attempts, time and spend; **Pause** in the UI or `touch state/STOP` halts everything.
+- **Local forge:** everything pushed into the bare repo is untrusted. It is created with no hooks, objects are fsck-checked, sandboxes clone over `file://`, merging never checks code out (it builds the merge as git objects and moves the branch with a compare-and-swap), protected paths are checked again at merge time, and a branch that changed since the factory verified it cannot be merged.
 - **UI/API:** loopback bind (refused otherwise unless you opt in), bearer token on every API route, Host-header allowlist against DNS rebinding, same-origin writes only, strict CSP, request size limits, no `innerHTML`.
 - **Known limits:** the proxy allows any path on an allowed host (so a sandboxed agent could still send data *to* `api.anthropic.com`/`chatgpt.com`); a determined prompt injection in a ticket from an allowed author is still a risk, so review every PR; Docker is not a perfect security boundary; if you expose the UI beyond localhost, put TLS and your own auth in front.
 
@@ -226,43 +293,50 @@ Using a consumer subscription (ChatGPT, Claude) to drive an unattended agent may
 
 ## What's verified
 
-All of this was run for real, not just unit-tested:
+All of this was run for real, not just unit-tested.
 
-- Issue → sandboxed agent (Claude and Codex) → tests → draft PR on real GitHub repos, including across multiple repos from one tracker.
+**The core loop**
+- Issue → sandboxed agent (Claude and Codex) → tests → draft PR on real GitHub repos, including across several repos from one tracker.
 - Failing GitHub Actions CI → log fetched → agent fix pushed → CI green. Review comment → follow-up commit.
-- Crash recovery, daily caps, protected paths, repo allowlist, clarity gate.
-- The egress proxy blocking direct access and non-allowlisted hosts (real Docker test).
-- The web UI used in a real browser: a ticket typed into the prompt bar became a PR while the live pipeline view tracked it; run detail, board, charts and Connect pages checked against real runs.
-- Creating a brand-new GitHub repo from a template, building it from a one-paragraph spec, answering a review comment on it, and bouncing a vague ticket; all against real GitHub and re-verified independently (clone, run its tests).
-- A brief + PRD turned into a 5-ticket plan by the real agent, launched, and ticket 1 built into a PR with that context.
-- The reuse library on a real private GitHub repo: a part promoted, the library CI green, and a real agent run that was told about the part, copied it with its provenance header, and shipped a PR that lists it and carries `.factory/parts.lock.json`.
-- The MCP server driven by the official MCP SDK client against the running app (handshake, tools, Code Mode execute, error handling).
+- Crash recovery, daily caps, protected paths, repo allowlist, clarity gate, and the egress proxy blocking non-allowlisted hosts (real Docker test).
+- **The full loop on a clean machine** (fresh clone, no git config, no `gh` login, a real device-code Codex login): the agent built a library on the local forge, the factory ran `npm test`, opened and merged a PR, and the merged code passed independent acceptance checks.
+- The reuse library adopted by the real agent in three real projects, checked independently.
 
-**Integrations, honestly:** GitHub (both roles) and **Ossicone** were run end to end against real servers. For Ossicone that means: a new project created on a live instance, connected through the wizard API, tickets queued in Ossicone, claimed and built into PRs on GitHub, with the ticket's status (`code_review`), labels and a PR-link comment written back to Ossicone; a vague ticket bounced to `agent-needs-info`, then fixed from the inbox (detail appended, requeued, built); comment, edit and close from the inbox. Account creation itself is left to the user: the wizard detects whether a server allows sign-up and links to it. Jira, Linear, GitLab and Bitbucket were built from their API documentation and tested against fakes that mirror those APIs, plus real calls confirming the endpoints are reached and bad credentials fail cleanly (GitLab and Linear 401, Jira site-unavailable; Bitbucket returned an inconclusive 503 for a made-up workspace). **I have not run a full ticket → PR cycle on a real Jira, Linear, GitLab or Bitbucket account**; please try one and open an issue if anything differs from the docs.
+**Recent, on the real stack**
+- **A whole site from a brief:** *Hillside Cafe*, a local project. The factory planned it (1 medium and 4 small tickets), then ran a designer pass (3 page designs and a brand and artwork set), matched the real pages to them, added a looping video background and fixed a layout bug. **13 tickets were merged** and the project's own 52 tests pass.
+- **Owner notes reach the agent.** A comment with a phone number on a ticket appeared exactly in the built page. (An earlier run showed such answers were being ignored; that gap is fixed and tested.)
+- **The harness on the real Codex path:** a forced bad answer from the cheaper model was refused and the job stepped up to the stronger one, with the reason logged. This drill also found a bug where the failed call's tokens were not counted, now fixed.
+- **Benchmarks** for the cheaper-model defaults (numbers in the table above; evidence in [`docs/evidence/`](docs/evidence)). One run per model on small corpora: a strong signal, not a guarantee.
+- **Free models:** real reviews and a real bug fix on free OpenRouter models, with automatic swap when one is limited, and Codex taking over when it runs out.
 
-**Also verified for real (latest work):**
+**Not verified:** whether the cheaper-model defaults actually save your Codex plan (token counts cannot show plan usage: watch yours); the builder on cheaper models beyond small tickets; publishing to a real GitHub/GitLab account (tested against a local bare remote only); Jira epics and the Cloudflare plugin against real services; parallel lanes with several real agents at once; non-Linux systems; a long unattended soak (days). Local models are tested against a real Ollama but are too slow on a CPU-only laptop to be a reviewer.
 
-- **Local-first loop with the real Codex agent:** a project created with no GitHub or tracker account; a ticket built by the agent into the local forge (module, tests, `package.json`); the PR reviewed in the real browser with a coloured diff, provenance and quality gate; merged by fast-forward; and the merged code's tests passing on a fresh clone of the repository.
-- **Built-in tracker in the real browser:** epics with progress, a ticket page, a comment posted, and the factory writing a real failure back to a ticket as a comment.
-- **Discipline checks** (tests weakened or deleted are flagged, a replaced run cannot publish, the review cap, provenance) are covered by tests against real git with a scripted agent; they have **not** yet been observed with a real agent misbehaving.
-- Git-level behaviour of the forge (parallel branches, conflicts, protected paths, a tampered branch, planted hooks, publish with a diverged remote) is tested against real git repositories.
+**Not built yet:** inline review comments and multi-person approvals on the local forge; a tracker file lock for multiple processes; SQLite state (it is JSON files); multi-user auth for the UI.
 
-- **Library parts adopted by the real agent in three real projects** (`relay`, `reverb`, `channel-watch`): draft PRs that replace hand-copied code with tested library parts. Checked independently by running them: `channel-watch`'s 124 tests pass on the PR branch, `relay`'s tests pass and its `security.py` is identical to the part, and both MCP servers (`relay`, `reverb`) were started and exercised (health, 401, 405, a real tool listing). This also exposed (and fixed) a bug where tests in a sub-folder were never run by the factory, which is why those three runs were not machine-checked by the factory itself.
+## Documentation
 
-- **The full loop on a clean machine** (fresh clone, fresh `HOME` with no git config, no `gh` login and no agent login, a real device-code Codex login, a first project on this machine with a test command): the agent built a small library, the factory ran `npm test`, opened a PR on the local forge, merged it, and the merged code passed the ticket's acceptance criteria when checked independently in a container. Running it found and fixed two bugs: the commit failed on a machine with no git identity, and `init` printed "Done" after a failed login.
-
-**Not verified:** publishing to a real GitHub/GitLab account (tested against a local bare remote only); the Jira epics and the Cloudflare plugin against real services; parallel lanes with several real agents at once; non-Linux systems; a long unattended soak (days).
-
-**Not built yet:** inline review comments and multi-person approvals on the local forge; a tracker file lock for multiple processes; SQLite state (it is JSON files); multi-user auth for the UI; metrics for time from ready to merged.
+| Doc | For |
+|---|---|
+| [docs/GUIDE.md](docs/GUIDE.md) | The longer walkthrough (some screens predate the newest UI; this README is current) |
+| [docs/setup.md](docs/setup.md) | Per-OS prerequisites, creating tokens, running as a service, troubleshooting |
+| [docs/AUTOPILOT.md](docs/AUTOPILOT.md) | Schedules, roles, skills, designs, unattended mode, delegation, local models, the harness |
+| [docs/AGENT-GUIDE.md](docs/AGENT-GUIDE.md) | Hand this to Claude or Codex so it can drive the factory (or run `agent-factory agents-md`) |
+| [docs/WORKFLOW.md](docs/WORKFLOW.md) | The AI workflow for evaluators: stages, trust boundaries, guardrails, failure modes, open risks |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | Scenarios, plugins, new trackers and hosts |
+| [docs/gaps-and-roadmap.md](docs/gaps-and-roadmap.md) | Known gaps and what is next |
+| [docs/evidence/](docs/evidence) | Benchmark results behind the model defaults |
+| [CHANGELOG.md](CHANGELOG.md) | What changed |
 
 ## Development
 
 ```bash
-npm test                          # ~200 tests, no network needed
+npm test                          # 518 tests, no network needed
 FACTORY_DOCKER_TESTS=1 npm test   # also runs the real Docker egress-proxy test
+npm run drill                     # nine guardrails against a misbehaving scripted agent
+npm run drill:real                # the same against your real agent (uses your plan)
 ```
 
-One optional dependency (QuickJS, for MCP Code Mode); everything else is plain Node. Layout: `src/factory.mjs` (ticket loop), `src/feedback.mjs` (CI/review loop), `src/engine.mjs` (projects, limits), `src/server.mjs` + `ui/` (API, UI and MCP), `src/ops.mjs` (every operation, defined once and served as REST, MCP tools and Code Mode), `src/adapters/` (tickets incl. the built-in tracker, sandbox, agents, git hosts incl. the local forge `host-local.mjs`), `src/quality.mjs` (quality gate and test-tampering checks), `src/leases.mjs` (claims with fencing tokens), `src/library.mjs`, `src/pack.mjs`, `src/scenarios.mjs`, `src/plugins.mjs`. Design notes: [docs/design.md](docs/design.md), [docs/design-local-forge.md](docs/design-local-forge.md); the landscape and why this exists: [docs/landscape.md](docs/landscape.md).
+Plain Node, no build step. One optional dependency (QuickJS, for MCP Code Mode). Layout: `src/factory.mjs` (the ticket loop), `src/engine*.mjs` (projects, delegation, local and free models, improvement loop), `src/harness.mjs` and `src/claims.mjs` (the checks around each model), `src/server.mjs` (REST and the push stream), `src/ops.mjs` (the 144 operations shared by MCP and CLI), `ui/` (the web UI, vanilla JS, no framework), `scripts/` (benchmarks and drills). The Line's machines are cut from `design/line-reference.png` by `scripts/make-line-sprites.py`.
 
 ## License
 
