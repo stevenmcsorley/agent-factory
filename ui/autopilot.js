@@ -8,8 +8,8 @@ const hours = (ms) => (ms >= 3_600_000 ? `${(ms / 3_600_000).toFixed(1)} h` : `$
 const lbl = (text, ctl, help) => h('div', { class: 'sfield' }, h('label', {}, text), ctl, help ? h('small', { class: 'help muted' }, help) : null);
 
 export async function loadAutopilot(id) {
-  const [waiting, auto, roles, preview] = await Promise.all([api(`/projects/${id}/waiting`), api(`/projects/${id}/autonomy`), api('/roles'), api(`/projects/${id}/preview`)]);
-  return { waiting, auto, roles, preview };
+  const [waiting, auto, roles, preview, unattended] = await Promise.all([api(`/projects/${id}/waiting`), api(`/projects/${id}/autonomy`), api('/roles'), api(`/projects/${id}/preview`), api(`/projects/${id}/unattended`).catch(() => null)]);
+  return { waiting, auto, roles, preview, unattended };
 }
 
 function waitingCard(w) {
@@ -53,18 +53,31 @@ function rolesCard(id, roles, rerender, projectRoles) {
     h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: save }, 'Save'), h('a', { class: 'btn ghost', href: '#/settings' }, 'Model for each role')));
 }
 
+// One switch for "build this project start to finish without me": roles, autonomous mode, fix rounds and conflict resolution together.
+function unattendedCard(id, u, rerender) {
+  if (!u) return null; const rounds = h('input', { type: 'number', min: '0', max: '5', value: u.rounds ?? 2, 'aria-label': 'Fix rounds' }); const per = h('input', { type: 'number', min: '1', max: '100', value: u.maxMergesPerDay ?? 20, 'aria-label': 'Merges per day' });
+  const sec = h('input', { type: 'checkbox', id: 'un-sec' }); sec.checked = !!u.roles?.security;
+  const go = (on) => act(async () => { await api(`/projects/${id}/unattended`, { method: 'POST', body: { on, rounds: Number(rounds.value), security: sec.checked, maxMergesPerDay: Number(per.value) } }); }, on ? 'Unattended mode is on' : 'Autonomous merging is off', rerender);
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Unattended mode'), u.on ? h('span', { class: 'stamp warn' }, 'ON: builds and merges by itself') : h('span', { class: 'stamp' }, 'off')),
+    h('p', { class: 'muted' }, 'One switch to build this project start to finish without you. It turns on the reviewer, tester and spec writer and autonomous merging. If the reviewers ask for changes the builder fixes them and the reviewers look again; merge conflicts are resolved automatically. A change merges only when the tests pass, the reviewers approve and the visual check is clean. If it cannot get there it stops and tells you (Inbox and notifications).'),
+    u.needs.length ? h('div', { class: 'note info' }, icon('plug', 15), h('div', {}, h('b', {}, 'Before this can be switched on: '), u.needs.join('; '), '.')) : null,
+    h('div', { class: 'sfields' }, lbl('Fix rounds per pull request', rounds, 'Then it is held for you. 0 turns fixing off.'), lbl('Automatic merges per day', per, `The factory-wide limit is ${u.factoryMergesPerDay} a day (Settings).`)),
+    h('label', { class: 'check', for: 'un-sec' }, sec, ' Keep the security reviewer on', h('small', { class: 'help muted' }, ' (off suits a static site with no backend)')),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: u.needs.length > 0, onclick: go(true) }, icon('check', 13), u.on ? 'Update' : 'Turn on unattended mode'), u.on ? h('button', { class: 'btn', onclick: go(false) }, 'Turn off') : null));
+}
+
 function autonomyCard(id, a, rerender) {
   const s = a.settings; const on = a.active;
   const mode = h('input', { type: 'checkbox', id: 'au-mode' }); mode.checked = s.mode === 'merge';
   const chk = (key, label, help) => { const c = h('input', { type: 'checkbox', id: `au-${key}` }); c.checked = !!s[key]; return { c, row: h('label', { class: 'check', for: `au-${key}` }, c, ' ', label, help ? h('small', { class: 'help muted' }, ` ${help}`) : null) }; };
-  const rr = chk('requireReviewer', 'The reviewer agent must approve', 'recommended'); const rc = chk('requireChecks', 'A test command must have checked the change, covering the files it touched', 'recommended'); const ff = chk('fixFailures', 'File a fix ticket when the pipeline breaks after a merge');
+  const rr = chk('requireReviewer', 'The reviewer agent must approve', 'recommended'); const rc = chk('requireChecks', 'A test command must have checked the change, covering the files it touched', 'recommended'); const ff = chk('fixFailures', 'File a fix ticket when the pipeline breaks after a merge'); const ar = chk('autoResolveConflicts', 'Resolve merge conflicts automatically before holding a pull request'); const rounds = h('input', { type: 'number', min: '0', max: '5', value: s.fixReviewRounds ?? 2, 'aria-label': 'Fix rounds' });
   const per = h('input', { type: 'number', min: '1', max: '100', value: s.maxMergesPerDay, 'aria-label': 'Merges per day' }); const att = h('input', { type: 'number', min: '1', max: '5', value: s.fixAttemptsPerWorkflow, 'aria-label': 'Fix attempts' });
-  const save = act(async () => { await api(`/projects/${id}/autonomy`, { method: 'POST', body: { settings: { mode: mode.checked ? 'merge' : 'off', requireReviewer: rr.c.checked, requireChecks: rc.c.checked, fixFailures: ff.c.checked, maxMergesPerDay: Number(per.value), fixAttemptsPerWorkflow: Number(att.value) } } }); }, 'Autonomy saved', rerender);
+  const save = act(async () => { await api(`/projects/${id}/autonomy`, { method: 'POST', body: { settings: { mode: mode.checked ? 'merge' : 'off', requireReviewer: rr.c.checked, requireChecks: rc.c.checked, fixFailures: ff.c.checked, autoResolveConflicts: ar.c.checked, fixReviewRounds: Number(rounds.value), maxMergesPerDay: Number(per.value), fixAttemptsPerWorkflow: Number(att.value) } } }); }, 'Autonomy saved', rerender);
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Autonomous mode'), on ? h('span', { class: 'stamp warn' }, 'ACTIVE: merges on its own') : h('span', { class: 'stamp' }, 'off')),
     h('div', { class: 'note warn' }, icon('alert', 15), h('div', {}, h('b', {}, 'This merges pull requests without a human. '), 'By default the factory never merges. In this mode it merges a change only when its tests passed, the quality gate is clean, CI is green, no review comment is unhandled and (if ticked below) the reviewer agent approved. It then watches the pipeline and files a fix ticket if it breaks. Every merge is logged and commented on the ticket.')),
     a.global.allow ? null : h('div', { class: 'note info' }, icon('plug', 15), h('div', {}, 'Autonomous merging is switched off for the whole factory. ', h('a', { href: '#/settings' }, 'Turn it on in Settings'), ' first.')),
-    h('label', { class: 'check gap-t', for: 'au-mode' }, mode, ' Let this project merge its own pull requests'), rr.row, rc.row, ff.row,
-    h('div', { class: 'sfields' }, lbl('Automatic merges per day (this project)', per), lbl('Fix tickets per failing workflow', att, 'Then it stops and leaves it to you.')),
+    h('label', { class: 'check gap-t', for: 'au-mode' }, mode, ' Let this project merge its own pull requests'), rr.row, rc.row, ff.row, ar.row,
+    h('div', { class: 'sfields' }, lbl('Fix rounds when the reviewers ask for changes', rounds, 'The builder addresses their findings and the reviewers look again, up to this many times per pull request; then it is held for you. 0 turns it off.'), lbl('Automatic merges per day (this project)', per), lbl('Fix tickets per failing workflow', att, 'Then it stops and leaves it to you.')),
     h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: save }, icon('check', 13), 'Save')),
     a.held.length ? h('div', {}, h('h3', {}, 'Held back right now'), h('ul', { class: 'reasons' }, a.held.map((x) => h('li', {}, h('b', {}, `#${x.pr} ${x.title ?? ''}`), h('div', { class: 'muted small' }, x.blockers.join('; ')))))) : null,
     a.recent.length ? h('div', {}, h('h3', {}, 'Merged automatically'), h('ul', { class: 'reasons' }, a.recent.map((x) => h('li', {}, h('b', {}, `#${x.pr} ${x.title ?? ''}`), h('span', { class: 'muted small' }, ` · ${ago(x.at)}${x.review ? ` · reviewer ${x.review}` : ''}`))))) : null,
@@ -103,5 +116,5 @@ function previewCard(id, pv, rerender, poll) {
 
 export function autopilotTab(data, { id, rerender, project, poll }) {
   if (!data) return h('div', { class: 'empty' }, h('b', {}, 'Could not load autopilot'));
-  return h('div', { class: 'stack' }, waitingCard(data.waiting), scheduleCard(id, data.waiting, rerender), rolesCard(id, data.roles, rerender, project?.roles), previewCard(id, data.preview, rerender, poll), autonomyCard(id, data.auto, rerender));
+  return h('div', { class: 'stack' }, unattendedCard(id, data.unattended, rerender), waitingCard(data.waiting), scheduleCard(id, data.waiting, rerender), rolesCard(id, data.roles, rerender, project?.roles), previewCard(id, data.preview, rerender, poll), autonomyCard(id, data.auto, rerender));
 }

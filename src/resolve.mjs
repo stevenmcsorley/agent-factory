@@ -22,7 +22,7 @@ export function resolvePrompt(pr, base, files, findings = '') {
 
 // deps: the same bundle the factory loop uses (host, sandbox, agent, vcs, config, stateDir). `pr`: {number, branch, title}. Returns the run record.
 export async function resolveConflicts({ host, sandbox, agent, vcs, config, stateDir }, pr, { base = 'main', findings = '' } = {}) {
-  const run = startRun({ pr: pr.number, prNumber: pr.number, title: `Resolve conflicts on #${pr.number}: ${pr.title ?? ''}`.trim(), round: 'conflicts', repo: config.repo, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
+  const run = startRun({ prNumber: pr.number, title: `Resolve conflicts on #${pr.number}: ${pr.title ?? ''}`.trim(), round: 'conflicts', repo: config.repo, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
   const rec = run.rec; let ws; const git = (args, o = {}) => sh('git', [...SAFE_GIT, ...args], { cwd: ws.dir, ...o });
   try {
     run.phase('sandbox', 'cloning the PR branch');

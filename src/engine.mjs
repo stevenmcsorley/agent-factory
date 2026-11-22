@@ -46,6 +46,7 @@ import { agentMethods } from './engine-agents.mjs';
 import { limitMethods } from './engine-limit.mjs';
 import { presetMethods } from './engine-presets.mjs';
 import { reviewMethods } from './engine-review.mjs';
+import { unattendedMethods } from './engine-unattended.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -926,4 +927,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods, unattendedMethods);

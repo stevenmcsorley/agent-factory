@@ -56,6 +56,9 @@ export const autonomyMethods = {
       const fb = await d.host.getFeedback(pr);
       const todays = st.merges.filter((m) => m.at.startsWith(day())); const globalLimit = this.cfg.autonomy.maxMergesPerDay ?? 10;   // counted from the live list, so merges earlier in this same pass count
       let v = mergeVerdict({ global: this.cfg.autonomy, auto, run: byNumber.get(pr.number), feedback: fb, seenComments: prState[pr.number]?.seen ?? [], mergedToday: todays.filter((m) => m.project === p.id).length });
+      // held for something a fix can cure (the reviewers asked for changes, or it conflicts)? Try a bounded round, then look at the gate again
+      if (!v.ok) { const fresh = await this._autoFix(p, pr, byNumber.get(pr.number), v, st, d).catch((e) => { this._audit({ what: 'auto-fix-error', project: p.id, pr: pr.number, error: String(e.message ?? e).slice(0, 200) }); return null; });
+        if (fresh) { byNumber.set(pr.number, fresh); const fb2 = await d.host.getFeedback(pr).catch(() => fb); v = mergeVerdict({ global: this.cfg.autonomy, auto, run: fresh, feedback: fb2, seenComments: prState[pr.number]?.seen ?? [], mergedToday: todays.filter((m) => m.project === p.id).length }); } }
       if (v.ok && todays.length >= globalLimit) v = { ok: false, blockers: [`the factory-wide limit of ${globalLimit} automatic merges today is reached`] };
       if (!v.ok) { held.push({ pr: pr.number, title: pr.title, blockers: v.blockers }); results.push({ pr: pr.number, status: 'held' }); continue; }
       try {

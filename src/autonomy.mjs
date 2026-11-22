@@ -3,7 +3,7 @@
 // and every condition below must hold for every merge. The decision is a pure function so the exact reasons can be shown and tested.
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 
-export const AUTONOMY_DEFAULTS = { mode: 'off', requireReviewer: true, requireChecks: true, maxMergesPerDay: 5, fixFailures: true, fixAttemptsPerWorkflow: 2 };
+export const AUTONOMY_DEFAULTS = { mode: 'off', requireReviewer: true, requireChecks: true, maxMergesPerDay: 5, fixFailures: true, fixAttemptsPerWorkflow: 2, fixReviewRounds: 2, autoResolveConflicts: true };
 
 export function normalizeAutonomy(input, current = {}) {
   if (input === null) return null;
@@ -11,8 +11,8 @@ export function normalizeAutonomy(input, current = {}) {
   const known = Object.keys(AUTONOMY_DEFAULTS); const unknown = Object.keys(input).filter((k) => !known.includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" is not an autonomy setting. Settings: ${known.join(', ')}`);
   const out = { ...AUTONOMY_DEFAULTS, ...current };
   if (input.mode !== undefined) { if (!['off', 'merge'].includes(input.mode)) throw bad('mode must be "off" or "merge"'); out.mode = input.mode; }
-  for (const k of ['requireReviewer', 'requireChecks', 'fixFailures']) if (input[k] !== undefined) { if (typeof input[k] !== 'boolean') throw bad(`${k} must be true or false`); out[k] = input[k]; }
-  for (const [k, max] of [['maxMergesPerDay', 100], ['fixAttemptsPerWorkflow', 5]]) if (input[k] !== undefined) { const n = Number(input[k]); if (!Number.isInteger(n) || n < 1 || n > max) throw bad(`${k} must be a whole number from 1 to ${max}`); out[k] = n; }
+  for (const k of ['requireReviewer', 'requireChecks', 'fixFailures', 'autoResolveConflicts']) if (input[k] !== undefined) { if (typeof input[k] !== 'boolean') throw bad(`${k} must be true or false`); out[k] = input[k]; }
+  for (const [k, max, min] of [['maxMergesPerDay', 100, 1], ['fixAttemptsPerWorkflow', 5, 1], ['fixReviewRounds', 5, 0]]) if (input[k] !== undefined) { const n = Number(input[k]); if (!Number.isInteger(n) || n < min || n > max) throw bad(`${k} must be a whole number from ${min} to ${max}`); out[k] = n; }
   return out;
 }
 

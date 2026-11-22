@@ -148,6 +148,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/(pause|resume)$/, async (m) => engine.setProjectPaused(m[1], m[2] === 'pause')],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m) => engine.listTickets(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m, b) => engine.createTicket(m[1], b)],
+    ['GET', /^\/api\/projects\/([a-z0-9-]+)\/unattended$/, async (m) => engine.unattendedStatus(m[1])],
+    ['POST', /^\/api\/projects\/([a-z0-9-]+)\/unattended$/, async (m, b) => engine.setUnattended(m[1], b ?? {})],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/prs$/, async (m) => engine.listPrs(m[1])],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/prs\/(\d{1,9})$/, async (m) => engine.prDetail(m[1], m[2])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/prs\/(\d{1,9})\/(merge|close|comment|rebuild|resolve)$/, async (m, b) => engine.prAction(m[1], m[2], m[3], b)],
