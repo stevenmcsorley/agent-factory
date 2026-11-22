@@ -637,6 +637,7 @@ export class Engine {
   }
   // A ticket is created only when everything it depends on is done (merged and closed), so each one builds on real code.
   async releasePlan(id) {
+    if (this._designPass?.get(id)?.state === 'running') return { released: 0, waiting: 'designs' };   // unattended: the screens and artwork come first
     const dir = this._packDir(id); let pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return { released: 0 };
     pack = await this.syncPlan(id); if (pack.plan?.status !== 'launched') return { released: 0 };
     const all = pk.planTickets(pack.plan); const done = new Set(all.filter((t) => t.status === 'done').map((t) => t.id)); let released = 0;

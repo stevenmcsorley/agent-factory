@@ -22,9 +22,10 @@ const write = (f, c) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs
 // An engine whose agent is scripted: a fix prompt makes the change the reviewers wanted (when `fixes`), a review prompt approves only a file that has the header.
 function world({ fixes = true } = {}) {
   const root = tmp(); const calls = { fix: 0, review: 0 };
-  const sandbox = { create: async ({ cloneUrl, branch, base, newBranch }) => { const dir = fs.mkdtempSync(path.join(root, 'ws-')); execFileSync('git', ['clone', '-q', '--branch', newBranch === false ? branch : base, cloneUrl, dir]); if (newBranch !== false) git(dir, 'checkout', '-qb', branch); return { dir, cloneUrl, destroy() {} }; },
+  const sandbox = { create: async ({ cloneUrl, branch, base, newBranch }) => { const dir = fs.mkdtempSync(path.join(root, 'ws-')); execFileSync('git', ['clone', '-q', '--branch', newBranch === false && branch !== 'design' ? branch : base, cloneUrl, dir]); if (newBranch !== false) git(dir, 'checkout', '-qb', branch); return { dir, cloneUrl, destroy() {} }; },
     exec: async (ws, cmd, args) => { try { return { code: 0, out: execFileSync(cmd, args, { cwd: ws.dir, stdio: 'pipe' }).toString() }; } catch (e) { return { code: e.status ?? 1, out: String(e.stdout ?? '') + String(e.stderr ?? '') }; } } };
   const agent = { run: async (_sb, ws, prompt) => {
+    if (/## What to (design|draw)/.test(prompt)) { calls.design = (calls.design ?? 0) + 1; const out = path.join(ws.dir, '.factory-design'); if (/## What to draw/.test(prompt)) { write(path.join(out, 'assets', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'); write(path.join(out, 'assets', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle r="4"/></svg>'); } else write(path.join(out, 'design.html'), `<!doctype html><html><body><main><h1>${/the (\S+\.html) page/.exec(prompt)?.[1] ?? 'page'}</h1></main></body></html>`); return { out: 'designed', costUsd: 0 }; }
     if (/Independent reviewers asked for changes/.test(prompt)) { calls.fix++; if (fixes) write(path.join(ws.dir, 'a.js'), '// header\nexport const a = 1;\n'); return { out: 'done', costUsd: 0 }; }
     calls.review++; const has = fs.readFileSync(path.join(ws.dir, 'a.js'), 'utf8').includes('// header');
     return { out: JSON.stringify(has ? { verdict: 'approve', summary: 'good', findings: [] } : { verdict: 'changes', summary: 'needs a header', findings: [{ severity: 'major', file: 'a.js', line: 1, issue: 'the file has no header comment', fix: 'add one' }] }), costUsd: 0 };
@@ -88,4 +89,26 @@ test('autonomous mode: two passes at once on one project never run two fix round
   const w = world(); await heldPr(w); w.e.setUnattended('app', { rounds: 2 }); const p = w.e.project('app');
   const [a, b] = await Promise.all([w.e.autopilot(p), w.e.autopilot(p)]); const all = [...a, ...b].map((r) => r.status).sort();
   assert.deepEqual(all, ['merged', 'skipped-busy']); assert.equal(w.calls.fix, 1, 'one fix round, not two');
+});
+
+test('design pass: one screen per page named in the brief plus an artwork set, approved automatically, with tickets held back until it is done', async () => {
+  const w = world(); await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } });
+  assert.throws(() => w.e.designProject('app', {}), /brief first/);
+  w.e.setPack('app', { brief: { goal: 'A small shop site for tenement flats.', scope: '- `index.html` Home: the hero and cards.\n- `about.html` About: what the shop is for.\n- `index.html` is also the brand home.' } });
+  const r = w.e.designProject('app', {}); assert.equal(r.started, true); assert.deepEqual(r.jobs, ['Index page', 'About page', 'Brand and artwork set']);
+  assert.throws(() => w.e.designProject('app', {}), /already working/);
+  for (let i = 0; i < 200 && w.e.designPassStatus('app').state === 'running'; i++) await new Promise((r) => setTimeout(r, 50));
+  const st = w.e.designPassStatus('app'); assert.equal(st.state, 'done', st.error ?? ''); assert.equal(st.done, 3); assert.equal(st.inUse, 3);
+  const used = w.e.designsInUse?.('app') ?? null; void used; const pack = (await import('../src/designs.mjs')).inUse(w.e._packDir('app')); assert.deepEqual(pack.designs.map((d) => d.kind).sort(), ['assets', 'screen', 'screen']);
+  assert.equal(w.e.designProject('app', {}).started, false, 'idempotent: everything already has a design');
+  assert.match(w.e._designContext('app'), /index|About|page/i, 'the builder is told about the approved designs');
+});
+
+test('design pass: the unattended switch starts it (and says so), and tickets are not released while it runs', async () => {
+  const w = world(); await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } }); w.e.setVerify('app', { verify: 'npm test' }); w.e.setAutonomyAllowed({ allow: true });
+  w.e.setPack('app', { brief: { goal: 'A small shop site for tenement flats.', scope: '- `index.html` Home.' } });
+  const s = w.e.setUnattended('app', {}); assert.equal(s.design.started, true); assert.equal(s.design.approve, true);
+  w.e._designPass.get('app').state = 'running'; assert.equal((await w.e.releasePlan('app')).waiting, 'designs');
+  for (let i = 0; i < 200 && w.e.designJobs?.size; i++) await new Promise((r) => setTimeout(r, 50));
+  w.e._designPass.get('app').state = 'done'; assert.equal(w.e.setUnattended('app', { designs: false }).design, null);
 });
