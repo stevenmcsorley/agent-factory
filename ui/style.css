@@ -501,3 +501,37 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 .line-card.l3::before, .line-card.l3::after { display: none; } .line-card.l3 .agent .a-top { flex-wrap: nowrap; white-space: nowrap; } .line-card.l3 .agent .a-top b { overflow: hidden; text-overflow: ellipsis; }
 
 .line3d .l3-parcel { opacity: 0; transition: opacity .3s; } .line3d .l3-station.on .l3-parcel { opacity: 1; }
+
+/* ---- THE LINE 3D, machines and parcel (these motions run only while a job is at that station; the .9s delay lets the parcel slide in first) */
+.line3d .l3-name.on { fill: #ffb08a; } .line3d .l-part-g .bob { animation: none; transform-box: fill-box; transform-origin: 50% 100%; } .line3d .l-labels .l-part-g { transition: transform .95s cubic-bezier(.45, 0, .2, 1), opacity .5s ease; }
+.line3d .p-label, .line3d .p-check, .line3d .p-tape { opacity: 0; } .line3d .p-code { transform-box: fill-box; transform-origin: left center; transform: scaleX(0); }
+.line3d .s1 .p-label, .line3d .s2 .p-label, .line3d .s3 .p-label, .line3d .s4 .p-label, .line3d .s5 .p-label { opacity: 1; } .line3d .s3 .p-code, .line3d .s4 .p-code, .line3d .s5 .p-code { transform: scaleX(1); } .line3d .s4 .p-check, .line3d .s5 .p-check { opacity: 1; } .line3d .s5 .p-tape { opacity: .9; }
+.line3d .m-stamp, .line3d .m-door-l, .line3d .m-door-r, .line3d .m-a1, .line3d .m-a2, .line3d .m-scan, .line3d .m-lift, .line3d .m-head { transform-origin: 0 0; } .line3d .m-glow { opacity: 0; }
+.line3d .m-door-l, .line3d .m-door-r { transform: scaleX(0); } .line3d .m-a1 { transform: rotate(-118deg); } .line3d .m-a2 { transform: rotate(60deg); } .line3d .m-spark, .line3d .m-chev { opacity: 0; } .line3d .m-scan { opacity: 0; }
+.line3d .m-chev { fill: none; stroke: #ff8a4c; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; } .line3d .m-vlight { fill: #3b3d42; }
+/* claim: the stamper presses a label onto the parcel */
+.line3d .l3-station.on .m-stamp { animation: m-stamp 2.4s ease-in-out .9s infinite; } @keyframes m-stamp { 0%, 15% { transform: translateY(0); } 32%, 46% { transform: translateY(10px); } 66%, 100% { transform: translateY(0); } }
+.line3d .at-claim .p-label { animation: m-label 2.4s linear .9s infinite; } @keyframes m-label { 0%, 38% { opacity: 0; } 42%, 100% { opacity: 1; } }
+/* sandbox: the doors close, a blue field pulses around the parcel, then the doors open */
+.line3d .l3-station.on .m-door-l { animation: m-doorl 3.4s ease-in-out .9s infinite; } .line3d .l3-station.on .m-door-r { animation: m-doorr 3.4s ease-in-out .9s infinite; } .line3d .l3-station.on .m-glow { animation: m-glow 3.4s ease-in-out .9s infinite; }
+@keyframes m-doorl { 0%, 12% { transform: scaleX(0); } 30%, 72% { transform: scaleX(1); } 90%, 100% { transform: scaleX(0); } } @keyframes m-doorr { 0%, 12% { transform: scaleX(0); } 30%, 72% { transform: scaleX(1); } 90%, 100% { transform: scaleX(0); } }
+@keyframes m-glow { 0%, 25% { opacity: 0; } 40% { opacity: .95; } 55% { opacity: .5; } 68% { opacity: .95; } 85%, 100% { opacity: 0; } } .line3d .at-sandbox { animation: none; }
+.line3d .at-sandbox.bob { animation: m-seal 3.4s ease-in-out .9s infinite; } @keyframes m-seal { 0%, 30% { filter: none; } 45%, 68% { filter: drop-shadow(0 0 5px #5cc8ff) brightness(1.15); } 85%, 100% { filter: none; } }
+/* agent: the arm reaches over the parcel, sparks fly, and the code stripe grows */
+.line3d .l3-station.on .m-a1 { animation: m-a1 3.6s ease-in-out .9s infinite; } .line3d .l3-station.on .m-a2 { animation: m-a2 3.6s ease-in-out .9s infinite; } .line3d .l3-station.on .m-spark { animation: m-spark .3s steps(2) .9s infinite; }
+@keyframes m-a1 { 0%, 4% { transform: rotate(-118deg); } 24% { transform: rotate(-72.8deg); } 38% { transform: rotate(-71deg); } 50% { transform: rotate(-74deg); } 62% { transform: rotate(-71.5deg); } 72% { transform: rotate(-72.8deg); } 92%, 100% { transform: rotate(-118deg); } }
+@keyframes m-a2 { 0%, 4% { transform: rotate(60deg); } 24% { transform: rotate(131.1deg); } 38% { transform: rotate(133deg); } 50% { transform: rotate(129deg); } 62% { transform: rotate(132deg); } 72% { transform: rotate(131.1deg); } 92%, 100% { transform: rotate(60deg); } }
+@keyframes m-spark { 0% { opacity: 1; } 100% { opacity: .15; } } .line3d .l3-station.on .m-spark { visibility: visible; }
+.line3d .at-agent .p-code { animation: m-code 3.6s linear .9s infinite; } @keyframes m-code { 0%, 22% { transform: scaleX(0); } 70%, 100% { transform: scaleX(1); } }
+/* verify: a blue scan plane sweeps over the parcel, then a green light and a check mark */
+.line3d .l3-station.on .m-scan { animation: m-scan 2.8s ease-in-out .9s infinite; } @keyframes m-scan { 0%, 10% { transform: translateX(-26px); opacity: 0; } 18% { opacity: 1; } 62% { transform: translateX(24px); opacity: 1; } 70%, 100% { transform: translateX(24px); opacity: 0; } }
+.line3d .l3-station.on .m-vlight { animation: m-vlight 2.8s linear .9s infinite; } @keyframes m-vlight { 0%, 60% { fill: #3b3d42; } 66%, 92% { fill: #3be0a1; filter: drop-shadow(0 0 5px #3be0a1); } 100% { fill: #3b3d42; } }
+.line3d .at-verify .p-check { animation: m-check 2.8s linear .9s infinite; } @keyframes m-check { 0%, 62% { opacity: 0; } 70%, 100% { opacity: 1; } }
+/* push: a lift raises the parcel while upward arrows ripple */
+.line3d .l3-station.on .m-lift { animation: m-lift 3s ease-in-out .9s infinite; } .line3d .at-push.bob { animation: m-lift 3s ease-in-out .9s infinite; } @keyframes m-lift { 0%, 12% { transform: translateY(0); } 38%, 62% { transform: translateY(-14px); } 88%, 100% { transform: translateY(0); } }
+.line3d .l3-station.on .m-chev { animation: m-chev 1s ease-in-out .9s infinite; } .line3d .l3-station.on .m-chev1 { animation-delay: 1.15s; } .line3d .l3-station.on .m-chev2 { animation-delay: 1.4s; } @keyframes m-chev { 0%, 100% { opacity: .1; } 45% { opacity: 1; } }
+/* ship: the press comes down, the parcel squashes a little, and a strap seals it */
+.line3d .l3-station.on .m-head { animation: m-head 2.8s ease-in-out .9s infinite; } @keyframes m-head { 0%, 14% { transform: translateY(0); } 34%, 52% { transform: translateY(10px); } 72%, 100% { transform: translateY(0); } }
+.line3d .at-pr.bob { animation: m-squash 2.8s ease-in-out .9s infinite; } @keyframes m-squash { 0%, 26% { transform: scaleY(1); } 34%, 52% { transform: scaleY(.88); } 66%, 100% { transform: scaleY(1); } }
+.line3d .at-pr .p-tape { animation: m-tape 2.8s linear .9s infinite; } @keyframes m-tape { 0%, 40% { opacity: 0; } 52%, 100% { opacity: .9; } }
+@media (prefers-reduced-motion: reduce) { .line3d .l3-station.on * { animation: none !important; } }
