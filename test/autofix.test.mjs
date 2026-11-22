@@ -83,3 +83,9 @@ test('set_plan: a plan you bring yourself becomes the proposed plan, with depend
   assert.equal(r.plan.status, 'proposed'); assert.deepEqual(r.plan.epics[0].tickets.map((t) => [t.id, t.dependsOn]), [['foundation', []], ['shop', ['foundation']]]);
   await w.e.launchPlan('app'); const g = await w.e.getPlan('app'); assert.equal(g.progress.queued, 1, 'only the first ticket exists until it is merged'); assert.equal(g.progress.planned, 1);
 });
+
+test('autonomous mode: two passes at once on one project never run two fix rounds on the same PR (the second is skipped)', async () => {
+  const w = world(); await heldPr(w); w.e.setUnattended('app', { rounds: 2 }); const p = w.e.project('app');
+  const [a, b] = await Promise.all([w.e.autopilot(p), w.e.autopilot(p)]); const all = [...a, ...b].map((r) => r.status).sort();
+  assert.deepEqual(all, ['merged', 'skipped-busy']); assert.equal(w.calls.fix, 1, 'one fix round, not two');
+});

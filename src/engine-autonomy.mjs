@@ -46,6 +46,11 @@ export const autonomyMethods = {
 
   // One pass for one project: merge every pull request that meets every condition, record why the rest are held.
   async autopilot(p) {
+    // One pass per project at a time. A pass can include fix rounds that run for minutes; a second pass (the scheduled one racing a manual run) would start a second round on the same branch.
+    this._autoBusy ??= new Set(); if (this._autoBusy.has(p.id)) return [{ pr: null, status: 'skipped-busy' }]; this._autoBusy.add(p.id);
+    try { return await this._autopilot(p); } finally { this._autoBusy.delete(p.id); }
+  },
+  async _autopilot(p) {
     const auto = p.autonomy; const results = [];
     if (auto?.mode !== 'merge' || !this.cfg.autonomy?.allow) return results;
     const d = this.deps(p); const st = this._autoState(); st.held ??= {}; st.merges ??= []; const held = [];
