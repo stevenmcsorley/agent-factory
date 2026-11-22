@@ -10,7 +10,7 @@ const field = (label, control, help) => h('div', { class: 'sfield' }, h('label',
 const fmt = (v) => (v === null || v === undefined || v === '' ? 'default' : String(v));
 const STANDARD_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 
-function agentCard(s, ctx) {
+export function agentCard(s, ctx) {
   const a = s.agent; const known = s.models.length > 0;
   if (!a.acceptsModel) return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agent'), h('span', { class: 'stamp' }, KIND[a.kind] ?? a.kind)),
     h('p', { class: 'muted' }, `The ${KIND[a.kind] ?? a.kind} agent has no model setting. To change which agent is used, edit agent.kind in the config file.`));
@@ -66,7 +66,7 @@ function drawProbe(el, p, a) {
     stale ? h('p', { class: 'small warn' }, icon('alert', 13), ' The settings have changed since this check. Check again to see what the new ones give.') : null));
 }
 
-function limitsCard(s, st, ctx) {
+export function limitsCard(s, st, ctx) {
   const inputs = {}; const f = s.limitFields; const today = st?.today;
   const row = (k) => {
     const def = f[k]; const ms = def.unit === 'ms'; const cur = s.limits[k];
@@ -88,13 +88,13 @@ function limitsCard(s, st, ctx) {
     h('div', { class: 'sfields' }, keys.map(row)), h('div', { class: 'row', style: { marginTop: '14px' } }, save));
 }
 
-function historyCard(s) {
+export function historyCard(s) {
   const lines = (e) => Object.entries(e.changes ?? {}).flatMap(([group, fields]) => Object.entries(fields).map(([k, v]) => `${group}.${k}: ${fmt(v.from)} → ${fmt(v.to)}`));
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'Recent changes')),
     s.history.length ? h('ul', { class: 'hist' }, s.history.map((e) => h('li', {}, h('span', { class: 'muted small' }, ago(e.at)), h('span', { class: 'mono small' }, lines(e).join(' · '))))) : h('p', { class: 'muted small' }, 'Nothing changed from this page yet.'));
 }
 
-function rolesCard(r, s, ctx) {
+export function rolesCard(r, s, ctx) {
   const known = s.models.length > 0; const shown = Object.entries(r.roles).filter(([, v]) => v.toggle || s.agent.acceptsModel);   // an agent with no model setting has nothing to configure on the always-on roles
   const rows = shown.map(([k, v]) => {
     const model = known ? h('select', { 'aria-label': `${v.label} model` }, [h('option', { value: '' }, `Same as the default (${r.default.model ?? 'Codex default'})`), ...s.models.map((m) => h('option', { value: m.slug, selected: m.slug === v.agent.model }, m.name))]) : h('input', { value: v.agent.model ?? '', placeholder: 'same as the default', 'aria-label': `${v.label} model` });
@@ -120,7 +120,7 @@ function autonomyCard(a, ctx) {
 
 // Setups: a named bundle of models, effort and which optional agents are on. One click to apply, and new projects start with the default one.
 let pickedSetup = null;
-function setupCard(d, ctx) {
+export function setupCard(d, ctx) {
   const sel = h('select', { 'aria-label': 'Setup' }); const byName = new Map(d.presets.map((p) => [p.name, p]));
   pickedSetup = byName.has(pickedSetup) ? pickedSetup : (d.active && byName.has(d.active) ? d.active : (byName.has('standard') ? 'standard' : d.presets[0]?.name));
   for (const p of d.presets) sel.append(h('option', { value: p.name, selected: p.name === pickedSetup }, `${p.label ?? p.name}${p.builtin ? '' : ' (yours)'}${d.active === p.name ? ' · applied' : ''}${d.newProject === p.name ? ' · new projects' : ''}`));
@@ -142,7 +142,7 @@ function setupCard(d, ctx) {
     h('div', { class: 'row nowrap' }, name, h('button', { class: 'btn', onclick: run(() => api('/setups', { method: 'POST', body: { name: name.value.trim(), fromCurrent: true } }), 'Saved') }, 'Save current setup')));
 }
 
-function limitCard(s, ctx) {
+export function limitCard(s, ctx) {
   const on = h('input', { type: 'checkbox', id: 'auto-resume' }); on.checked = !!s.autoResume;
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('clock', 17), 'When the plan\'s usage limit is hit'), s.autoResume ? h('span', { class: 'stamp ok' }, 'auto-resume on') : h('span', { class: 'stamp warn' }, 'auto-resume off')),
     h('p', { class: 'muted small' }, 'Your agent plan has a usage limit that resets at a set time. The moment any agent reports it, the factory pauses every agent (instead of failing tickets one by one), says when it resumes, and keeps the queue. With auto-resume on it starts again by itself at that time and puts back the tickets the limit stopped. With it off it stays paused until you press Resume.'),
@@ -167,7 +167,8 @@ export const settings = {
   async load() { const [s, st, roles, au, nt, su] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy'), api('/notify'), api('/setups')]); return { s, st, roles, au, nt, su }; },
   draw({ s, st, roles, au, nt, su }, ctx) {
     return [head('Settings', 'Which model builds your tickets, and the guardrails around it. Changes apply from the next run and are saved to the config file: no restart.'),
-      setupCard(su, ctx), agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), limitCard(s, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
+      card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Agents and models'), h('a', { class: 'btn small', href: '#/agents/codex' }, 'Open')), h('p', { class: 'muted' }, 'The Codex model, how hard it thinks, the setups for each agent, what happens when the plan runs out, and the free models all live on the Agents page now.')),
+      limitsCard(s, st, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx),
       h('p', { class: 'muted small' }, `Not editable here on purpose: the agent type, sandbox and network allowlist, and the projects. Those are security boundaries and live in the config file.`)];
   },
 };

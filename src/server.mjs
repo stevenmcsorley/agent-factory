@@ -148,6 +148,7 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/(pause|resume)$/, async (m) => engine.setProjectPaused(m[1], m[2] === 'pause')],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m) => engine.listTickets(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m, b) => engine.createTicket(m[1], b)],
+    ['GET', /^\/api\/accounts$/, async (_m, _b, url) => engine.accounts({ days: url.searchParams.get('days'), calls: url.searchParams.get('calls') })],
     ['GET', /^\/api\/agents\/policy$/, async () => engine.agentPolicy()],
     ['POST', /^\/api\/agents\/policy$/, async (_m, b) => engine.setAgentPolicy(b ?? {})],
     ['GET', /^\/api\/openrouter$/, async () => engine.openrouterStatus()],
@@ -221,6 +222,7 @@ export function createServer(engine, { token, allowedHosts }) {
         const onChange = (topics) => { try { res.write(`event: change\ndata: ${JSON.stringify({ topics })}\n\n`); } catch { /* the connection is gone */ } }; const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 20_000);
         const done = () => { clearInterval(beat); engine.bus.off('change', onChange); streams.delete(res); }; streams.add(res); engine.bus.on('change', onChange); req.on('close', done); res.on('close', done); return;
       }
+      if (url.pathname === '/api/accounts.csv' && req.method === 'GET') return send(res, 200, await engine.accountsCsv(url.searchParams.get('days')), { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="agent-factory-usage.csv"' });
       const shot = /^\/api\/projects\/([a-z0-9-]+)\/visual\/(baseline|screens|[a-f0-9]{8})\/([a-z0-9-]+\.png)$/.exec(url.pathname);
       if (shot && req.method === 'GET') return send(res, 200, engine.visualFile(shot[1], shot[2], shot[3]), { 'Content-Type': 'image/png' });
       for (const [method, re, fn] of routes) {

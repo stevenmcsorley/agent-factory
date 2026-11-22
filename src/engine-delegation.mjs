@@ -8,6 +8,9 @@ import { recordUsage, readUsage } from './usage.mjs';
 import * as pk from './pack.mjs';
 import { ROLE_KEYS } from './presets.mjs';
 import { MODES, ROUTES, DEFAULT_ROUTES, JUDGES, decide, effectiveRoute } from './delegation.mjs';
+import { buildAccounts, accountsCsv } from './accounts.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const ZERO = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 };
@@ -44,7 +47,7 @@ export const delegationMethods = {
     return { out: `You've hit your usage limit: ${dec.why}. Try again at ${clockOf(until)}.`, costUsd: 0, tokens: { ...ZERO }, model: null, limited: true };
   },
   _recordUse(role, ctx, args, r, t0, via, why, extra = {}) {
-    this.notify('usage'); const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via, why: String(why ?? '').slice(0, 160), input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...extra });
+    this.notify('usage'); const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via, why: String(why ?? '').slice(0, 280), input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...extra });
   },
 
   // The agent the factory uses for a role: a wrapper that decides, per call, who does it.
@@ -57,7 +60,7 @@ export const delegationMethods = {
       if (dec.provider === 'none') { r = this._noProviderResult(dec); this._recordUse(role, ctx, args, r, t0, 'none', why, { limited: true }); return r; }
       if (dec.provider === 'openrouter') {
         r = await onFree(args, dec.shot);
-        if (dec.escalate && call.codexUsable && this._orUnusable(role, r)) { this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null, why: r?.limited ? 'the free models were limited' : 'the free models gave no usable answer' }); const o = await onPlan(args); r = o.r; via = 'codex'; escalated = true; why = `${why} → escalated to Codex`; if (o.lim) this._recordUse(role, ctx, args, r, t0, via, why, { limited: true, escalated }); }
+        if (dec.escalate && call.codexUsable && this._orUnusable(role, r)) { this._audit({ what: 'openrouter', action: 'back-to-plan', role, project: ctx.project ?? null, why: r?.limited ? 'the free models were limited' : 'the free models gave no usable answer' }); const o = await onPlan(args); r = o.r; via = 'codex'; escalated = true; why = `${why} The free models could not give a usable answer, so Codex did it.`; if (o.lim) this._recordUse(role, ctx, args, r, t0, via, why, { limited: true, escalated }); }
       } else {
         const o = await onPlan(args); r = o.r;
         // the plan ran out in the middle of this call: if the free models may stand in, do the same job on them instead of failing it
@@ -80,6 +83,14 @@ export const delegationMethods = {
     if (patch.routes !== undefined) { if (!patch.routes || typeof patch.routes !== 'object') throw bad('routes must map a role to codex, openrouter or auto'); const routes = { ...(next.routes ?? {}) }; for (const [r, v] of Object.entries(patch.routes)) { if (!ROLE_KEYS.includes(r)) throw bad(`Unknown role "${r}"`); if (v === null || v === '' || v === 'default') delete routes[r]; else if (ROUTES.includes(v)) routes[r] = v; else throw bad(`The route for ${r} must be codex, openrouter, auto (or default to clear it)`); } next.routes = routes; }
     this.cfg.agents = next; this._persist(); this._audit({ what: 'agent-policy', from: JSON.parse(before), to: this._policy() }); return this.agentPolicy();
   },
+  // The accounting for the Usage page: what each agent and model used and when, what the limits did, and the credit position.
+  async accounts({ days = 7, calls = 200 } = {}) {
+    const d = Math.min(90, Math.max(1, Number(days) || 7)); const r = this.router(); if (this._orKey()) await r.refreshCredits().catch(() => null);
+    const audit = (() => { try { return fs.readFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-6000).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return []; } })();
+    const lim = this.planLimit?.() ?? null; const st = r.status();
+    return buildAccounts({ usage: readUsage(this.cfg.stateDir), orCalls: r.recent(3000), audit, days: d, planLimit: lim, budget: st.budget, credits: st.credits, keyInfo: st.keyInfo, freeUntil: st.freeUntil, callsLimit: Math.min(1000, Number(calls) || 200) });
+  },
+  async accountsCsv(days) { return accountsCsv(await this.accounts({ days, calls: 1000 })); },
   // Where the tokens went: by provider and by role, over the last few days (the number that tells you whether delegation is paying off).
   usageByProvider(days = 7) {
     const since = Date.now() - days * 86_400_000; const sum = () => ({ calls: 0, input: 0, cached: 0, output: 0, weighted: 0, escalated: 0 }); const prov = { codex: sum(), openrouter: sum() }; const byRole = {};

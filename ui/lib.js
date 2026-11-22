@@ -78,3 +78,14 @@ export const persist = (key, state, create) => { const n = document.createElemen
 
 // A click handler that disables its button while the work runs, toasts the result or the error, and optionally re-renders.
 export const act = (fn, done, rerender) => async (e) => { const b = e?.currentTarget; if (b) b.disabled = true; try { const r = await fn(); if (done) toast(done, 'ok'); rerender?.(); return r; } catch (err) { toast(err.message, 'bad'); } finally { if (b) b.disabled = false; } };
+
+// Live updates from the server (text/event-stream over fetch, so it carries the same Authorization header as every other call: a token never goes in a URL).
+// onChange(topics) fires when something changed; onState('live' | 'reconnecting'); it reconnects with a growing pause and stops if the token is refused. Returns a stop function.
+export function openStream({ onChange, onState, onAuthFail }) {
+  let stopped = false; let ctl = null; let pause = 1000; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  (async () => { while (!stopped) { try { ctl = new AbortController(); const res = await fetch('/api/stream', { headers: { Authorization: `Bearer ${session.token}` }, signal: ctl.signal }); if (res.status === 401) { onAuthFail?.(); return; } if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      onState?.('live'); pause = 1000; const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true }); let i; while ((i = buf.indexOf('\n\n')) >= 0) { const block = buf.slice(0, i); buf = buf.slice(i + 2); if (/^event: change$/m.test(block)) { const data = /^data: (.+)$/m.exec(block)?.[1]; try { onChange?.(JSON.parse(data).topics ?? []); } catch { onChange?.([]); } } } }
+    } catch { if (stopped) return; } onState?.('reconnecting'); await sleep(pause); pause = Math.min(15_000, pause * 2); } })();
+  return () => { stopped = true; try { ctl?.abort(); } catch { /* done */ } };
+}

@@ -11,15 +11,15 @@ export const JUDGES = new Set(['reviewer', 'security']);   // roles whose job is
 // What each role does by default in 'mix', and why. Judging is the cheapest thing to move (one request; measured: see docs/evidence/review-bench-*.json), then drafting; building and designing start on Codex's side until a free model
 // has proved itself on that kind of work: `auto` lets small, first-attempt jobs go to the free models and escalates the rest.
 export const DEFAULT_ROUTES = {
-  reviewer: { route: 'openrouter', why: 'a verdict on a diff is one request, measured about as good as an exploring agent on planted defects at a fraction of the tokens' },
-  security: { route: 'codex', why: 'security verdicts have not been benchmarked on free models yet: Codex until they have' },
-  'spec-writer': { route: 'auto', why: 'a short written spec; escalates to Codex if the free models fail' },
-  'skill-writer': { route: 'auto', why: 'a short written skill; escalates to Codex if the free models fail' },
-  tester: { route: 'auto', why: 'tests for a small change; escalates to Codex if the free models fail' },
-  designer: { route: 'auto', why: 'HTML and SVG mockups; escalates to Codex if the free models fail' },
-  planner: { route: 'codex', why: 'the plan everything else follows: quality first' },
-  builder: { route: 'auto', why: 'small tickets (size S) on the first attempt go to free models; anything bigger, or a retry, goes to Codex' },
-  fixer: { route: 'auto', why: 'small fixes on the first attempt go to free models; a retry goes to Codex' },
+  reviewer: { route: 'openrouter', why: 'Checking a change takes one short request, and free models did as well as a full agent in our tests.' },
+  security: { route: 'codex', why: 'Not tested on free models yet, so it stays on Codex.' },
+  'spec-writer': { route: 'auto', why: 'A short piece of writing. Free models first, and Codex if they cannot do it.' },
+  'skill-writer': { route: 'auto', why: 'A short piece of writing. Free models first, and Codex if they cannot do it.' },
+  tester: { route: 'auto', why: 'Tests for a small change. Free models first, and Codex if they cannot do it.' },
+  designer: { route: 'auto', why: 'Mockups and artwork. Free models first, and Codex if they cannot do it.' },
+  planner: { route: 'codex', why: 'Everything else follows the plan, so quality comes first (quality first).' },
+  builder: { route: 'auto', why: 'Small tickets on the first try go to free models. Bigger tickets and retries go to Codex.' },
+  fixer: { route: 'auto', why: 'Small fixes on the first try go to free models. Retries go to Codex.' },
 };
 
 export function effectiveRoute(role, policy = {}) { const user = policy.routes?.[role]; if (ROUTES.includes(user)) return { route: user, source: 'you' }; const d = DEFAULT_ROUTES[role] ?? { route: 'codex', why: 'no default for this role' }; return { route: d.route, source: 'default', why: d.why }; }
@@ -40,6 +40,6 @@ export function decide(ctx) {
   if (route === 'codex') return codex(why);
   if (route === 'openrouter') return or(source === 'you' ? 'you set this role to OpenRouter' : why, true);
   // auto
-  if (['builder', 'fixer'].includes(role)) { if (attempt > 1) return codex('a retry after a failed attempt goes to Codex'); if (size && size !== 'S') return codex(`a ticket of size ${size} goes to Codex`); if (!size) return codex('the ticket\'s size is not known, so Codex'); }
-  return or(why ?? 'free models first', true);
+  if (['builder', 'fixer'].includes(role)) { if (attempt > 1) return codex('a retry after a failed attempt goes to Codex'); if (size && size !== 'S') return codex(`a bigger ticket (size ${size}) goes to Codex`); if (!size) return codex('the ticket\'s size is not known, so Codex does it'); }
+  return or(why ?? 'Free models first.', true);
 }

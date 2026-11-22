@@ -145,14 +145,14 @@ test('engine: config is validated and the MCP operations exist (and none of them
 test('engine: a reviewer goes to the free models as ONE request, and the usage log says which model, that it came via OpenRouter, and why', async () => {
   const VERDICT = '{"verdict":"approve","summary":"ok","findings":[]}'; const w = orEngine({ answers: [{ content: VERDICT }] }); await w.e.setOpenRouterKey(KEY); const dir = tmp();
   const reviewer = w.e._agentFor('reviewer', path.join(w.root, 'l.log'), { project: 'p' }); const r = await reviewer.run({ kind: 'local', exec: async () => ({ code: 0, out: '' }) }, { dir }, 'You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix.\nJudge this', { timeoutMs: 30_000, meta: { ref: 'x' } });
-  assert.equal(r.out, VERDICT); assert.equal(w.log.length, 1, 'one request'); assert.equal(w.log[0], 'big/ultra-550b:free'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.deepEqual([u.role, u.model, u.via, u.input, u.output], ['reviewer', 'big/ultra-550b:free', 'openrouter', 50, 5]); assert.match(u.why, /one request/);
+  assert.equal(r.out, VERDICT); assert.equal(w.log.length, 1, 'one request'); assert.equal(w.log[0], 'big/ultra-550b:free'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.deepEqual([u.role, u.model, u.via, u.input, u.output], ['reviewer', 'big/ultra-550b:free', 'openrouter', 50, 5]); assert.match(u.why, /one short request/);
   const builder = w.e._agentFor('builder', path.join(w.root, 'l.log'), {}); assert.equal(builder.name, 'shell', 'the agent keeps the plan agent\'s name');
 });
 
 test('engine: a free-model verdict that does not parse is redone on Codex (escalation), and the usage log says so', async () => {
   const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: 'I think it looks fine' }] }); await w.e.setOpenRouterKey(KEY); const dir = tmp(); const GOOD = '{"verdict":"changes","summary":"s","findings":[{"severity":"major","issue":"x"}]}';
   const r = await w.e._agentFor('reviewer', path.join(w.root, 'l.log'), { project: 'p' }).run({ kind: 'local', exec: async () => ({ code: 0, out: GOOD }) }, { dir }, 'Judge', { timeoutMs: 30_000, meta: {} });
-  assert.equal(r.out, GOOD, 'Codex gave the verdict'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.equal(u.via, 'codex'); assert.equal(u.escalated, true); assert.match(u.why, /escalated to Codex/);
+  assert.equal(r.out, GOOD, 'Codex gave the verdict'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.equal(u.via, 'codex'); assert.equal(u.escalated, true); assert.match(u.why, /Codex did it/);
 });
 
 test('engine: when the plan says it is limited, OpenRouter does the same job instead, the factory is not paused, and the swap is recorded; with the fallback off, it stays paused', async () => {
@@ -228,7 +228,7 @@ test('policy: openrouter only runs everything on the free models, never on Codex
 
 test('policy: mix sends a small first attempt to the free models and a retry to Codex; a big ticket goes straight to Codex', async () => {
   const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: 'free built it' }] }); await w.e.setOpenRouterKey(KEY); const U = async () => (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1);
-  w.e._ticketSize = () => 'S'; assert.equal((await runAs(w, 'builder', { run: 'run1', ticket: 5 })).out, 'free built it'); assert.equal((await U()).via, 'openrouter'); assert.match((await U()).why, /size S|small/);
+  w.e._ticketSize = () => 'S'; assert.equal((await runAs(w, 'builder', { run: 'run1', ticket: 5 })).out, 'free built it'); assert.equal((await U()).via, 'openrouter'); assert.match((await U()).why, /Small tickets/);
   assert.equal((await runAs(w, 'builder', { run: 'run1', ticket: 5 })).out, 'codex did it', 'the second call in the SAME run is attempt 2: Codex'); assert.equal((await U()).via, 'codex'); assert.match((await U()).why, /retry/);
   w.e._ticketSize = () => 'L'; assert.equal((await runAs(w, 'builder', { run: 'run2', ticket: 6 })).out, 'codex did it'); assert.match((await U()).why, /size L/); assert.equal(w.log.length, 1, 'only the one small first attempt used the free models');
 });

@@ -1,5 +1,6 @@
-import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim } from './lib.js';
-import { openrouterPage } from './openrouter.js';
+import { h, icon, s, api, session, saveToken, clearToken, toast, dur, anim, openStream } from './lib.js';
+import { agentsPage } from './agents.js';
+import { usagePage } from './usage.js';
 import { overview, inboxPage, projectsPage, project, runPage, runsPage, connect, health, newProject, act } from './views.js';
 import { library } from './library.js';
 import { portfolio } from './portfolio.js';
@@ -9,8 +10,15 @@ import { settings } from './settings.js';
 import { skillsPage } from './skills.js';
 
 const $app = document.getElementById('app');
-const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^openrouter$/, openrouterPage, 'openrouter'], [/^skills$/, skillsPage, 'settings'], [/^new$/, newProject, 'studio']];
-const NAV = [['overview', '#/', 'Control room'], ['portfolio', '#/portfolio', 'Portfolio'], ['studio', '#/studio', 'Studio'], ['inbox', '#/inbox', 'Inbox'], ['library', '#/library', 'Library'], ['scenarios', '#/scenarios', 'Scenarios'], ['runs', '#/runs', 'Orders'], ['openrouter', '#/openrouter', 'Models'], ['connect', '#/connect', 'Connect'], ['health', '#/health', 'Health'], ['settings', '#/settings', 'Settings']];
+const ROUTES = [[/^$/, overview, 'overview'], [/^inbox$/, inboxPage, 'inbox'], [/^projects$/, projectsPage, 'projects'], [/^library$/, library, 'library'], [/^portfolio$/, portfolio, 'portfolio'], [/^scenarios$/, scenarios, 'scenarios'], [/^studio$/, studio, 'studio'], [/^project\/([\w-]+)$/, project, 'projects'], [/^run\/([a-f0-9]{8})$/, runPage, 'runs'], [/^runs$/, runsPage, 'runs'], [/^connect$/, connect, 'connect'], [/^health$/, health, 'health'], [/^settings$/, settings, 'settings'], [/^agents(?:\/([a-z]+))?$/, agentsPage, 'agents'], [/^usage$/, usagePage, 'usage'], [/^openrouter$/, { load: async () => { location.hash = '#/agents/free'; return {}; }, draw: () => [] }, 'agents'], [/^skills$/, skillsPage, 'settings'], [/^new$/, newProject, 'studio']];
+// The menu is grouped so the top bar stays calm: three things you use all day, then three menus. A narrow screen shows everything in one scrolling row.
+const NAV_GROUPS = [
+  { k: 'overview', href: '#/', name: 'Control room' }, { k: 'inbox', href: '#/inbox', name: 'Inbox' }, { k: 'runs', href: '#/runs', name: 'Orders' },
+  { group: 'projects', name: 'Projects', items: [['portfolio', '#/portfolio', 'Portfolio', 'All projects at a glance'], ['studio', '#/studio', 'Studio', 'Start a new project'], ['library', '#/library', 'Library', 'Code shared between projects'], ['scenarios', '#/scenarios', 'Scenarios', 'Ready-made workflows']] },
+  { group: 'agents', name: 'Agents', items: [['agents', '#/agents', 'Agents and models', 'Who does the work, and the settings'], ['usage', '#/usage', 'Usage', 'What was used, when, and limits']] },
+  { group: 'system', name: 'System', items: [['connect', '#/connect', 'Connect', 'Link Claude and other tools'], ['health', '#/health', 'Health', 'Checks that everything works'], ['settings', '#/settings', 'Settings', 'Limits, alerts and autonomy']] },
+];
+const NAV = NAV_GROUPS.flatMap((g) => (g.group ? g.items.map(([k, href, name]) => [k, href, name]) : [[g.k, g.href, g.name]]));
 let inboxCount = 0;
 const THEME_KEY = 'agent-factory-theme';
 let theme = null; try { theme = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
@@ -34,12 +42,27 @@ function drawTicker(events, st) {
   ticker.className = `ticker ${items.length < 4 ? 'static' : ''}`;
   ticker.replaceChildren(h('div', { class: 'ticker-track' }, ...(items.length ? (items.length < 4 ? items : [...items, ...items]) : [idle])));
 }
+const narrow = () => matchMedia('(max-width: 900px)').matches;
+const badge = (k) => (k === 'inbox' && inboxCount > 0 ? h('b', { class: 'nbadge', title: `${inboxCount} waiting on you` }, String(inboxCount)) : null);
+function navEl(nav) {
+  if (narrow()) return h('nav', { 'aria-label': 'Main' }, NAV.map(([k, href, name]) => h('a', { href, class: nav === k ? 'on' : '' }, h('span', {}, name), badge(k))));
+  return h('nav', { 'aria-label': 'Main' }, NAV_GROUPS.map((g) => {
+    if (!g.group) return h('a', { href: g.href, class: nav === g.k ? 'on' : '' }, h('span', {}, g.name), badge(g.k));
+    const on = g.items.some(([k]) => k === nav) || (g.group === 'projects' && nav === 'projects'); const d = h('details', { class: `navmenu ${on ? 'on' : ''}` }, h('summary', {}, h('span', {}, g.name), icon('chevron', 11)),
+      h('div', { class: 'menu' }, g.items.map(([k, href, label, hint]) => h('a', { href, class: nav === k ? 'on' : '', onclick: () => d.removeAttribute('open') }, h('b', {}, label), hint ? h('span', {}, hint) : null))));
+    d.addEventListener('toggle', () => { if (d.open) document.querySelectorAll('.navmenu[open]').forEach((o) => { if (o !== d) o.removeAttribute('open'); }); }); return d;
+  }));
+}
+addEventListener('click', (e) => document.querySelectorAll('.navmenu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); }));
+addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('.navmenu[open]').forEach((d) => d.removeAttribute('open')); });
+let headerKey = '';
 function drawHeader(nav) {
+  const key = JSON.stringify([nav, status?.paused, status?.busy, status?.active, inboxCount, isLight(), status?.demo, narrow(), liveState]); if (key === headerKey && header?.firstChild) return; headerKey = key;
   const st = status; const state = !st ? 'off' : st.paused ? 'warn' : st.busy || st.active ? 'busy' : 'ok';
   const label = !st ? '…' : st.paused ? 'Paused' : st.active ? `${st.active} live` : st.busy ? 'Checking' : 'Ready';
   header.replaceChildren(h('div', { class: 'bar' }, h('a', { class: 'brand', href: '#/' }, logo(), h('span', {}, 'Agent Factory')),
-    h('nav', {}, NAV.map(([k, href, name], i) => h('a', { href, class: nav === k ? 'on' : '' }, h('i', {}, `0${i + 1}`), h('span', {}, name), k === 'inbox' && inboxCount > 0 ? h('b', { class: 'nbadge', title: `${inboxCount} waiting on you` }, String(inboxCount)) : null))),
-    h('div', { class: 'bar-r' }, st ? h('span', { class: 'line-state' }, h('i', { class: `lamp ${state}` }), label) : null,
+    navEl(nav),
+    h('div', { class: 'bar-r' }, st ? h('span', { class: 'line-state' }, h('i', { class: `lamp ${state}` }), label) : null, h('span', { class: `livedot ${liveState}`, title: liveState === 'live' ? 'Live: changes appear as they happen' : 'Reconnecting to live updates…' }),
       st ? h('button', { class: 'btn small', disabled: st.busy || st.paused, onclick: act(() => api('/control/tick', { method: 'POST', body: {} }), 'Checking for work…', () => refresh(true)) }, icon('play', 11), 'Run') : null,
       st ? h('button', { class: 'btn small', onclick: act(() => api(`/control/${st.paused ? 'resume' : 'pause'}`, { method: 'POST', body: {} }), st.paused ? 'Line resumed' : 'Line paused', () => refresh(true)) }, icon(st.paused ? 'play' : 'pause', 11), st.paused ? 'Resume' : 'Pause') : null,
       h('button', { class: 'btn small ghost', onclick: toggleTheme, 'aria-label': 'Toggle light/dark theme', title: 'Toggle theme' }, icon(isLight() ? 'moon' : 'sun', 13)),
@@ -81,7 +104,7 @@ async function refresh(force = false) {
   try {
     const [data, st, act2, ic] = await Promise.all([r.v.load(r.arg), api('/status'), api('/activity').catch(() => ({ events: [] })), api('/inbox/count').catch(() => ({ count: 0 }))]);
     if (st.build) { if (!buildId) buildId = st.build; else if (st.build !== buildId) showUpdate(); }
-    status = st; inboxCount = ic.count; if (!header) { shell(); lastRoute = null; } drawHeader(r.nav); drawTicker(act2.events, st);
+    status = st; inboxCount = ic.count; if (!header) { shell(); lastRoute = null; } lastNav = r.nav; drawHeader(r.nav); drawTicker(act2.events, st); startStream();
     const key = JSON.stringify([location.hash, data]);
     if (!force && key === lastKey) return;
     if (!force && typing()) return;
@@ -129,7 +152,13 @@ addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLow
 
 // ---- live elapsed timers + polling
 setInterval(() => document.querySelectorAll('.since').forEach((el) => { el.textContent = dur(Date.now() - new Date(el.dataset.since)); }), 1000);
-let timer; const loop = async () => { if (document.visibilityState === 'visible' && !palette) await refresh(false); timer = setTimeout(loop, status?.active || status?.busy ? 2500 : 7000); };
+// Live updates: the server tells us when something changed (src/server.mjs /api/stream), so the page refreshes then, not on a timer. A slow refresh stays as a safety net (things that
+// change in other systems, like a ticket edited on GitHub, never reach the server's change bus), and the old quick polling returns while the stream is down.
+let liveState = 'connecting'; let pushT = null; let stopStream = null;
+const pushRefresh = () => { clearTimeout(pushT); pushT = setTimeout(() => { if (document.visibilityState === 'visible' && !palette) refresh(false); }, 350); };
+const startStream = () => { if (stopStream || !session.token) return; stopStream = openStream({ onChange: pushRefresh, onState: (st) => { const was = liveState; liveState = st; if (was !== st) { headerKey = ''; if (header && status) drawHeader(lastNav); } if (st === 'live' && was !== 'live') pushRefresh(); }, onAuthFail: () => { stopStream?.(); stopStream = null; } }); };
+let lastNav = 'overview';
+let timer; const loop = async () => { if (document.visibilityState === 'visible' && !palette) await refresh(false); startStream(); timer = setTimeout(loop, liveState === 'live' ? 30000 : (status?.active || status?.busy ? 2500 : 7000)); };
 addEventListener('hashchange', () => { lastKey = ''; refresh(true); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(false); });
 refresh(true).then(() => { timer = setTimeout(loop, 3000); });

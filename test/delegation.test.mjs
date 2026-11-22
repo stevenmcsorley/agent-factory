@@ -14,7 +14,7 @@ test('codex only and openrouter only are strict: no quiet use of the other provi
 });
 
 test('mix, by default: reviewers go to the free models as ONE request; the planner stays on Codex', () => {
-  const r = d({ role: 'reviewer' }); assert.deepEqual([r.provider, r.shot, r.escalate], ['openrouter', true, true]); assert.match(r.why, /one request/); assert.equal(d({ role: 'security' }).provider, 'codex', 'unbenchmarked: Codex until proven'); assert.equal(d({ role: 'security', routes: { security: 'openrouter' } }).shot, true, 'but you can send it to the free models');
+  const r = d({ role: 'reviewer' }); assert.deepEqual([r.provider, r.shot, r.escalate], ['openrouter', true, true]); assert.match(r.why, /one short request/); assert.equal(d({ role: 'security' }).provider, 'codex', 'unbenchmarked: Codex until proven'); assert.equal(d({ role: 'security', routes: { security: 'openrouter' } }).shot, true, 'but you can send it to the free models');
   assert.equal(d({ role: 'planner' }).provider, 'codex'); assert.match(d({ role: 'planner' }).why, /quality first/); assert.equal(d({ role: 'builder', size: 'S', attempt: 1, role: 'reviewer' }).shot, true);
 });
 
