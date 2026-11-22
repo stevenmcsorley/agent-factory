@@ -138,19 +138,62 @@ Pick the provider per agent, or for everything:
 - **Free models** are used at full capacity: a router ranks them, learns how long each rests after a limit, swaps to the next mid-task, and keeps a daily allowance gauge.
 - **Local models** are free and private, but a CPU-only laptop is slow. On a 4-core, 12 GB laptop the best small model tried (`qwen2.5:3b`) caught 3 of 8 planted defects, against 7 to 8 for Codex, so they suit short jobs and standing in when everything else is down. Models Ollama runs on its own servers (`:cloud`) are flagged as not local and kept out unless you allow them.
 
-### The harness: cheaper models, same checks
+## The harness: reliable results from cheaper models
 
-Each agent has a written harness (Agents → Who does what → *What it is held to*). Codex agents start on an **older, cheaper Codex model** and step up to the usual one when a check fails:
+A coding model is an engine you rent, and it can be wrong, lazy or quietly dishonest. The **harness** is everything the factory puts *around* the model so that the result is dependable whichever model produced it: the checks it must pass, the limits it works under, what happens when it fails, and a record of all of it. The model is the swappable part; the harness is the constant part. That is what makes it safe to start on an older, cheaper model and step up only when needed.
 
-| Agent | Starts on | Held to | Evidence |
-|---|---|---|---|
-| Reviewer | `gpt-6-luna` | a clear verdict, or the next model does it | **Measured:** 8/8 planted defects, 0 false blocks (`gpt-6-luna`, `gpt-5.6-luna`, `gpt-6.1-sol`), against 7/8 for the usual model |
-| Security reviewer | `gpt-6-luna` | a clear verdict | **Measured:** 6/6 planted vulnerabilities, 0 false blocks |
-| Builder | `gpt-6-luna` on small tickets only | tests, claims check, quality gate, second reader | **Provisional:** 6/6 small hidden-test tickets on every model; says nothing about big ones |
-| Tester, spec writer, skill writer | cheaper models | output must be real, not empty | **Provisional**, labelled as such |
-| Designer, planner, fixer | the usual model | you approve designs and plans | not measured yet |
+```mermaid
+flowchart LR
+    A["Agent answers<br/>(any model)"] --> C{"Checks<br/>outside the model"}
+    C -- passes --> N["Next stage"]
+    C -- fails, builder --> R["Retry on the next<br/>model step"]
+    C -- fails, reviewer or writer --> U["Step up to the<br/>next model"]
+    R --> A
+    U --> A
+    A -. "every call, including the<br/>ones that failed, is counted" .-> L[("Usage and<br/>audit log")]
+```
 
-Every step-up is logged with the reason, and a call that failed its check still counts its tokens. **Is it paying off?** The Improvements page has a panel that says so in plain words ("too early to say" until enough jobs have run), because token counts alone do not show how much of your Codex plan a cheaper model uses.
+**What each agent is held to** (also shown in the UI under Agents → Who does what → *What it is held to*, so it is never a secret):
+
+| Agent | Checked outside the model | Limits |
+|---|---|---|
+| **Builder** | the project's tests must pass; its summary must match its diff (no tests claimed but not written, none switched off); the quality gate and the design and screenshot checks; a second agent reads the change | a time limit per attempt, a fixed number of attempts, each on the next model step |
+| **Fixer** | tests, the claims check, and the reviewer reads it again | a fixed number of fix rounds |
+| **Reviewer** | the answer must be a clear verdict (approve or changes) whose findings name a severity; if not, the next model does the review | one request about the diff, with no repository to wander through |
+| **Security reviewer** | a clear verdict, or the next model does it | one request, no tools |
+| **Tester** | the new tests must pass, otherwise they are undone; only test files may change | runs once per ticket |
+| **Spec writer, skill writer** | it must write something real, not an empty or one-line answer; nothing a skill writer drafts is saved until you approve it | a short piece of writing, no tools |
+| **Designer, planner** | you approve designs and plans before anything is built from them | the planner stays on the strongest model |
+
+**Things a prompt alone could not do** (each found by running the factory for real and fixed):
+
+- **The claims check.** A free, deterministic comparison of what the agent *says* with what its diff *shows*: a test switched off (`skip`, `only`, `todo`), or "I added tests" with no test file changed, goes back to the builder like a failing test. No model is involved, so it costs no tokens.
+- **A verdict is one request.** A review on Codex used to be an agent exploring the whole repository (about 39,000 tokens each). It is now one request about the diff on an empty folder, the form that was benchmarked: about a seventh of the tokens.
+- **Every road into Codex starts on the cheapest step.** After a free model fails, after a retry, on the main path: all of them use the same ladder, so a stronger model is only used when a cheaper one failed its check.
+- **Failed calls still count.** When a job steps up, the tokens spent on the call that failed are added to the job, so a step-up never looks cheaper than it was. (The real-path drill found the first version losing them.)
+- **The owner's answers reach the agent.** A comment you write on a ticket, from a trusted author, is put in the agent's prompt. Comments from anyone else, and the factory's own, never are. (Before this, answers to the agent's questions were silently ignored.)
+
+### Model steps: cheaper models first
+
+Codex agents start on an **older, cheaper Codex model** and step up to the usual one when a check fails:
+
+| Agent | Starts on | Evidence |
+|---|---|---|
+| Reviewer | `gpt-6-luna` | **Measured:** 8/8 planted defects, 0 false blocks (`gpt-6-luna`, `gpt-5.6-luna`, `gpt-6.1-sol`), against 7/8 for the usual model |
+| Security reviewer | `gpt-6-luna` | **Measured:** 6/6 planted vulnerabilities, 0 false blocks |
+| Builder | `gpt-6-luna` on small tickets only | **Provisional:** 6/6 small hidden-test tickets on every model tried; says nothing about big ones |
+| Tester, spec writer, skill writer | cheaper models | **Provisional**, labelled as such in the UI |
+| Designer, planner, fixer | the usual model | not measured yet |
+
+Override any of it per agent, or switch every default off (`defaultTiers: false`). Every step-up is written to the audit log with its reason.
+
+### See it working
+
+<a href="docs/img/harness-panel.jpg"><img src="docs/img/harness-panel.jpg" alt="The harness panel on the Improvements page: a plain verdict, problems caught, jobs stepped up, before and after, models compared, and the recent step-ups with their reasons" width="100%"></a>
+
+The panel above is on **Agents → Improvements** (and over MCP as `harness_report`). It shows a plain verdict, what the claims check caught, how many jobs were stepped up and why, first-time success before and after the harness, and how the cheaper models compare with the usual one in score and tokens per job. The four step-ups listed are real: on those reviews `gpt-6-luna` did not give a clear verdict, the check refused it, and `gpt-6.2-astra` did the review.
+
+**Honest status.** The verdict reads **"too early to say"**, and that is the truth: the cheaper builder has run on only one real job, and the claims check has not yet caught anything in real use. The benchmarks show the cheaper models can do these jobs; they do not show how much of your Codex plan they save, because token counts cannot see plan usage (an older model may cost less per token). Watch your own plan usage, and let the panel tell you when it has enough jobs to judge.
 
 Re-run the evidence yourself:
 
