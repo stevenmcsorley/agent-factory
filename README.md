@@ -163,9 +163,32 @@ node scripts/harness-drill.mjs      # proves the step-up on the real Codex path
 
 ## Design first, then build
 
-For a project with pages, **design is stage zero**. The designer draws a screen per page and a set of SVG artwork (logo, hero, icons, dividers) from the brief; you approve them (or unattended mode does); only then are build tickets released, and every build is told to match the approved design. A page that falls behind its design is flagged as **drift**.
+For a project with pages, **design is stage zero**. Before any build ticket is released, the **designer** (an agent like the others, with its own harness) makes the look of the project and you approve it. Builders then follow what was approved, not their own taste.
 
-For an existing project, **Restyle** takes a direction in a few sentences ("warm, characterful, forest green and terracotta"), designs it, and plans one ticket per page to make the real pages match.
+<table>
+<tr>
+<td width="33%"><a href="docs/img/design-mockup.jpg"><img src="docs/img/design-mockup.jpg" alt="The designer's mockup of the Hillside Cafe home page, with the designer's notes and an Ask for changes box"></a></td>
+<td width="33%"><a href="docs/img/design-artwork.jpg"><img src="docs/img/design-artwork.jpg" alt="The artwork contact sheet: every SVG the designer drew, on light and dark backgrounds at three sizes"></a></td>
+<td width="33%"><a href="docs/img/design-stage.jpg"><img src="docs/img/design-stage.jpg" alt="The Design stage panel: each design with its status, approved ones marked as followed by the builders"></a></td>
+</tr>
+<tr>
+<td><sub><b>A screen.</b> A finished full-page mockup, at desktop and phone width, with the designer's notes and an <i>Ask for changes</i> box that sends your comment back to the designer.</sub></td>
+<td><sub><b>The artwork.</b> The logo, hero, divider, map and icons, drawn as SVG code and shown on light and dark at three sizes, so a bad one is obvious.</sub></td>
+<td><sub><b>The design stage.</b> Every design and its status. Only approved ones are <i>in use</i>. (The failed Index design is real: the first try failed, the designer was run again, and the retry worked.)</sub></td>
+</tr>
+</table>
+
+**How a design becomes a build**
+
+1. **The designer drafts.** From the brief and sources it makes one screen per page named in the brief (up to five) and one artwork set. Artwork is code (SVG, no scripts, no external references), so it is small, crisp and reviewable in a diff. Each design takes a few minutes and runs in the background.
+2. **You review.** Preview each design at desktop and phone width, edit its files, ask for changes (the designer keeps everything you do not mention), or approve it. In [unattended mode](docs/AUTOPILOT.md) the designs approve themselves.
+3. **Approved means in use.** Only approved designs guide the builder: their colours, type, layout patterns and artwork are written into every ticket's instructions, and the reviewer checks each change against them. Build tickets are not released until the designs exist.
+4. **Drift is flagged.** Each page records which design version it was built from. If you approve a newer design, the page is shown as behind it.
+5. **If one design fails,** the rest still run. Each design gets a second try, and the pass reports exactly which one is missing so you can run it again.
+
+**Restyle an existing project.** Give a direction in a few sentences ("warm, characterful, forest green and terracotta, a hero illustration of a steaming cup"). The designer looks at what exists, designs the new look for the key pages (or all of them) plus new artwork if the direction mentions a brand or illustrations, and after you approve, the factory plans the match: a **shared look first, then the artwork, then one ticket per page**. That is how the Hillside Café above went from a plain page to the designed one, with every change reviewed and tested.
+
+**Honest limits.** The designer is not benchmarked (unlike the reviewer), and by default it runs on the usual model with the free models first where they can do the job. Its work is judged by you, and by the screenshot check when you have it set up. It makes clean, stylised, drawn-as-code artwork, not photographs: if you want a photo or a video, give the factory the file and it will place and optimise it (the café's looping hero video was added exactly this way, with the licence credit on the page).
 
 ## It improves itself, with your approval
 
@@ -185,11 +208,13 @@ For an existing project, **Restyle** takes a direction in a few sentences ("warm
 | **Agents ▾** | **Agents and models** (who does what, the harness, free models, local models, Codex settings) · **Usage** (tokens by model, agent and project; limits and resets; CSV) · **Improvements** (scores, suggested fixes, is the harness working). |
 | **System ▾** | **Connect** (copy-paste setup for Claude and other MCP clients) · **Health** (the same checks as `npm run doctor`) · **Settings** (limits and autonomy). |
 
+A project's own page has tabs: **Board, Tracker, Plan, Brief, Designs, Autopilot, Pull requests, Work orders, Code, Log**.
+
 Dark and light themes, self-hosted fonts (works offline), and **Ctrl/⌘ K** for a command palette. It listens on `127.0.0.1` only and every API call needs the token in `state/ui-token`.
 
 ## Autopilot
 
-Schedules, agent roles (reviewer, security reviewer, tester, spec writer), editable skills, designs you approve, and an opt-in **unattended mode** that makes a project run start to finish: roles on, fix rounds on reviewer findings, automatic conflict resolution, merging behind caps. Full details in [docs/AUTOPILOT.md](docs/AUTOPILOT.md); all of it is controllable over MCP.
+Schedules, agent roles (reviewer, security reviewer, tester, spec writer, designer), editable skills, designs you approve, and an opt-in **unattended mode** that makes a project run start to finish: roles on, fix rounds on reviewer findings, automatic conflict resolution, merging behind caps. Full details in [docs/AUTOPILOT.md](docs/AUTOPILOT.md); all of it is controllable over MCP.
 
 ## Briefs, plans and a reuse library
 
