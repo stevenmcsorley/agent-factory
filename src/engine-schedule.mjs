@@ -9,6 +9,7 @@ export const scheduleMethods = {
     const reasons = []; const l = this.cfg.limits;
     if (this.paused()) reasons.push({ code: 'factory-paused', reason: 'the whole factory is paused' });
     if (p.paused) reasons.push({ code: 'project-paused', reason: 'this project is paused' });
+    const lim = this.planLimit(); if (lim) reasons.push({ code: 'plan-limit', reason: `the agent plan's usage limit is reached; agents resume ${lim.autoResume ? 'by themselves ' : 'when you press Resume, after '}${lim.untilText}`, nextAt: new Date(lim.until).toISOString() });
     const sch = scheduleState(p.schedule, now, p.schedule?.hoursPerDay ? usedToday(readRuns(this.cfg.stateDir), p.id, now) : 0);
     if (!sch.allowed) reasons.push({ code: sch.code, reason: sch.reason, nextAt: sch.nextAt });
     if (l.maxRunsPerDay != null && runsToday(this.cfg.stateDir) >= l.maxRunsPerDay) reasons.push({ code: 'daily-cap', reason: `the factory's daily run cap is reached (${l.maxRunsPerDay} of ${l.maxRunsPerDay})` });
@@ -17,7 +18,7 @@ export const scheduleMethods = {
   },
   // Projects whose turn it is: unpaused, inside their schedule, lowest priority number first. A project that finished its plan and asked to stop is paused here.
   _dueProjects(now = Date.now()) {
-    const due = [];
+    const due = []; if (this.planLimit()) return due;   // the plan's limit pauses every agent, so no project is due until it lifts
     for (const p of this.cfg.projects) {
       if (p.schedule?.stopWhenDone && !p.paused) {
         try { if (pk.loadPack(pk.packDir(this.cfg.stateDir, p.id)).plan?.status === 'complete') { p.paused = true; this._persist(); this._audit({ what: 'schedule', project: p.id, note: 'plan complete: project paused (stopWhenDone)' }); } } catch { /* best effort */ }

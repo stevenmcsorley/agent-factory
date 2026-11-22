@@ -118,6 +118,14 @@ function autonomyCard(a, ctx) {
         h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: (e) => { if (!ack.checked) { toast('Tick the box first', 'bad'); return; } return set({ allow: true }, 'Allowed. Now choose which projects use it.')(e); } }, 'Allow autonomous merging'))));
 }
 
+function limitCard(s, ctx) {
+  const on = h('input', { type: 'checkbox', id: 'auto-resume' }); on.checked = !!s.autoResume;
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('clock', 17), 'When the plan\'s usage limit is hit'), s.autoResume ? h('span', { class: 'stamp ok' }, 'auto-resume on') : h('span', { class: 'stamp warn' }, 'auto-resume off')),
+    h('p', { class: 'muted small' }, 'Your agent plan has a usage limit that resets at a set time. The moment any agent reports it, the factory pauses every agent (instead of failing tickets one by one), says when it resumes, and keeps the queue. With auto-resume on it starts again by itself at that time and puts back the tickets the limit stopped. With it off it stays paused until you press Resume.'),
+    h('label', { class: 'check', for: 'auto-resume' }, on, ' Resume by itself when the limit resets (recommended)'),
+    h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: async (e) => { e.currentTarget.disabled = true; try { await api('/settings', { method: 'POST', body: { autoResume: on.checked } }); toast(on.checked ? 'Auto-resume on' : 'Auto-resume off: agents stay paused after a limit until you press Resume', 'ok'); ctx.rerender(); } catch (err) { toast(err.message, 'bad'); e.currentTarget.disabled = false; } } }, icon('check', 13), 'Save')));
+}
+
 function notifyCard(n, ctx) {
   const c = n.notify; const url = h('input', { type: 'url', value: c?.url ?? '', placeholder: 'https://ntfy.sh/your-private-topic', 'aria-label': 'Notification address', autocomplete: 'off', spellcheck: 'false' });
   const boxes = Object.entries(n.events).map(([k, label]) => { const b = h('input', { type: 'checkbox', id: `nt-${k}`, 'data-ev': k }); b.checked = c ? c.events.includes(k) : true; return h('label', { class: 'check', for: `nt-${k}` }, b, ` ${label}`); });
@@ -135,7 +143,7 @@ export const settings = {
   async load() { const [s, st, roles, au, nt] = await Promise.all([api('/settings'), api('/status').catch(() => null), api('/roles'), api('/autonomy'), api('/notify')]); return { s, st, roles, au, nt }; },
   draw({ s, st, roles, au, nt }, ctx) {
     return [head('Settings', 'Which model builds your tickets, and the guardrails around it. Changes apply from the next run and are saved to the config file: no restart.'),
-      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
+      agentCard(s, ctx), rolesCard(roles, s, ctx), limitsCard(s, st, ctx), limitCard(s, ctx), notifyCard(nt, ctx), autonomyCard(au, ctx), historyCard(s),
       h('p', { class: 'muted small' }, `Not editable here on purpose: the agent type, sandbox and network allowlist, and the projects. Those are security boundaries and live in the config file.`)];
   },
 };

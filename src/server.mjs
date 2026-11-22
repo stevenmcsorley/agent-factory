@@ -105,6 +105,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m) => engine.getPreview(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview$/, async (m, b) => engine.setPreview(m[1], b.preview ?? null)],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/preview\/check$/, async (m) => engine.startVisualCheck(m[1])],
+    ['GET', /^\/api\/limit$/, async () => ({ limit: engine.planLimit(), autoResume: engine.autoResume() })],
+    ['POST', /^\/api\/limit\/resume$/, async () => engine.clearPlanLimit()],
     ['GET', /^\/api\/notify$/, async () => engine.getNotify()],
     ['POST', /^\/api\/notify$/, async (_m, b) => engine.setNotify(b.notify ?? null)],
     ['POST', /^\/api\/notify\/test$/, async () => engine.testNotify()],

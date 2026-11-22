@@ -154,9 +154,14 @@ test('settings API: read, change model/effort/limits, persist to the config file
   } finally { t.close(); }
 });
 
-test('settings are not an agent operation: no op or MCP tool can change them', async () => {
-  const { OPS } = await import('../src/ops.mjs');
-  assert.ok(!OPS.some((o) => /setting|limit|model/i.test(o.name)), 'no operation edits settings');
+test('settings can be changed over MCP, validated and audited, but the security boundaries are never settings', async () => {
+  const { callOp, OPS } = await import('../src/ops.mjs'); assert.ok(OPS.some((o) => o.name === 'set_settings') && OPS.some((o) => o.name === 'get_settings'));
+  const t = await boot(); try {
+    const r = await callOp(t.e, 'set_settings', { limits: { maxRunsPerDay: 33 }, autoResume: false }); assert.equal(r.limits.maxRunsPerDay, 33); assert.equal(r.autoResume, false); assert.equal(t.e.cfg.limits.maxRunsPerDay, 33);
+    assert.equal((await callOp(t.e, 'get_settings', {})).limits.maxRunsPerDay, 33);
+    assert.ok(fs.readFileSync(path.join(t.e.cfg.stateDir, 'audit.jsonl'), 'utf8').includes('"what":"settings"'), 'recorded in the audit log');
+    for (const bad of [{ sandbox: { kind: 'local' } }, { ui: { host: '0.0.0.0' } }, { projects: [] }, { agent: { kind: 'shell' } }, { limits: { maxRunsPerDay: 99999 } }]) await assert.rejects(() => callOp(t.e, 'set_settings', bad), /cannot be changed|must be|unknown|not an agent/i, `${JSON.stringify(bad)} must be refused`);
+  } finally { t.close(); }
 });
 
 test('probe asks the container what Codex will use and remembers the answer', async () => {

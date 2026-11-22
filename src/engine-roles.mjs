@@ -60,9 +60,9 @@ export const roleMethods = {
   _roleOn(p, role) { return p.roles?.[role]?.enabled ?? this.cfg.roles?.[role]?.enabled ?? false; },
   // The agent for a role: the global agent, with the role's own model and effort laid over it.
   _agentFor(role, log) {
-    if (this.f.agent) return this.f.agent;
-    const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) };
-    return agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log });
+    let agent = this.f.agent; if (!agent) { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; agent = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }
+    // Whichever role runs, the first sign of the plan's usage limit pauses every agent (see engine-limit.mjs).
+    return { ...agent, run: async (...args) => { const r = await agent.run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim); return r; } };
   },
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },
   _skillsText(role, projectId) { try { return sk.skillsFor(this.cfg.stateDir, { role, project: projectId }).text; } catch { return ''; } },
@@ -135,7 +135,7 @@ export const roleMethods = {
 
   // The skill writer: a draft you read, edit and save yourself. It is never saved or applied automatically.
   startSkillDraft({ name, request, improve } = {}) {
-    this.skillJobs ??= new Map();
+    this.assertAgentAvailable(); this.skillJobs ??= new Map();
     const ask = String(request ?? '').trim(); if (ask.length < 10) throw bad('Describe what the skill should help an agent do (a sentence or two)');
     if (ask.length > 4000) throw bad('That request is too long (4000 characters at most)');
     let current = null; if (improve) { current = sk.getSkill(this.cfg.stateDir, improve); }

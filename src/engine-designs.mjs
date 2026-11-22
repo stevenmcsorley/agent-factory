@@ -20,11 +20,13 @@ export const designMethods = {
   _designContext(id) { try { return ds.designContext(this._designDir(id)); } catch { return ''; } },
 
   startDesign(id, { title, request, kind, area } = {}) {
+    this.assertAgentAvailable();
     const dir = this._designDir(id); const d = ds.createDesign(dir, { title, request, kind, area });
     this._runDesign(id, d.id, { request: d.request, kind: d.kind }); this._audit({ what: 'design', project: id, design: d.id, action: 'requested' }); return this.getDesign(id, d.id);
   },
   // Feedback from you becomes the next version. The previous version is shown to the designer so it changes what you asked for and keeps the rest.
   reviseDesign(id, did, { feedback } = {}) {
+    this.assertAgentAvailable();
     const dir = this._designDir(id); const d = ds.getDesign(dir, did); if (this.designJobs?.has(`${id}:${did}`)) throw bad('The designer is still working on this one', 409);
     if (!d.versions.length) throw bad('There is no version to revise yet'); ds.addComment(dir, did, feedback); ds.setStatus(dir, did, 'drafting');
     const previous = d.kind === 'assets' ? ds.readAssets(dir, did, d.versions.at(-1).n) : ds.readHtml(dir, did, d.versions.at(-1).n);

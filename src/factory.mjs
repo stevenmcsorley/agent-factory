@@ -211,8 +211,13 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       await tickets.comment(t.id, `agent-factory needs a little more information before it can build this:\n\n${rec.question}\n\nAnswer in the Agent Factory inbox and press Requeue (or edit the ticket and re-add the \`agent-ready\` label).`);
       await tickets.label(t.id, ['agent-needs-info'], ['agent-working']); config.recordEvent?.({ ticket: t.id, title: t.title, url: rec.pr, event: 'parked' });
     } else if (rec.status === 'rate-limited') {
-      await tickets.comment(t.id, `agent-factory stopped: the agent hit its usage limit${rec.retryAt ? ` (it says to try again ${rec.retryAt})` : ''}, so nothing was built and no pull request was opened. Press Requeue in the Agent Factory inbox once the limit has reset.`);
-      await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, title: t.title, url: rec.pr, event: 'parked' });
+      if (config.autoResume !== false) {   // the factory pauses every agent until the limit lifts, then picks this ticket up again by itself
+        await tickets.comment(t.id, `agent-factory paused: the agent hit its usage limit${rec.retryAt ? ` (it says to try again ${rec.retryAt})` : ''}, so nothing was built and no pull request was opened. This ticket stays in the queue and starts again by itself once the limit has reset.`);
+        await tickets.label(t.id, ['agent-ready'], ['agent-working']);
+      } else {
+        await tickets.comment(t.id, `agent-factory stopped: the agent hit its usage limit${rec.retryAt ? ` (it says to try again ${rec.retryAt})` : ''}, so nothing was built and no pull request was opened. Press Requeue in the Agent Factory inbox once the limit has reset.`);
+        await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, title: t.title, url: rec.pr, event: 'parked' });
+      }
     } else {
       await tickets.comment(t.id, `agent-factory gave up: ${rec.status}${rec.error ? ` (${rec.error})` : ''} after ${rec.attempts} attempt(s).`);
       await tickets.label(t.id, ['agent-failed'], ['agent-working']); config.recordEvent?.({ ticket: t.id, title: t.title, url: rec.pr, event: 'failed' });

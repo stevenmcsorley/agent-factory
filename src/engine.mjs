@@ -43,6 +43,7 @@ import { visualMethods } from './engine-visual.mjs';
 import { notifyMethods } from './engine-notify.mjs';
 import { livePreviewMethods } from './engine-livepreview.mjs';
 import { agentMethods } from './engine-agents.mjs';
+import { limitMethods } from './engine-limit.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -114,6 +115,7 @@ export class Engine {
       clarify: this._clarifier(p, sb, log),
       tester: this._tester(p, sb, log),
       visual: this._visualHook(p, sb),
+      autoResume: this.autoResume(),
       setHolds: (list) => { (this.holds ??= new Map()).set(p.id, list); },
       openChanges: async () => { const prs = await host.listAgentPrs(); const runs = readRuns(this.cfg.stateDir).filter((r) => r.project === p.id && r.status === 'ok' && r.pr && Array.isArray(r.changed)); return prs.map((pr) => ({ pr: pr.number, files: runs.filter((r) => Number(/(\d+)$/.exec(String(r.pr))?.[1]) === pr.number).flatMap((r) => r.changed.map((f) => String(f).replace(/^\S+\s+/, ''))) })).filter((o) => o.files.length); },
       materializeContext: (wsDir, t) => { const d = pk.packDir(this.cfg.stateDir, p.id); const pack = pk.loadPack(d); if (pack.brief && (Object.keys(pack.brief).length || pack.stack || pack.decisions || pack.sources.length)) pk.materialize(pack, d, wsDir); this._materializeParts(p, t, wsDir); this._materializeDesigns(p.id, wsDir); },
@@ -208,6 +210,7 @@ export class Engine {
     return { demo: !!this.demo, paused: this.paused(), busy: this.busy, last: this.last, active: this.active.size, nextAt: this.nextAt ? new Date(this.nextAt).toISOString() : null, pollMs: this.pollMs ?? null, agent: this.cfg.agent.kind,
       today: { runs: runsToday(this.cfg.stateDir), maxRuns: l.maxRunsPerDay ?? null, costUsd: Number(spentToday(this.cfg.stateDir).toFixed(4)), maxCostUsd: l.dailyBudgetUsd ?? null },
       lanes: { parallel: Math.max(1, Math.min(8, Number(l.parallelProjects) || 1)), running: [...this.lanes.keys()] },
+      limit: this.planLimit(), autoResume: this.autoResume(),
       projects: Object.values(per) };
   }
   async _cached(key, ttl, fn) { const c = this.cache.get(key); if (c && Date.now() - c.at < ttl) return c.v; const v = await fn(); this.cache.set(key, { at: Date.now(), v }); return v; }
@@ -318,12 +321,13 @@ export class Engine {
     const models = a.kind === 'codexContainer' ? readCodexModels(a.codexHome) : [];
     const limits = Object.fromEntries(Object.keys(LIMIT_FIELDS).map((k) => [k, l[k] ?? LIMIT_DEFAULTS[k] ?? null]));
     return { agent: { kind: a.kind, model: a.model ?? null, reasoningEffort: a.reasoningEffort ?? null, acceptsModel: MODEL_AGENTS.includes(a.kind), acceptsEffort: EFFORT_AGENTS.includes(a.kind), codexHome: a.codexHome ?? null, image: this.cfg.sandbox.agentImage },
-      models, limits, limitFields: LIMIT_FIELDS, limitDefaults: LIMIT_DEFAULTS, probe: this._readProbe(), probing: !!this._probing, history: this._settingsHistory(8) };
+      models, limits, limitFields: LIMIT_FIELDS, limitDefaults: LIMIT_DEFAULTS, autoResume: this.autoResume(), probe: this._readProbe(), probing: !!this._probing, history: this._settingsHistory(8) };
   }
   setSettings(patch = {}) {
     const bad = (m) => Object.assign(new Error(m), { status: 400 });
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw bad('Send an object like { agent: { model }, limits: { maxRunsPerDay } }');
-    const unknown = Object.keys(patch).filter((k) => !['agent', 'limits'].includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" cannot be changed here`);
+    const unknown = Object.keys(patch).filter((k) => !['agent', 'limits', 'autoResume'].includes(k)); if (unknown.length) throw bad(`"${unknown[0]}" cannot be changed here`);
+    if (patch.autoResume !== undefined) this.setAutoResume(patch.autoResume);
     const a = this.cfg.agent; const models = a.kind === 'codexContainer' ? readCodexModels(a.codexHome) : [];
     const ag = validateAgentPatch(patch.agent ?? {}, { kind: a.kind, models, current: { model: a.model ?? null } }); const lim = validateLimitsPatch(patch.limits ?? {});
     const errors = [...ag.errors, ...lim.errors]; if (errors.length) throw bad(errors.join('. '));
@@ -550,6 +554,7 @@ export class Engine {
 
   // Planning is a background job: the agent reads the brief and returns epics and tickets for you to review.
   startPlanning(id) {
+    this.assertAgentAvailable();
     const dir = this._packDir(id); const pack = pk.loadPack(dir); const bad = (m) => Object.assign(new Error(m), { status: 400 });
     if (this.planJobs.get(id)?.state === 'running') return this.planJobs.get(id);
     if (pack.plan && pack.plan.status !== 'proposed') throw bad('This plan is already launched, so its tickets exist. Add new work as tickets, or edit the brief for future runs.');
@@ -894,4 +899,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods);

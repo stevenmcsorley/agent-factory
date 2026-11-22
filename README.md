@@ -185,7 +185,7 @@ Open **Settings** in the UI (`#/settings`) to change, without editing the file o
 - **Model and reasoning effort** for the agent. The list comes from the models your Codex login can use (Codex's own cache), and the effort choices change with the model. Leave the model unpinned and Codex picks its own default, which can change when Codex updates; pin one to make runs repeatable. **Check what a run will use** sends one tiny prompt through the same container and login and shows what Codex reports (model, effort, version). Every run record also stores which agent and model it was asked for.
 - **Limits:** runs per day, attempts per ticket, time limit per run, projects in parallel, daily budget. Each is range-checked, and each change is saved to the config file and listed under *Recent changes*.
 
-Changes apply from the next run; a run in progress keeps what it started with. The agent type, sandbox, network allowlist and projects are deliberately not editable here (they are security boundaries). Settings are a human action only (UI and REST: `GET/POST /api/settings`, `POST /api/settings/probe`): they are not an MCP operation, so an agent cannot raise its own limits.
+Changes apply from the next run; a run in progress keeps what it started with. The agent type, sandbox, network allowlist and projects are deliberately not editable here (they are security boundaries). Settings can be changed from the UI, over REST (`GET/POST /api/settings`, `POST /api/settings/probe`) and over MCP (`get_settings`, `set_settings`), so the assistant that drives your factory can tune it. Every change is validated, applied from the next run and written to the audit log.
 
 ```jsonc
 {

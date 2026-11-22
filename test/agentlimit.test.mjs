@@ -27,7 +27,7 @@ test('an agent merely talking about rate limiting in the code it wrote is not a 
   assert.equal(parseUsageLimit(undefined), null);
 });
 
-test('a run whose agent hit the limit opens no PR, pushes nothing, and parks the ticket with a clear comment', async () => {
+for (const autoResume of [false, true]) test(`a run whose agent hit the limit opens no PR, pushes nothing, and ${autoResume ? 'keeps the ticket queued to start again by itself' : 'parks the ticket for a manual requeue'}`, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-')); const remote = path.join(root, 'remote.git'); const seed = path.join(root, 'seed');
   const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
   git(root, 'init', '--bare', '-b', 'main', remote); fs.mkdirSync(seed); git(seed, 'init', '-b', 'main');
@@ -38,11 +38,12 @@ test('a run whose agent hit the limit opens no PR, pushes nothing, and parks the
   // The agent makes a small, valid-looking change (so verify would pass) and then reports the limit, exactly like the real incident.
   const cmd = "echo partial > b.txt; echo 'You have hit your usage limit. Try again at 4:12 AM.'";
   const [rec] = await tick({ tickets: fileTickets(tpath), sandbox: sandbox({ kind: 'local' }), agent: agents.shell({ command: cmd }), vcs: gitVcs({ openPr: false }),
-    config: { cloneUrl: remote, base: 'main', maxAttempts: 2, timeoutMs: 20000, verify: 'test -f b.txt', gate: false }, stateDir: path.join(root, 'state') });
+    config: { cloneUrl: remote, base: 'main', maxAttempts: 2, timeoutMs: 20000, verify: 'test -f b.txt', gate: false, autoResume }, stateDir: path.join(root, 'state') });
   assert.equal(rec.status, 'rate-limited'); assert.equal(rec.attempts, 1, 'no second attempt is wasted on a plan that is already exhausted');
   assert.equal(rec.retryAt, '4:12 AM'); assert.equal(rec.pr, undefined);
   assert.doesNotMatch(execFileSync('git', ['branch', '-a'], { cwd: remote }).toString(), /agent\//, 'nothing was pushed');
   const t = JSON.parse(fs.readFileSync(tpath))[0];
-  assert.ok(t.labels.includes('agent-failed') && !t.labels.includes('agent-working') && !t.labels.includes('agent-review'));
+  if (autoResume) { assert.ok(t.labels.includes('agent-ready') && !t.labels.includes('agent-failed') && !t.labels.includes('agent-working'), 'back in the queue'); assert.match(JSON.stringify(t), /starts again by itself/); }
+  else { assert.ok(t.labels.includes('agent-failed') && !t.labels.includes('agent-working') && !t.labels.includes('agent-review')); assert.match(JSON.stringify(t), /Press Requeue/); }
   assert.match(JSON.stringify(t), /usage limit/);
 });

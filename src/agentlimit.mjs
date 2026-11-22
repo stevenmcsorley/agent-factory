@@ -10,3 +10,15 @@ export function parseUsageLimit(out) {
   const at = /try again (?:at|in|after) ([^.\n]{1,40})/i.exec(text)?.[1]?.trim();
   return { message: line, retryAt: at || null };
 }
+
+// When does the limit lift? The CLI prints a clock time ("10:26 PM", meaning the next time that comes round) or a full date ("Nov 22nd, 2026 3:28 AM"), in this machine's local time.
+// Returns a timestamp (ms) a couple of minutes after the stated time, or null when it cannot be read (the caller then tries again later rather than guessing a long wait).
+export function retryAtMs(text, now = Date.now()) {
+  const s = String(text ?? ''); const margin = 2 * 60_000;
+  const full = /([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(s);
+  if (full) { const t = new Date(`${full[1]} ${full[2]}, ${full[3]} ${full[4]}:${full[5]} ${full[6].toUpperCase()}`).getTime(); return Number.isFinite(t) ? t + margin : null; }
+  const clock = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(s);
+  if (clock) { let h = Number(clock[1]) % 12; if (/pm/i.test(clock[3])) h += 12; const d = new Date(now); d.setHours(h, Number(clock[2]), 0, 0); let t = d.getTime(); if (t <= now) t += 24 * 3_600_000; return t + margin; }
+  const rel = /(?:in\s+)?(\d+)\s*(minute|min|hour|hr)s?/i.exec(s); if (rel) return now + Number(rel[1]) * (/^h/i.test(rel[2]) ? 3_600_000 : 60_000) + margin;
+  return null;
+}

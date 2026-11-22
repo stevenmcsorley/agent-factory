@@ -9,6 +9,8 @@ export const EVENTS = {
   'deploy-failing': 'A pipeline is failing after a merge',
   'cap-reached': 'The daily run cap was reached',
   held: 'An automatic merge was held back',
+  'limit-reached': 'The agent plan hit its usage limit (agents paused)',
+  'plan-resumed': 'Agents are working again after a usage limit',
 };
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 

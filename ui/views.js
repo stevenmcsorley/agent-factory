@@ -97,7 +97,12 @@ export const overview = {
     const ticks = cap ? Math.min(cap, 24) : 0, usedTicks = cap ? Math.round((st.today.runs / cap) * ticks) : 0;
     const nextIn = st.nextAt ? Math.max(0, Math.round((new Date(st.nextAt) - Date.now()) / 1000)) : null;
     const stable = (node, key, sig) => keyed(node, key, sig);
+    // The plan's usage limit: every agent is paused until it lifts, and the page says so plainly instead of leaving tickets to fail one by one.
+    const limitBanner = st.limit ? h('section', { class: 'card limit-card', role: 'status' }, h('div', { class: 'card-h' }, h('h2', {}, icon('clock', 17), 'The agent plan has hit its usage limit'), h('span', { class: `stamp ${st.autoResume ? 'ok' : 'warn'}` }, st.autoResume ? 'resumes by itself' : 'press Resume')),
+      h('p', {}, `Every agent is paused until ${st.limit.untilText}. Nothing is lost: tickets stay queued${st.autoResume ? ' and start again on their own when it resets' : ', and you press Resume when it has reset'}.`),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: act(() => api('/limit/resume', { method: 'POST', body: {} }), 'Agents resumed. If the limit has not really lifted they will pause again.', ctx.rerender) }, icon('play', 13), 'Resume anyway'), h('a', { class: 'btn ghost', href: '#/settings' }, st.autoResume ? 'Auto-resume is on' : 'Turn on auto-resume'))) : null;
     return [
+      limitBanner,
       stable(launcher(projects, st), 'launcher', [projects.length, st.lanes?.running?.length ?? 0, st.lanes?.parallel ?? 1, st.active]),
       persist('line', { queued, shipped, active: activity.active, agents: activity.agents ?? [], roster: activity.roster ?? [], paused: st.paused, nextIn }, lineCard),
       stable(h('section', { class: 'spec' },
