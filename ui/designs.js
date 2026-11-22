@@ -3,6 +3,7 @@
 // SECURITY: all text through h(); the mockup itself never touches this page's DOM, only the frame.
 import { h, icon, api, toast, ago, act } from './lib.js';
 import { codeBlock } from './codeblock.js';
+import { designStageCard, restyleCard } from './designstage.js';
 import { shotImg } from './autopilot.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
@@ -13,7 +14,7 @@ const newer = (d) => d.status === 'approved' && d.approvedVersion && latestOf(d)
 // One line that says what the builder does with this design.
 const stateLine = (d) => d.working ? 'designer working…' : d.status === 'approved' ? `in use · v${d.approvedVersion}${newer(d) ? ` · newer v${latestOf(d)} waiting for you` : ''}` : d.status === 'proposed' ? `waiting for you · v${latestOf(d)}` : d.status === 'archived' ? `archived${d.supersededBy ? ' · replaced by a newer design' : ''}` : d.status === 'failed' ? 'failed' : d.status;
 
-export async function loadDesigns(id) { const [d, screens] = await Promise.all([api(`/projects/${id}/designs`).catch(() => ({ designs: [] })), api(`/projects/${id}/screens`).catch(() => null)]); return { ...d, screens }; }
+export async function loadDesigns(id) { const [d, screens, stage] = await Promise.all([api(`/projects/${id}/designs`).catch(() => ({ designs: [] })), api(`/projects/${id}/screens`).catch(() => null), api('/op/design_phase_status', { method: 'POST', body: { project: id } }).catch(() => null)]); return { ...d, screens, stage }; }
 
 function newForm(id, rerender) {
   const kind = h('select', { 'aria-label': 'What to make' }, [['screen', 'A screen (HTML mockup)'], ['assets', 'Artwork: logo, icons, illustrations (SVG files)']].map(([v, l]) => h('option', { value: v }, l)));
@@ -122,7 +123,7 @@ export function designsTab(data, { id, rerender, poll }) {
   const cur = list.find((d) => d.id === selected) ?? null; if (selected && !cur) selected = null;
   return h('div', { class: 'stack' },
     h('div', { class: 'note info' }, icon('spark', 14), h('div', {}, 'The designer drafts screens and artwork (logos, icons, illustrations as SVG) for you to approve. ', h('b', {}, 'Only designs marked "in use" guide the builder'), ': its colours, type, layout patterns and artwork go into every ticket\'s instructions.')),
-    builderPanel(id, data, rerender), list.length ? card(h('div', { class: 'card-h' }, h('h2', {}, 'Designs'), h('span', { class: 'muted small' }, `${list.length} in total`)), library(list, rerender)) : null,
+    designStageCard(id, data?.stage, rerender, { poll }), builderPanel(id, data, rerender), list.length ? card(h('div', { class: 'card-h' }, h('h2', {}, 'Designs'), h('span', { class: 'muted small' }, `${list.length} in total`)), library(list, rerender)) : null,
     cur ? detail(id, cur, rerender) : (list.length ? h('p', { class: 'muted small' }, 'Pick a design above to see its versions and decide which one to use.') : null),
-    screensCard(id, data?.screens, rerender, poll), newForm(id, rerender));
+    screensCard(id, data?.screens, rerender, poll), restyleCard(id, data?.stage, rerender), newForm(id, rerender));
 }

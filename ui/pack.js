@@ -1,6 +1,7 @@
 // The Brief tab (what we are building, conventions, decisions, source material) and the Plan tab (brief -> epics -> tickets -> done).
 import { h, icon, api, toast, ago, num, ext, act } from './lib.js';
 import { codeBlock } from './codeblock.js';
+import { designStageCard } from './designstage.js';
 
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
 const pill = (text, cls = '') => h('span', { class: `pill2 ${cls}` }, text);
@@ -141,5 +142,5 @@ export function planTab(data, pack, { id, rerender, poll, openBrief }) {
     : card('', h('div', { class: 'card-h' }, h('h2', {}, 'Proposed plan'), pill(`${total} tickets in ${epics.length} epics`, 'muted')), h('p', {}, plan.summary),
         h('p', { class: 'muted small' }, 'Read it, then edit titles and details, remove anything you do not want, and launch. Nothing is created in your tracker until you launch. Tickets with dependencies are created only after the tickets they depend on are merged.'),
         h('div', { class: 'row gap-t' }, launchBtn, saveBtn, h('button', { class: 'btn ghost', onclick: act(() => api(`/projects/${id}/plan/discard`, { method: 'POST', body: {} }), 'Plan discarded', rerender) }, 'Discard and re-draft')));
-  return [head, root];
+  return [head, designStageCard(id, data.designStage, rerender, { poll }), root].filter(Boolean);
 }

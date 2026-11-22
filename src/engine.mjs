@@ -47,6 +47,7 @@ import { limitMethods } from './engine-limit.mjs';
 import { presetMethods } from './engine-presets.mjs';
 import { reviewMethods } from './engine-review.mjs';
 import { unattendedMethods } from './engine-unattended.mjs';
+import { designPhaseMethods } from './engine-designphase.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -114,7 +115,7 @@ export class Engine {
     const detected = !p.config?.verify && p.profile?.verify ? { verify: p.profile.verify, ...(!p.config?.image && p.profile.image ? { image: p.profile.image } : {}) } : {};
     const config = { ...this.cfg.limits, ...detected, ...(p.config ?? {}), repo: p.repo, projectId: p.id, base: p.base, analysis: this._analysisCfg(p),
       // Same-for-every-ticket text first (so a provider can reuse its cache of that beginning across tickets), then what depends on THIS ticket.
-      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); const c = pk.renderContextParts(pk.loadPack(d), d, t); return [c.fixed, this._designContext?.(p.id), this._skillsText('builder', p.id), c.perTicket, this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
+      contextFor: (t) => { try { const d = pk.packDir(this.cfg.stateDir, p.id); const c = pk.renderContextParts(pk.loadPack(d), d, t); return [c.fixed, this._designContext?.(p.id), this._ticketDesignHint?.(p, t), this._skillsText('builder', p.id), c.perTicket, this._planContext(p, t), this._partsContext(p, t).text].filter(Boolean).join('\n\n'); } catch { return ''; } },
       review: this._reviewer(p, sb, log),
       clarify: this._clarifier(p, sb, log),
       tester: this._tester(p, sb, log),
@@ -608,6 +609,7 @@ export class Engine {
     const adapter = this.deps(this.project(id)).tickets;
     if (typeof adapter.createEpic === 'function') for (const e of pack.plan.epics) { if (e.trackerId) continue; try { const r = await adapter.createEpic({ title: e.title, body: `${e.goal || ''}\n\nTickets in this epic:\n${e.tickets.map((t) => `- ${t.title}`).join('\n')}\n\n(Created by Agent Factory from the project plan.)`.trim() }); e.trackerId = String(r?.id ?? ''); e.trackerUrl = r?.url; } catch (err) { e.trackerError = String(err.message ?? err).slice(0, 200); } }
     pk.savePack(dir, pack);
+    await this._beginDesignPhase(id).catch(() => {});   // a project with a UI starts with its designs
     await this.releasePlan(id); return this.getPack(id);
   }
   // Keep plan ticket statuses in step with the tracker: planned -> queued/working/review -> done (closed).
@@ -640,16 +642,17 @@ export class Engine {
     if (this._designPass?.get(id)?.state === 'running') return { released: 0, waiting: 'designs' };   // unattended: the screens and artwork come first
     const dir = this._packDir(id); let pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return { released: 0 };
     pack = await this.syncPlan(id); if (pack.plan?.status !== 'launched') return { released: 0 };
+    { const block = this.designPhaseBlock(id, pack); if (block) return { released: 0, waiting: 'designs', design: block.state }; }   // the design stage comes first
     const all = pk.planTickets(pack.plan); const done = new Set(all.filter((t) => t.status === 'done').map((t) => t.id)); let released = 0;
     for (const e of pack.plan.epics) for (const t of e.tickets) {
       if (t.status !== 'planned' || !t.dependsOn.every((d) => done.has(d))) continue;
-      const res = await this.createTicket(id, { title: t.title, body: pk.ticketBody(t, e), epic: e.trackerId || undefined });
+      const res = await this.createTicket(id, { title: t.title, body: pk.ticketBody(t, e), epic: e.trackerId || undefined }); t.designVersions = this._designStamp(id);   // which version of each screen this ticket was built from
       t.status = 'queued'; t.url = res?.url; t.ticketId = res?.id ?? (res?.url ? /([\w-]+)$/.exec(res.url)?.[1] : undefined); t.queuedAt = new Date().toISOString(); released++;
     }
     if (released) pk.savePack(dir, pack); return { released };
   }
   planProgress(plan) { const all = pk.planTickets(plan); const n = (s) => all.filter((t) => t.status === s).length; return { total: all.length, planned: n('planned'), queued: n('queued'), working: n('working'), review: n('review'), done: n('done'), failed: n('failed') + n('needs-info') }; }
-  async getPlan(id) { const pack = await this.syncPlan(id); return { plan: pack.plan, progress: pack.plan ? this.planProgress(pack.plan) : null, health: pack.plan ? this.planHealth(id) : null, job: this.planJobs.get(id) ?? { state: 'idle' } }; }
+  async getPlan(id) { const pack = await this.syncPlan(id); return { plan: pack.plan, progress: pack.plan ? this.planProgress(pack.plan) : null, health: pack.plan ? this.planHealth(id) : null, designStage: this.designPhaseStatus(id), job: this.planJobs.get(id) ?? { state: 'idle' } }; }
 
   // Publish the pack into the repo as a reviewable PR under .factory/ (the factory's copy stays the working copy).
   async publishPack(id) {
@@ -929,4 +932,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods, unattendedMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods, unattendedMethods, designPhaseMethods);
