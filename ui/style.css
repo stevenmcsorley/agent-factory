@@ -499,3 +499,5 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 @media (prefers-reduced-motion: reduce) { .line3d *, .line3d { animation: none !important; } }
 
 .line-card.l3::before, .line-card.l3::after { display: none; } .line-card.l3 .agent .a-top { flex-wrap: nowrap; white-space: nowrap; } .line-card.l3 .agent .a-top b { overflow: hidden; text-overflow: ellipsis; }
+
+.line3d .l3-parcel { opacity: 0; transition: opacity .3s; } .line3d .l3-station.on .l3-parcel { opacity: 1; }
