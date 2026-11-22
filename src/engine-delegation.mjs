@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const addTokens = (a, b) => (!a && !b ? null : ({ input: (a?.input ?? 0) + (b?.input ?? 0), output: (a?.output ?? 0) + (b?.output ?? 0), cached: (a?.cached ?? 0) + (b?.cached ?? 0), reasoning: (a?.reasoning ?? 0) + (b?.reasoning ?? 0), steps: (a?.steps ?? 0) + (b?.steps ?? 0) }));
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const ZERO = { input: 0, output: 0, cached: 0, reasoning: 0, steps: 0 };
 const clockOf = (ms) => { const d = new Date(ms); const h = d.getHours(); return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`; };
@@ -86,8 +87,9 @@ export const delegationMethods = {
       } else {
         // a role may start on an older, cheaper Codex model and step up on each retry (cfg.agents.tiers); the model that did the work is what gets recorded
         // the harness: builders step up a model on each retry; every other role steps up when its output fails the check for that role (a verdict that does not parse, an empty or token-thin answer)
-        const seq = this._ladder(role, call.size).models; const climbs = role === 'builder' || role === 'fixer'; let idx = climbs ? Math.min(Math.max(1, call.attempt), seq.length || 1) - 1 : 0; let tier = seq[idx] ?? null; let o = await onPlan(args, tier); r = o.r;
-        while (!climbs && !o.lim && seq.length && idx < seq.length - 1 && !validateOutput(role, r?.out).ok) { const bad = validateOutput(role, r?.out); this._audit({ what: 'harness', action: 'step-up', role, project: ctx.project ?? null, from: tier, to: seq[idx + 1], why: bad.why }); idx++; const prev = tier; tier = seq[idx]; o = await onPlan(args, tier); r = o.r; escalated = true; why = `${why}; ${prev} ${bad.why}, so ${tier} took over`; }
+        const seq = this._ladder(role, call.size).models; const climbs = role === 'builder' || role === 'fixer'; let idx = climbs ? Math.min(Math.max(1, call.attempt), seq.length || 1) - 1 : 0; let tier = seq[idx] ?? null; let o = await onPlan(args, tier); r = o.r; let spent = null;
+        while (!climbs && !o.lim && seq.length && idx < seq.length - 1 && !validateOutput(role, r?.out).ok) { const bad = validateOutput(role, r?.out); this._audit({ what: 'harness', action: 'step-up', role, project: ctx.project ?? null, from: tier, to: seq[idx + 1], why: bad.why }); spent = addTokens(spent, r?.tokens); idx++; const prev = tier; tier = seq[idx]; o = await onPlan(args, tier); r = o.r; escalated = true; why = `${why}; ${prev} ${bad.why}, so ${tier} took over`; }
+        if (spent && r) r = { ...r, tokens: addTokens(r.tokens, spent) };   // the calls that failed their check still cost tokens: they are counted, not lost
         if (tier && r) { r = { ...r, model: r.model ?? tier }; why = `${why}; model ${tier}${seq.length > 1 ? ` (step ${idx + 1} of ${seq.length})` : ''}`; }
         // the plan ran out in the middle of this call: if the free models may stand in, do the same job on them instead of failing it
         if (o.lim && this._fallbackCovers(role)) { this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await onFree(args, JUDGES.has(role)); via = 'openrouter'; escalated = true; why = `${why} → Codex limit: the free models carried on`; }

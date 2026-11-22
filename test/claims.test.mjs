@@ -80,3 +80,9 @@ test('defaults: with a Codex login that offers the models, the reviewer and the 
   e.setAgentPolicy({ defaultTiers: false }); assert.deepEqual(e._ladder('reviewer').models, []); e.setAgentPolicy({ defaultTiers: true }); e.codexModels = () => [{ id: 'gpt-6.2-astra', name: 'x' }]; assert.deepEqual(e._ladder('reviewer').models, [], 'a model the login does not offer is never used');
   const shell = eng(); shell.codexModels = e.codexModels; assert.deepEqual(shell._ladder('reviewer').models, [], 'only for Codex agents');
 });
+
+test('a call that failed its check still counts: its tokens are added to the job that stepped up', async () => {
+  const V = '{"verdict":"approve","summary":"ok","findings":[]}'; const e = eng({ agents: { tiers: { reviewer: ['gpt-6-luna', 'gpt-6.2-astra'] } } }); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-'));
+  const sb = { kind: 'local', exec: async (_w, _c, _a, o) => ({ code: 0, out: o.env.AGENT_MODEL === 'gpt-6-luna' ? 'looks fine' : V, tokens: o.env.AGENT_MODEL === 'gpt-6-luna' ? { input: 1000, output: 10 } : { input: 2000, output: 20 } }) };
+  await e._agentFor('reviewer', path.join(dir, 'l.log'), { project: 'p' }).run(sb, { dir }, 'Judge', { timeoutMs: 20_000, meta: {} }); const u = readUsage(e.cfg.stateDir).at(-1); assert.deepEqual([u.input, u.output], [3000, 30], 'both calls are counted'); assert.equal(u.model, 'gpt-6.2-astra');
+});
