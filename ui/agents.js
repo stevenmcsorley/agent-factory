@@ -25,7 +25,7 @@ function codexCard(d) {
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Codex'), lim ? chip('warn', `Limited until ${lim.untilText}`) : chip('ok', 'Working normally')),
     lim ? h('p', { class: 'muted' }, `Your Codex plan has run out for now and is back ${d.codex.backIn ? `in about ${d.codex.backIn}` : `at ${lim.untilText}`}. ${d.policy.mode === 'codex' ? 'Work waits until then.' : d.openrouterReady ? 'The free models are carrying on in the meantime.' : 'Turn on the free models to keep working meanwhile.'}`) : h('p', { class: 'muted' }, 'Your Codex plan is available.'),
     a ? h('div', { class: 'pair' }, h('div', {}, h('span', {}, 'Model'), h('b', {}, a.model ?? 'Codex default')), h('div', {}, h('span', {}, 'Thinking effort'), h('b', {}, a.reasoningEffort ?? 'default'))) : null,
-    h('div', { class: 'mini' }, [[week.calls, 'jobs this week'], [compact(week.input), 'tokens read'], [compact(week.output), 'tokens written']].map(([n, t]) => h('div', {}, h('b', {}, String(n)), h('span', {}, t)))),
+    h('div', { class: 'figs' }, [[week.calls, 'jobs this week'], [compact(week.input), 'tokens read'], [compact(week.output), 'tokens written']].map(([n, t]) => h('div', {}, h('b', {}, String(n)), h('span', {}, t)))),
     h('div', { class: 'row gap-t' }, h('a', { class: 'btn small', href: '#/agents/codex' }, 'Codex settings')));
 }
 function freeCard(d) {
