@@ -618,3 +618,5 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 @keyframes ln-idlebin2 { 0%, 100% { stroke-opacity: .15; } 50% { stroke-opacity: .7; } } @keyframes ln-idlescan { 0%, 6% { transform: translateX(912px); opacity: 0; } 20% { opacity: .55; } 62% { transform: translateX(996px); opacity: .55; } 76%, 100% { transform: translateX(996px); opacity: 0; } }
 @keyframes ln-idleslip { 0% { transform: translate(385px, 266px) rotate(-6deg); opacity: 0; } 12% { opacity: .75; } 70% { transform: translate(385px, 330px) rotate(2deg); opacity: .75; } 82%, 100% { transform: translate(385px, 338px); opacity: 0; } }
 @keyframes ln-idleghost { 0% { transform: translate(1160px, 374px) rotate(-19deg); opacity: 0; } 15% { opacity: .6; } 85% { opacity: .6; } 100% { transform: translate(1126px, 268px) rotate(-19deg); opacity: 0; } }
+/* a job that stopped without shipping: its parcel greys out as it drops off the belt */
+.lineart .bob.rejected { filter: grayscale(.8) brightness(.65); transition: filter .4s ease; } .lineart .l-part-g { transition: transform .95s cubic-bezier(.45, 0, .2, 1), opacity .9s ease; }

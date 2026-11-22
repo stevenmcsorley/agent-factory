@@ -106,7 +106,7 @@ export const overview = {
     return [
       limitBanner,
       stable(launcher(projects, st), 'launcher', [projects.length, st.lanes?.running?.length ?? 0, st.lanes?.parallel ?? 1, st.active]),
-      persist('line', { queued, shipped, active: activity.active, agents: activity.agents ?? [], roster: activity.roster ?? [], paused: st.paused, nextIn }, lineCard),
+      persist('line', { queued, shipped, active: activity.active, agents: activity.agents ?? [], roster: activity.roster ?? [], paused: st.paused, nextIn, ends: Object.fromEntries((activity.events ?? []).filter((e) => e.type === 'end' && e.run).map((e) => [e.run, e.status])) }, lineCard),
       stable(h('section', { class: 'spec' },
         h('div', {}, h('span', { class: 'eyebrow' }, 'Shipped today'), h('div', { class: 'num orange' }, odometer(shipped, 2)), h('div', { class: 'foot' }, `${t.ok} PRs in 14 days`)),
         h('div', {}, h('span', { class: 'eyebrow' }, 'Success rate · 14d'), h('div', { class: `num ${t.successRate == null ? '' : t.successRate > 0.7 ? 'green' : t.successRate > 0.4 ? '' : 'red'}` }, t.successRate == null ? '–' : odometer(Math.round(t.successRate * 100), 1), t.successRate == null ? null : h('small', {}, '%')), h('div', { class: 'foot' }, `${t.ok} of ${t.runs} runs${t.failed ? ` · ${t.failed} failed` : ''}`)),

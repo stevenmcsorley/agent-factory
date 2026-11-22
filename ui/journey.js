@@ -8,8 +8,9 @@ export const dwellFor = (key) => DWELL[key] ?? 2600;
 // The station index a phase name belongs to (null when it is not one of the line's stations, so the parcel stays where it is).
 export function stationOf(phase, keys) { const k = STAGE_OF[phase]; const i = keys.indexOf(k); return i < 0 ? null : i; }
 // What the parcel does next. vis = station it is at now (-1 = still in the hopper), target = the furthest station the real job has reached, done = the real job has ended.
-// Returns { move: station } to advance one station, { exit: true } to leave for the shipped bin, or null to wait where it is.
-export function nextStep({ vis, target, done, last }) {
+// Returns { move: station } to advance one station, { exit: true } to leave for the shipped bin, { drop: true } to fall off the belt (the job stopped without shipping), or null to wait where it is.
+export function nextStep({ vis, target, done, last, outcome = null }) {
+  if (done && outcome && outcome !== 'ok') return vis < 0 ? { drop: true } : (vis >= target ? { drop: true } : { move: vis + 1 });   // a job that did not ship still visits the machines it really reached, then drops off the belt where it stopped
   if (vis < target) return { move: vis + 1 };                 // catch up one station at a time, never skipping one
   if (done) return vis < last ? { move: vis + 1 } : { exit: true };   // the job has ended: finish the journey
   return null;

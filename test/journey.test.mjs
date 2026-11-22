@@ -17,3 +17,8 @@ test('when the job has ended the parcel finishes the journey through the station
   assert.deepEqual(nextStep({ vis: 5, target: 5, done: true, last: 5 }), { exit: true }); assert.deepEqual(nextStep({ vis: 0, target: 0, done: true, last: 5 }), { move: 1 }, 'a job that ended at once still visits every machine');
 });
 test('each machine is given long enough for its motion to play', () => { for (const k of KEYS) assert.ok(DWELL[k] >= 2500 && dwellFor(k) === DWELL[k], k); assert.equal(dwellFor('unknown'), 2600); const total = KEYS.reduce((n, k) => n + dwellFor(k), 0); assert.ok(total < 25_000, `a whole journey is ${total} ms`); });
+
+test('a job that did not ship still visits the machines it reached, then drops off the belt where it stopped; an unknown ending waits', () => {
+  assert.deepEqual(nextStep({ vis: 2, target: 2, done: true, last: 5, outcome: 'needs-info' }), { drop: true }); assert.deepEqual(nextStep({ vis: 0, target: 2, done: true, last: 5, outcome: 'verify-failed' }), { move: 1 }, 'it still passes the machines it really reached');
+  assert.deepEqual(nextStep({ vis: -1, target: -1, done: true, last: 5, outcome: 'error' }), { drop: true }); assert.deepEqual(nextStep({ vis: 2, target: 2, done: true, last: 5, outcome: 'ok' }), { move: 3 }, 'a shipped job goes all the way');
+});

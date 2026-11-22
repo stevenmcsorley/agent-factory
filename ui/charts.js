@@ -223,7 +223,7 @@ export function createLine3D(stages) {
       s('rect', { x: -28, y: -10, width: 52, height: 4, rx: 1, fill: '#1fbf7e', class: 'p-code' }), s('g', { class: 'p-check' }, s('circle', { cx: 17, cy: -21, r: 8.5, fill: '#3be0a1', stroke: '#07130e', 'stroke-width': 1 }), s('path', { d: 'M12.5 -21L16 -17.5L22 -25', fill: 'none', stroke: '#07130e', 'stroke-width': 2.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })),
       s('rect', { x: -3, y: -50, width: 11, height: 49, fill: '#2fe0a0', opacity: 0.85, class: 'p-tape' }));
     const g = s('g', { class: 'l-part-g' }, s('g', { transform: 'scale(.96)' }, inner)); layer.append(g); const lab = s('g', { class: 'l-part-g l-lab' }, s('text', { x: 0, y: 0, class: 'ln-part-label', 'text-anchor': 'middle' }, '')); labels.append(lab); return { g, inner, lab, label: lab.firstChild }; };
-  function update({ queued = 0, shipped = 0, active = [], paused = false }) {
+  function update({ queued = 0, shipped = 0, active = [], paused = false, ends = {} }) {
     svg.classList.toggle('shipping', shipped > 0);
     svg.setAttribute('aria-label', `Assembly line: ${queued} queued, ${active.length} in progress, ${shipped} shipped today`);
     pileEls.forEach((e, i) => e.classList.toggle('show', i < Math.min(queued, 5)));
@@ -232,10 +232,10 @@ export function createLine3D(stages) {
     // data in: note how far each real job has got (never going backwards) and which have finished. The parcels' own journey (below) decides what is drawn.
     const seen = new Set(); const keys = stages.map(([k]) => k); const now = Date.now();
     for (const a of active) { seen.add(a.run); const target = stationOf(a.phase, keys); let p = parts.get(a.run);
-      if (!p) { p = makePart(); p.target = target ?? 0; p.done = false; p.exiting = false; p.title = a.title ?? ''; p.vis = ready ? -1 : p.target; p.readyAt = now + (ready ? 800 : 0); parts.set(a.run, p);
+      if (!p) { p = makePart(); p.target = target ?? 0; p.done = false; p.exiting = false; p.title = a.title ?? ''; p.run = a.run; p.vis = ready ? -1 : p.target; p.readyAt = now + (ready ? 800 : 0); parts.set(a.run, p);
         for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? HOPPER_MOUTH : stX(p.vis) + (OFF[keys[p.vis]] ?? 0), ready ? LANE : lane(keys[p.vis])); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } if (!ready) show(p); }
       else if (target != null) p.target = Math.max(p.target, target); p.title = a.title ?? p.title; }
-    for (const p of parts.values()) if (![...seen].some((id) => parts.get(id) === p)) p.done = true;
+    for (const [id, p] of parts) if (!seen.has(id)) { if (!p.done) { p.done = true; p.doneAt = now; } if (ends[id] != null) p.outcome = ends[id]; else if (now - p.doneAt > 6000) p.outcome = 'ok'; }   // how it ended comes from the log; if it never arrives, assume it shipped
     ensureTicker(); redraw(); ready = true;
   }
   // ---- the journey: one step at a time, each station for as long as its motion takes
@@ -252,10 +252,12 @@ export function createLine3D(stages) {
     setTimeout(() => { place(p.g, slotX(7) - 10, 330); p.g.style.opacity = '0'; }, 1100); setTimeout(() => { p.g.remove(); p.lab.remove(); }, 2600);
     for (const [id, q] of parts) if (q === p) parts.delete(id); redraw();
   }
+  // a job that stopped without shipping (it needs an answer, or failed): the parcel is taken off the belt where it stopped
+  function dropOff(p) { p.exiting = true; p.inner.setAttribute('class', `bob rejected`); const g = p.g; place(g, (Number(/translate\(([-\d.]+)px/.exec(g.style.transform)?.[1]) || stX(Math.max(0, p.vis))), LANE + 46); g.style.opacity = '0'; p.lab.style.opacity = '0'; setTimeout(() => { p.g.remove(); p.lab.remove(); }, 1800); for (const [id, q] of parts) if (q === p) parts.delete(id); redraw(); }
   function tick() {
     if (!svg.isConnected) { clearInterval(timer); timer = null; return; } const now = Date.now(); let changed = false;
-    for (const p of [...parts.values()]) { if (p.exiting || now < p.readyAt) continue; const nx = nextStep({ vis: p.vis, target: p.target, done: p.done, last: keys0.length - 1 });
-      if (!nx) continue; if (nx.exit) { exitToBin(p); continue; } p.vis = nx.move; p.readyAt = now + dwellFor(keys0[p.vis]) + (p.vis === 0 ? 0 : 0); changed = true; }
+    for (const p of [...parts.values()]) { if (p.exiting || now < p.readyAt) continue; const nx = nextStep({ vis: p.vis, target: p.target, done: p.done && (p.outcome != null || p.doneAt == null), last: keys0.length - 1, outcome: p.outcome });
+      if (!nx) continue; if (nx.exit) { exitToBin(p); continue; } if (nx.drop) { dropOff(p); continue; } p.vis = nx.move; p.readyAt = now + dwellFor(keys0[p.vis]) + (p.vis === 0 ? 0 : 0); changed = true; }
     if (changed) redraw(); if (!parts.size && timer) { clearInterval(timer); timer = null; }
   }
   function ensureTicker() { if (!timer) timer = setInterval(tick, 200); }
