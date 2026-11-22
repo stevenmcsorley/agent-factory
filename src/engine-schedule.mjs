@@ -9,7 +9,7 @@ export const scheduleMethods = {
     const reasons = []; const l = this.cfg.limits;
     if (this.paused()) reasons.push({ code: 'factory-paused', reason: 'the whole factory is paused' });
     if (p.paused) reasons.push({ code: 'project-paused', reason: 'this project is paused' });
-    const lim = this.planLimit(); if (lim) reasons.push({ code: 'plan-limit', reason: `the agent plan's usage limit is reached; agents resume ${lim.autoResume ? 'by themselves ' : 'when you press Resume, after '}${lim.untilText}`, nextAt: new Date(lim.until).toISOString() });
+    const lim = this.planLimit(); if (lim && !this._fallbackAny?.()) reasons.push({ code: 'plan-limit', reason: `the agent plan's usage limit is reached; agents resume ${lim.autoResume ? 'by themselves ' : 'when you press Resume, after '}${lim.untilText}`, nextAt: new Date(lim.until).toISOString() });
     const sch = scheduleState(p.schedule, now, p.schedule?.hoursPerDay ? usedToday(readRuns(this.cfg.stateDir), p.id, now) : 0);
     if (!sch.allowed) reasons.push({ code: sch.code, reason: sch.reason, nextAt: sch.nextAt });
     if (l.maxRunsPerDay != null && runsToday(this.cfg.stateDir) >= l.maxRunsPerDay) reasons.push({ code: 'daily-cap', reason: `the factory's daily run cap is reached (${l.maxRunsPerDay} of ${l.maxRunsPerDay})` });

@@ -61,10 +61,14 @@ export const roleMethods = {
   _roleOn(p, role) { return p.roles?.[role]?.enabled ?? this.cfg.roles?.[role]?.enabled ?? false; },
   // The agent for a role: the global agent, with the role's own model and effort laid over it.
   _agentFor(role, log, ctx = {}) {
-    let agent = this.f.agent; if (!agent) { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; agent = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); }
+    // OpenRouter is this role's first choice, or it stands in while the plan is limited (see engine-openrouter.mjs).
+    const viaOr = !this.f.agent && (this._roleUsesOpenRouter(role) || (!!this.planLimit() && this._fallbackCovers(role)));
+    let agent = this.f.agent; if (!agent) { if (viaOr) agent = this._orAgent(role, log, ctx); else { const a = { ...this.cfg.agent, ...(this.cfg.roles?.[role]?.agent ?? {}) }; agent = agents[a.kind]({ ...a, image: this.cfg.sandbox.agentImage, log }); } }
     // The one place every agent call passes through, whichever role: the first sign of the plan's usage limit pauses every agent (engine-limit.mjs), and the tokens used are logged (usage.mjs).
-    return { ...agent, run: async (...args) => { const t0 = Date.now(); const r = await agent.run(...args); const lim = parseUsageLimit(r?.out); if (lim) this._noteLimit(lim);
-      const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: (this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null, input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...(lim ? { limited: true } : {}) }); return r; } };
+    return { ...agent, run: async (...args) => { const t0 = Date.now(); let r = await agent.run(...args); let lim = parseUsageLimit(r?.out); let swapped = false;
+      // the plan ran out in the middle of this call: say so, and (when OpenRouter is set to stand in) do the same job again on a free model instead of failing it
+      if (lim && agent.name !== 'openrouter' && !this.f.agent && this._fallbackCovers(role)) { this._noteLimit(lim); this._audit({ what: 'openrouter', action: 'fallback', role, project: ctx.project ?? null }); r = await this._orAgent(role, log, ctx).run(...args); lim = parseUsageLimit(r?.out); swapped = true; } if (lim) this._noteLimit(lim);
+      const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via: r?.models || agent.name === 'openrouter' || swapped ? 'openrouter' : null, input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...(lim ? { limited: true } : {}) }); return r; } };
   },
   _sandboxFor(log) { return this.f.sandbox ?? makeSandbox({ ...this.cfg.sandbox, ...(this.egress ? { network: this.egress.network, extraEnv: this.egress.env } : {}), log }); },
   _skillsText(role, projectId) { try { return sk.skillsFor(this.cfg.stateDir, { role, project: projectId }).text; } catch { return ''; } },

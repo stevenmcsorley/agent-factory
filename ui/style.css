@@ -418,3 +418,8 @@ td.empty { background: repeating-linear-gradient(135deg, transparent 0 6px, var(
 .cb-scroll { overflow: auto; } .cb-scroll:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
 .cb .dtab { width: auto; min-width: 100%; } .cb .dc { padding-left: 14px; } .cb .dn::before { content: attr(data-n); } .cb.wrap .dtab { width: 100%; } .cb.wrap .dc { white-space: pre-wrap; overflow-wrap: anywhere; } .cb-more { color: var(--muted); font-style: italic; }
 .cb .dn { background: var(--panel); }
+
+/* ---- OpenRouter page (ui/openrouter.js) */
+.ortable-wrap { overflow-x: auto; margin-top: 8px; } .ortable { width: 100%; border-collapse: collapse; font-size: 13px; } .ortable th { text-align: left; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+.ortable td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; } .ortable td.num { text-align: right; font-family: var(--mono); white-space: nowrap; } .ortable tr.dim td { color: var(--muted); } .ortable code { font-size: 12px; }
+.rolebox { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 6px 0; } .rolegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-top: 6px; } .rolegrid > div { border: 1px solid var(--line); background: var(--panel-2); padding: 8px 10px; display: grid; gap: 2px; } .rolegrid b { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); } .rolegrid code { font-size: 12px; overflow-wrap: anywhere; }

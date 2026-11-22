@@ -39,7 +39,7 @@ export const limitMethods = {
     this._notify?.({ event: 'plan-resumed', title: 'Agents are working again', detail: this.autoResume() ? 'the usage limit has reset' : 'the limit was cleared' });
   },
   clearPlanLimit() { const had = !!this.planLimit(); this._expireLimit({ requeue: true }); return { cleared: had }; },
-  assertAgentAvailable() { const l = this.planLimit(); if (l) throw Object.assign(new Error(`The agent plan's usage limit is reached. Agents are paused until ${l.untilText}${l.autoResume ? ' and resume by themselves' : ''}. (Press Resume anyway on the Control room to try now.)`), { status: 429 }); },
+  assertAgentAvailable() { const l = this.planLimit(); if (l && !this._fallbackAny?.()) throw Object.assign(new Error(`The agent plan's usage limit is reached. Agents are paused until ${l.untilText}${l.autoResume ? ' and resume by themselves' : ''}. (Press Resume anyway on the Control room to try now.)`), { status: 429 }); },
   // Tickets that only failed because of the limit go back in the queue (not ones that failed for a real reason).
   async requeueLimited() {
     const lastBy = new Map(); for (const r of readRuns(this.cfg.stateDir)) if (r.ticket != null) lastBy.set(`${r.project}#${r.ticket}`, r); const out = [];
