@@ -33,6 +33,8 @@ function daysCard(a) {
     dayBars(days, { aClass: 'codex', bClass: 'free', aLabel: 'Codex', bLabel: 'Free models', height: 170 }), h('p', { class: 'muted small' }, 'Tokens read and written each day. A quiet day shows as an empty slot.'));
 }
 
+// Zoom the strip to where the events are (padded), so a week with one busy day is not a row of overlapping dots in the last corner.
+function tlFrom(events, a) { const first = Math.min(...events.map((e) => Date.parse(e.at))); const full = Date.parse(a.range.from); const padded = first - 3_600_000; return new Date(Math.max(full, Math.min(padded, Date.parse(a.range.to) - 6 * 3_600_000))).toISOString(); }
 function limitsCard(a) {
   const L = a.limits; const free = L.free; const codex = L.codex; const b = free.budget; const events = a.events;
   const codexNow = codex.current ? chip('warn', `Limited until ${codex.current.untilText}`) : chip('ok', 'Working normally');
@@ -42,7 +44,7 @@ function limitsCard(a) {
       h('div', { class: 'limitbox' }, h('h3', {}, 'Codex'), codexNow, h('p', { class: 'muted small' }, codex.history.length ? `Hit its limit ${codex.history.length} time${codex.history.length === 1 ? '' : 's'} in this period.` : 'No limits hit in this period.')),
       h('div', { class: 'limitbox' }, h('h3', {}, 'Free models, today'), b?.cap ? gauge({ value: b.cap - (b.remaining ?? 0), max: b.cap, label: String(b.remaining ?? '–'), sub: 'requests left', tone: (b.remaining ?? 0) < b.cap * 0.1 ? 'bad' : (b.remaining ?? 0) < b.cap * 0.3 ? 'warn' : 'ok', size: 112, title: `${b.used} of ${b.cap} free-model requests used today` }) : h('p', { class: 'muted small' }, 'Not set up.'), h('p', { class: 'muted small' }, b?.cap ? `${b.used} of ${b.cap} used. The allowance resets at ${reset} (midnight UTC).` : '')),
       h('div', { class: 'limitbox' }, h('h3', {}, 'OpenRouter credit'), free.credits ? h('div', {}, h('b', { class: 'bignum' }, money(free.credits.remaining)), h('p', { class: 'muted small' }, `of ${money(free.credits.total)} bought. Free models do not use it; only paid models would.`)) : h('p', { class: 'muted small' }, 'Credit details are not available.'))),
-    h('h3', { class: 'gap-t' }, 'What happened'), events.length ? timeline(events, a.range.from, a.range.to) : null,
+    h('h3', { class: 'gap-t' }, 'What happened'), events.length ? timeline(events, tlFrom(events, a), a.range.to) : null,
     events.length ? h('ul', { class: 'eventlist' }, events.slice(0, 12).map((e) => h('li', {}, h('span', { class: `evdot ev-${e.kind}` }, icon(EVENT_ICON[e.kind] ?? 'pulse', 13)), h('div', {}, h('b', {}, e.title), e.detail && e.kind !== 'codex-limit' ? h('span', { class: 'muted small' }, ` · ${e.detail}`) : null), h('time', { class: 'muted small', datetime: e.at, title: new Date(e.at).toLocaleString() }, ago(e.at))))) : h('p', { class: 'muted' }, 'Nothing has hit a limit in this period.'),
     codex.history.length ? h('div', {}, h('h3', { class: 'gap-t' }, 'Codex limits, in detail'), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Hit', 'Expected back', 'Work resumed', 'Lasted'].map((x) => h('th', {}, x)))),
       h('tbody', {}, ...codex.history.map((r) => h('tr', {}, h('td', {}, when(r.at)), h('td', {}, r.expected ? when(r.expected) : 'not stated'), h('td', {}, r.resumedAt ? when(r.resumedAt) : h('span', { class: 'muted' }, 'still limited')), h('td', {}, r.durationMs != null ? span(r.durationMs) : '–'))))))) : null);

@@ -38,7 +38,7 @@ function drawTicker(events, st) {
   const items = events.slice(0, 14).map((e) => { const t = new Date(e.at).toLocaleTimeString([], { hour12: false });
     const msg = e.type === 'phase' ? `${e.phase.toUpperCase()}` : e.type === 'start' ? 'PICKED UP' : e.status === 'ok' ? 'SHIPPED' : `STOPPED: ${e.status}`; const cls = e.type === 'end' ? (e.status === 'ok' ? 't-ok' : 't-bad') : 't-run';
     return h('span', {}, h('em', {}, t), h('b', {}, `${(e.title ?? `#${e.ticket ?? e.pr ?? ''}`).slice(0, 38)}`), ' ', h('i', { class: cls, style: { fontStyle: 'normal' } }, `› ${msg}`)); });
-  const idle = h('span', {}, st?.paused ? 'LINE PAUSED · NOTHING WILL BE CLAIMED UNTIL YOU RESUME' : st?.limit ? `AGENTS PAUSED · PLAN USAGE LIMIT · BACK ${String(st.limit.untilText).toUpperCase()}${st.autoResume ? ' · RESUMES BY ITSELF' : ''}` : `LINE IDLE · WATCHING FOR TICKETS LABELLED agent-ready · ${st?.projects?.length ?? 0} CELL${st?.projects?.length === 1 ? '' : 'S'}`);
+  const idle = h('span', {}, st?.paused ? 'Paused · no new work will start until you press Resume' : st?.limit ? `Codex has run out of usage · back ${st.limit.untilText}${st.autoResume ? ' · work resumes by itself' : ''}` : `Quiet right now · watching ${st?.projects?.length ?? 0} project${st?.projects?.length === 1 ? '' : 's'} for new work`);
   ticker.className = `ticker ${items.length < 4 ? 'static' : ''}`;
   ticker.replaceChildren(h('div', { class: 'ticker-track' }, ...(items.length ? (items.length < 4 ? items : [...items, ...items]) : [idle])));
 }

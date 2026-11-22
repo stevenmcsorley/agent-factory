@@ -46,7 +46,7 @@ test('agents overview: Codex and the free models side by side, in plain words, w
 
 test('agents overview when Codex has run out: says so in words, when it is back, and who is carrying on', async () => {
   const e = await world({ limited: true }); e.setOpenRouter({ enabled: true }); const d = await load(e, 'overview'); const t = text(agentsPage.draw(d, { rerender() {} }));
-  assert.match(t, /Limited until/); assert.match(t, /Your Codex plan has run out for now and is back/); assert.match(t, /free models are carrying on/); assert.match(t, /Codex ran out|Codex hit its usage limit/);
+  assert.match(t, /Limited until/); assert.match(t, /Your Codex plan has run out for now and is back/); assert.match(t, /free models are carrying on/); assert.match(t, /Codex ran out of usage/);
 });
 
 test('agents overview without the free models set up: invites you in, nothing broken', async () => {
@@ -71,7 +71,7 @@ test('codex tab: the Codex settings are back (model, thinking effort, per-agent 
 
 test('usage: the accounting page draws with its numbers, limits and resets in words, the tool-call columns with explanations, and a filterable call log', async () => {
   const e = await world({ limited: true }); const out = usagePage.draw({ a: await e.accounts({ days: 7, calls: 500 }) }, { rerender() {} }); const t = text(out);
-  assert.match(t, /Usage/); assert.match(t, /Last 24 hours/); assert.match(t, /7 days/); assert.match(t, /Download as CSV/); assert.match(t, /jobs run/); assert.match(t, /tokens read/); assert.match(t, /done by free models/); assert.match(t, /times Codex ran out/); assert.match(t, /Day by day/); assert.match(t, /Limits and resets/); assert.match(t, /Working normally|Limited until/); assert.match(t, /requests left/); assert.match(t, /OpenRouter credit/); assert.match(t, /\$10\.05/); assert.match(t, /What happened/); assert.match(t, /Codex hit its usage limit/);
+  assert.match(t, /Usage/); assert.match(t, /Last 24 hours/); assert.match(t, /7 days/); assert.match(t, /Download as CSV/); assert.match(t, /jobs run/); assert.match(t, /tokens read/); assert.match(t, /done by free models/); assert.match(t, /times Codex ran out/); assert.match(t, /Day by day/); assert.match(t, /Limits and resets/); assert.match(t, /Working normally|Limited until/); assert.match(t, /requests left/); assert.match(t, /OpenRouter credit/); assert.match(t, /\$10\.05/); assert.match(t, /What happened/); assert.match(t, /Codex ran out of usage/);
   assert.match(t, /By model/); assert.match(t, /Steps per job/); assert.match(t, /Bad tool calls/); assert.match(t, /By agent/); assert.match(t, /By project/); assert.match(t, /close-joinery/); assert.match(t, /Every call/); assert.match(t, /Any provider/); assert.match(t, /Handed to Codex/); assert.match(t, /Done/);
   const tips = out.flatMap((n) => n.all()).filter((x) => x.attrs.class === 'tip'); assert.ok(tips.length >= 6 && tips.every((x) => x.attrs.title.length > 20), 'every unavoidable term explains itself'); for (const re of [/weighted/i, /escalat/i, /\bshot\b/i, /\bprior\b/i]) assert.doesNotMatch(t, re, `${re}`);
 });

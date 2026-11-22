@@ -68,3 +68,9 @@ test('through the engine: usage written by the factory and the audit trail come 
   try { const get = (p, token = TOKEN) => fetch(`http://127.0.0.1:${port}${p}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }); assert.equal((await get('/api/accounts?days=1', null)).status, 401); const j = await (await get('/api/accounts?days=1')).json(); assert.equal(j.totals.calls, 2);
     const csv = await get('/api/accounts.csv?days=1'); assert.match(csv.headers.get('content-type'), /text\/csv/); assert.match(await csv.text(), /tokens_in/); assert.equal((await get('/api/accounts.csv', null)).status, 401); } finally { srv.closeAllConnections(); srv.close(); }
 });
+
+test('a limit that is re-noted and a clear that is re-checked many times is ONE hit and ONE resume (the audit trail repeats itself; the accounting must not)', () => {
+  const a = buildAccounts({ usage: [], now: NOW, days: 7, audit: [{ at: iso(21, 8), what: 'plan-limit', until: iso(21, 12) }, { at: iso(21, 8, ), what: 'plan-limit', until: iso(21, 12) }, { at: iso(21, 9), what: 'plan-limit', until: iso(21, 13) }, { at: iso(21, 14), what: 'plan-limit-cleared' }, { at: iso(21, 14), what: 'plan-limit-cleared' }, { at: iso(21, 15), what: 'plan-limit-cleared' }] });
+  assert.deepEqual(a.events.map((e) => e.kind).sort(), ['codex-limit', 'codex-resume']); assert.equal(a.limits.codex.history.length, 1); assert.equal(a.limits.codex.history[0].expected, iso(21, 13), 'the latest expected time'); assert.equal(a.limits.codex.history[0].resumedAt, iso(21, 14)); assert.equal(a.limits.codex.history[0].durationMs, 6 * 3_600_000);
+  assert.equal(buildAccounts({ usage: [], now: NOW, days: 7, audit: [{ at: iso(21, 9), what: 'plan-limit-cleared' }] }).events.length, 0, 'a clear with no limit before it is not an event');
+});
