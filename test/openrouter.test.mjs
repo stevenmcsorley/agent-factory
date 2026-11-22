@@ -162,3 +162,8 @@ test('engine: testing a model makes one real call and records it; a model that r
   const w = orEngine({ answers: [{ error: 429 }] }); await w.e.setOpenRouterKey(KEY); const bad = await w.e.testOpenRouterModel('big/ultra-550b:free'); assert.equal(bad.ok, false); assert.equal(bad.kind, 'rate-limit'); assert.equal(w.e.openrouterStatus().models.find((m) => m.id === 'big/ultra-550b:free').state, 'resting');
   const s = w.e.resetOpenRouter('big/ultra-550b:free'); assert.equal(s.models.find((m) => m.id === 'big/ultra-550b:free').state, 'ready'); assert.equal(w.e.openrouterStatus().recent[0].ok, false);
 });
+
+test('status rows keep their fields distinct (input types vs token counts), and music or image-only models are not offered as agents', async () => {
+  const c = clock(); const cat = [...CATALOGUE, M('goog/lyria-3:free', { output: ['audio'] })]; const r = new ModelRouter({ dir: tmp(), client: fakeClient(cat), now: c.now, config: () => ({}) }); await r.refresh(); r.noteOk('mid/gemma-31b:free', { ms: 1000, usage: { input: 1234, output: 56 } });
+  const rows = r.status().models; const row = rows.find((m) => m.id === 'mid/gemma-31b:free'); assert.deepEqual(row.modalities, ['text']); assert.equal(row.tokensIn, 1234); assert.equal(row.tokensOut, 56); assert.ok(!rows.some((m) => m.id === 'goog/lyria-3:free'), 'not listed'); assert.ok(!r.candidates({}).some((m) => m.id === 'goog/lyria-3:free'), 'not picked');
+});

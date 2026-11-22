@@ -36,7 +36,7 @@ export class ModelRouter {
   // The best model that is ready, in order, for a job. need = { tools, vision, minContext }.
   candidates({ role = 'builder', need = {}, exclude = [] } = {}) {
     const t = this.now(); const cfg = this.config(); const out = [];
-    for (const m of Object.values(this.s.models)) { if (exclude.includes(m.id) || !this.allowed(m, cfg)) continue; if (need.tools !== false && !m.tools) continue; if (need.vision && !m.input.includes('image')) continue; if ((need.minContext ?? 0) > (m.context || 0)) continue;
+    for (const m of Object.values(this.s.models)) { if (exclude.includes(m.id) || !this.allowed(m, cfg) || !(m.output ?? ['text']).includes('text')) continue; if (need.tools !== false && !m.tools) continue; if (need.vision && !m.input.includes('image')) continue; if ((need.minContext ?? 0) > (m.context || 0)) continue;
       const rest = this.resting(m.id, t); if (rest) continue; if (m.free && this.s.freeUntil > t) continue; out.push({ ...m, score: this.score(m, role) }); }
     return out.sort((a, b) => b.score - a.score);
   }
@@ -74,11 +74,11 @@ export class ModelRouter {
   recent(n = 60) { try { return fs.readFileSync(this.callsFile, 'utf8').split('\n').filter(Boolean).slice(-n).map((l) => JSON.parse(l)).reverse(); } catch { return []; } }
 
   status({ role = 'builder' } = {}) {
-    const t = this.now(); const cfg = this.config(); const rows = Object.values(this.s.models).filter((m) => m.free || cfg.allowPaid || this.s.stats[m.id]?.calls).map((m) => { const st = this.s.stats[m.id] ?? null; const rest = this.resting(m.id, t); const freeRest = m.free && this.s.freeUntil > t;
-      return { id: m.id, name: m.name, free: m.free, tools: m.tools, context: m.context, input: m.input, reasoning: m.reasoning, allowed: this.allowed(m, cfg), banned: !!cfg.banned?.includes(m.id), score: this.score(m, role), prior: priorScore(m, role),
+    const t = this.now(); const cfg = this.config(); const rows = Object.values(this.s.models).filter((m) => (m.output ?? ['text']).includes('text') && (m.free || cfg.allowPaid || this.s.stats[m.id]?.calls)).map((m) => { const st = this.s.stats[m.id] ?? null; const rest = this.resting(m.id, t); const freeRest = m.free && this.s.freeUntil > t;
+      return { id: m.id, name: m.name, free: m.free, tools: m.tools, context: m.context, modalities: m.input, reasoning: m.reasoning, allowed: this.allowed(m, cfg), banned: !!cfg.banned?.includes(m.id), score: this.score(m, role), prior: priorScore(m, role),
         state: !this.allowed(m, cfg) ? (cfg.banned?.includes(m.id) ? 'banned' : 'not allowed') : !m.tools ? 'no tool calling' : rest ? 'resting' : freeRest ? 'free allowance used' : 'ready',
         backAt: rest ? rest.until : freeRest ? this.s.freeUntil : null, restKind: rest?.kind ?? (freeRest ? 'daily-limit' : null), learnedRestMs: st?.restEma ?? null,
-        calls: st?.calls ?? 0, ok: st?.ok ?? 0, limited: st?.limited ?? 0, unavailable: st?.unavailable ?? 0, badTools: st?.badTools ?? 0, avgMs: st?.ok ? Math.round(st.ms / st.ok) : null, input: st?.input ?? 0, output: st?.output ?? 0, lastOk: st?.lastOk ?? null, lastErr: st?.lastErr ?? null, lastMsg: st?.lastMsg ?? null }; });
+        calls: st?.calls ?? 0, ok: st?.ok ?? 0, limited: st?.limited ?? 0, unavailable: st?.unavailable ?? 0, badTools: st?.badTools ?? 0, avgMs: st?.ok ? Math.round(st.ms / st.ok) : null, tokensIn: st?.input ?? 0, tokensOut: st?.output ?? 0, lastOk: st?.lastOk ?? null, lastErr: st?.lastErr ?? null, lastMsg: st?.lastMsg ?? null }; });
     rows.sort((a, b) => (b.state === 'ready') - (a.state === 'ready') || b.score - a.score);
     return { refreshedAt: this.s.refreshedAt, authFailed: this.s.authFailed, freeUntil: this.s.freeUntil > t ? this.s.freeUntil : null, today: this._day().requests, keyInfo: this.s.keyInfo, models: rows, ready: rows.filter((r) => r.state === 'ready').length, resting: rows.filter((r) => r.state === 'resting').length };
   }

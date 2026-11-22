@@ -52,7 +52,7 @@ export const openrouterMethods = {
     if (patch.pinned !== undefined) { if (!patch.pinned || typeof patch.pinned !== 'object') throw bad('pinned must map a role to a model id'); const p = {}; for (const [r, m] of Object.entries(patch.pinned)) { if (!ROLE_KEYS.includes(r)) throw bad(`Unknown role "${r}"`); if (m !== null && m !== '' && !MODEL_RE.test(m)) throw bad('That is not a model id'); if (m) p[r] = m; } next.pinned = p; }
     this.cfg.openrouter = next; this._persist(); this._audit({ what: 'openrouter', action: 'config', from: JSON.parse(before), to: this._orConf() }); return this.openrouterStatus();
   },
-  async refreshOpenRouter() { if (!this._orKey()) throw bad('Add your OpenRouter API key first.'); const info = await this.router().refresh().catch((e) => { throw bad(`Could not reach OpenRouter: ${String(e.message ?? e).slice(0, 200)}`); }); return { ...info, ...this.openrouterStatus() }; },
+  async refreshOpenRouter() { if (!this._orKey()) throw bad('Add your OpenRouter API key first.'); const info = await this.router().refresh().catch((e) => { throw bad(`Could not reach OpenRouter: ${String(e.message ?? e).slice(0, 200)}`); }); return { refreshed: info, ...this.openrouterStatus() }; },
   // One tiny real call to a model: does it answer, how fast, and does it handle a tool call? Counts against its limits like any other call.
   async testOpenRouterModel(id) {
     if (!MODEL_RE.test(String(id))) throw bad('That is not a model id'); if (!this._orKey()) throw bad('Add your OpenRouter API key first.'); const r = this.router(); const c = this._orClient();
