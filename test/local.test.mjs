@@ -51,7 +51,7 @@ test('failures are named in plain terms: the server is down, the model is missin
 });
 
 test('the router: only what fits and can call tools, cloud models only when allowed, a pinned model wins, failures rest a model, speed is learned', async () => {
-  let conf = { enabled: true, maxGb: 6, allowRemote: false, banned: [], pinned: {} }; const dir = tmp(); const t = { now: 1_000_000 };
+  let conf = { enabled: true, maxGb: 7, allowRemote: false, banned: [], pinned: {} }; const dir = tmp(); const t = { now: 1_000_000 };
   const r = new LocalRouter({ dir, client: localClient({ fetchImpl: fakeOllama().f }), config: () => conf, now: () => t.now }); await r.refresh();
   assert.equal(r.pick({ role: 'builder', need: { tools: true } }).id, 'llama3.1:8b', 'the biggest model that fits and calls tools'); assert.ok(!r.models.find((m) => m.id === 'gemma3n:e4b' && r.eligible(m, { tools: true })), 'too big and no tools');
   assert.equal(r.pick({ role: 'reviewer', need: { tools: false } }).id !== 'glm-5.1:cloud', true); conf = { ...conf, allowRemote: true }; assert.ok(r.eligible(r.models.find((m) => m.id === 'glm-5.1:cloud'), { tools: true }), 'allowed when you say so');
@@ -81,7 +81,7 @@ test('delegation: when Codex is limited and the free models are not available, l
 });
 
 function localEngine({ answers = [], routes = {}, mode = 'mix', codexAgent = { kind: 'shell', command: 'echo codex-did-it' } } = {}) {
-  const root = tmp(); const o = fakeOllama({ answers }); const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: codexAgent, sandbox: { kind: 'local' }, projects: [], agents: { mode, routes }, local: { enabled: true } }), { configPath: path.join(root, 'c.json'), env: {}, factories: { fetch: o.f } }); return { e, root, o };
+  const root = tmp(); const o = fakeOllama({ answers }); const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: codexAgent, sandbox: { kind: 'local' }, projects: [], agents: { mode, routes }, local: { enabled: true, maxGb: 8 } }), { configPath: path.join(root, 'c.json'), env: {}, factories: { fetch: o.f } }); return { e, root, o };
 }
 const SHOT = 'You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix.\nJudge this';
 const VERDICT = '{"verdict":"approve","summary":"ok","findings":[]}';

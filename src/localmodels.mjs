@@ -73,7 +73,9 @@ export class LocalRouter {
   st(id) { return (this.s.stats[id] ??= { ok: 0, fail: 0, badTool: 0, ms: null, tps: null, restUntil: 0, lastError: null, lastAt: 0 }); }
   async refresh() { try { this.models = await this.client.models(); this.error = null; } catch (e) { this.models = []; this.error = String(e.message ?? e).slice(0, 200); } this.refreshedAt = this.now(); this.onChange('local'); return { models: this.models.length, error: this.error }; }
   maxGb() { const c = this.config(); return Number(c.maxGb) > 0 ? Number(c.maxGb) : defaultMaxGb(); }
-  fits(m) { const c = this.config(); if (m.remote) return !!c.allowRemote; return m.sizeGb == null || m.sizeGb * 1.15 <= this.maxGb(); }
+  // the model file plus what its context window needs (measured: an 8B model at 16k context needs about 6.3 GB, not the 4.9 GB of its file)
+  needGb(m) { const ctx = Number(this.config().numCtx) || 16384; return m.sizeGb == null ? null : Math.round((m.sizeGb + 0.6 + (m.params ?? 4) * (ctx / 16384) * 0.1) * 10) / 10; }
+  fits(m) { const c = this.config(); if (m.remote) return !!c.allowRemote; const need = this.needGb(m); return need == null || need <= this.maxGb(); }
   eligible(m, need = {}) { const c = this.config(); if (c.banned?.includes(m.id)) return false; if (!this.fits(m)) return false; if (need.tools && m.tools === false) return false; if (need.tools && this.st(m.id).badTool >= 3 && this.st(m.id).ok < this.st(m.id).badTool) return false; return true; }
   // bigger models write better code and judge better; learned results beat guesses; a model that keeps failing or is very slow sinks
   score(m, role) { const s = this.st(m.id); const total = s.ok + s.fail; const rate = total >= 3 ? s.ok / total : 0.7; const size = Math.min(m.params ?? 4, 14); return size * 10 + (m.tools ? 6 : 0) + rate * 25 - (s.tps != null && s.tps < 1.5 ? 12 : 0) - (m.remote ? 8 : 0) + (m.thinking && ['reviewer', 'security'].includes(role) ? 3 : 0); }
@@ -90,7 +92,7 @@ export class LocalRouter {
   status() {
     const now = this.now(); const c = this.config();
     return { reachable: !this.error && this.refreshedAt > 0, error: this.error, kind: this.client.kind, endpoint: this.client.root, refreshedAt: this.refreshedAt || null, maxGb: this.maxGb(), memoryGb: Math.round(os.totalmem() / 1e8) / 10, cores: os.cpus().length,
-      models: this.models.map((m) => { const s = this.st(m.id); const ok = this.eligible(m, {}); return { ...m, fits: this.fits(m), banned: !!c.banned?.includes(m.id), pinnedFor: Object.entries(c.pinned ?? {}).filter(([, v]) => v === m.id).map(([r]) => r), usable: ok, resting: s.restUntil > now ? { until: s.restUntil, why: s.lastError } : null,
+      models: this.models.map((m) => { const s = this.st(m.id); m = { ...m, needGb: this.needGb(m) }; const ok = this.eligible(m, {}); return { ...m, fits: this.fits(m), banned: !!c.banned?.includes(m.id), pinnedFor: Object.entries(c.pinned ?? {}).filter(([, v]) => v === m.id).map(([r]) => r), usable: ok, resting: s.restUntil > now ? { until: s.restUntil, why: s.lastError } : null,
         ok: s.ok, fail: s.fail, badTool: s.badTool, avgMs: s.ms == null ? null : Math.round(s.ms), tokensPerSecond: s.tps == null ? null : Math.round(s.tps * 10) / 10 }; }) };
   }
 }

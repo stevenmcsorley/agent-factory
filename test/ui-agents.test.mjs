@@ -86,7 +86,7 @@ test('local models: the tab says what this machine can run, lists the models wit
   const e = await world(); const off = text(agentsPage.draw(await load(e, 'local'), { rerender() {} })); assert.match(off, /Switched off/); assert.match(off, /Use local models/); assert.doesNotMatch(off, /llama3\.1/, 'no models are listed until they are switched on');
   const ov = text(agentsPage.draw(await load(e, 'overview'), { rerender() {} })); assert.match(ov, /Local models/); assert.match(ov, /Switched off/); assert.match(ov, /Set up/);
   assert.doesNotMatch(text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })), /Local only/, 'no local choice before they are switched on'); assert.match(text(agentsPage.draw(await load(e, 'policy'), { rerender() {} })), /Set up local models/);
-  e.setLocal({ enabled: true, maxGb: 6 }); await e.refreshLocal(); e.localRouter().noteFail('llama3.1:8b', { kind: 'memory', message: 'Not enough memory to run this model' });
+  e.setLocal({ enabled: true, maxGb: 7 }); await e.refreshLocal(); e.localRouter().noteFail('llama3.1:8b', { kind: 'memory', message: 'Not enough memory to run this model' });
   const d = await load(e, 'local'); const t = text(agentsPage.draw(d, { rerender() {} }));
   for (const re of [/Connected/, /Largest model to run/, /Also use cloud-hosted models/, /memory and \d+ processor cores/, /llama3\.1:8b/, /Resting/, /Not enough memory to run this model/, /Too big for this machine/, /Runs on Ollama's servers, not on this machine/, /Check again/]) assert.match(t, re, String(re));
   for (const j of JARGON) assert.doesNotMatch(t, j, `developer wording: ${j}`); assert.doesNotMatch(t, /num_ctx|ollama pull|tokens\/s|quantiz/i);
