@@ -159,6 +159,7 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/openrouter\/reset$/, async (_m, b) => engine.resetOpenRouter(b?.model)],
     ['GET', /^\/api\/codex\/models$/, async () => engine.codexModels()],
     ['GET', /^\/api\/improvements$/, async (_m, _b, url) => engine.improvements({ days: url?.searchParams?.get('days') ?? 14 })],
+    ['GET', /^\/api\/harness$/, async (_m, _b, url) => engine.harnessReport({ days: url?.searchParams?.get('days') ?? 30 })],
     ['GET', /^\/api\/runscores$/, async (_m, _b, url) => engine.runScores({ days: url?.searchParams?.get('days') ?? 14, limit: url?.searchParams?.get('limit') ?? 100 })],
     ['POST', /^\/api\/improvements\/([a-f0-9]{10})\/(apply|dismiss|reopen)$/, async (m, b) => (m[2] === 'apply' ? engine.applyImprovement(m[1], b ?? {}) : m[2] === 'dismiss' ? engine.dismissImprovement(m[1], b?.note) : engine.reopenImprovement(m[1]))],
     ['GET', /^\/api\/local$/, async () => { await engine._localEnsure().catch(() => null); return engine.localStatus(); }],

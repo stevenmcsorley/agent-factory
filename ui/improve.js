@@ -36,6 +36,21 @@ function ideaCard(i, rerender) {
     i.status === 'new' ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: act(async () => { await post(`/improvements/${i.id}/apply`, isSkill ? { text: ta.value } : {}); }, 'Applied', rerender) }, icon('check', 13), isSkill ? 'Give agents this instruction' : 'Make this change'), h('button', { class: 'btn ghost', onclick: act(async () => { await post(`/improvements/${i.id}/dismiss`, {}); }, 'Noted', rerender) }, 'Not now')) : null,
     i.status === 'dismissed' ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn small', onclick: act(async () => { await post(`/improvements/${i.id}/reopen`); }, 'Brought back', rerender) }, 'Bring it back')) : null);
 }
+const VERDICT = { early: ['off', 'Too early to say'], holding: ['ok', 'Holding up'], mixed: ['warn', 'Not clearly cheaper'], revert: ['bad', 'Not holding up'] };
+const ROLE_NAME = { reviewer: 'reviewer', security: 'security reviewer', tester: 'tester', 'spec-writer': 'spec writer', 'skill-writer': 'skill writer', builder: 'builder', fixer: 'fixer', designer: 'designer', planner: 'planner' };
+function harnessCard(hz) {
+  if (!hz) return null; const [tone, label] = VERDICT[hz.verdict.state] ?? VERDICT.early; const p = (v) => (v == null ? '–' : percent(v)); const n = (v) => (v == null ? '–' : Number(v).toLocaleString());
+  const tiles = [[hz.claims.caught, 'problems caught', 'Times the check on what an agent says it did found a mismatch: a test switched off, or tests claimed but not written.'], [hz.stepUps.count, 'jobs stepped up', 'Times a cheaper model\'s answer failed its check and a stronger model did the job instead.'], [hz.cheaperJobs, 'jobs on cheaper models', 'Build jobs that started on an older, cheaper Codex model.']];
+  const b = hz.before, a = hz.after; const ba = [['Before the harness', b], ['Since it went live', a]].map(([t, x]) => h('tr', {}, h('td', {}, h('b', {}, t)), h('td', { class: 'tnum' }, x ? String(x.jobs) : '0'), h('td', { class: 'tnum' }, x ? p(x.firstTry) : '–'), h('td', { class: 'tnum' }, x ? p(x.reviewerChanges) : '–')));
+  const models = hz.models.map((m) => h('tr', {}, h('td', {}, h('b', {}, m.model)), h('td', { class: 'tnum' }, String(m.jobs)), h('td', { class: 'tnum' }, String(m.average)), h('td', { class: 'tnum' }, n(m.medianTokens))));
+  const events = [...hz.stepUps.recent.map((s) => h('li', {}, `${ROLE_NAME[s.role] ?? s.role}: ${s.from} gave way to ${s.to}, because ${s.why}.`)), ...hz.claims.recent.map((c) => h('li', {}, `${c.title ?? c.run}: ${c.findings[0] ?? 'a mismatch was found'}`))];
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('shield', 17), 'Is the harness working?'), chip(tone, label)), h('p', { class: 'big-line' }, hz.verdict.text),
+    h('div', { class: 'kpis' }, tiles.map(([v, l, help]) => h('div', { class: 'kpi', title: help }, h('b', {}, String(v)), h('span', {}, l)))),
+    h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['', 'Jobs', 'Right first time', 'Reviewer asked for changes'].map((x) => h('th', {}, x)))), h('tbody', {}, ...ba))),
+    hz.models.length ? h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Model that started the job', 'Jobs', 'Average score', h('span', {}, 'Typical tokens per job')].map((x) => h('th', {}, x)))), h('tbody', {}, ...models))) : null,
+    events.length ? h('div', {}, h('h3', {}, 'Recent catches and step-ups'), h('ul', { class: 'examples' }, ...events)) : h('p', { class: 'muted small' }, 'Nothing has been caught or stepped up yet. That is normal while few jobs have run.'),
+    h('p', { class: 'muted small' }, 'Tokens are the pieces of text an agent reads and writes. Fewer tokens does not always mean less of your Codex plan: older models may cost less per token, which this page cannot see. Check your plan usage as well.'));
+}
 function ideasCard(d, rerender) {
   if (!d.enough) return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Suggested fixes')), h('p', { class: 'muted' }, `Not enough finished jobs yet to say anything useful (${d.health.jobs} so far, it needs at least 5). Suggestions appear here as the factory does more work.`));
   if (!d.ideas.length) return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Suggested fixes')), h('p', { class: 'muted' }, 'Nothing needs fixing right now. A suggestion appears when the same problem shows up in several jobs.'));
@@ -63,9 +78,9 @@ function jobsCard(rows) {
   return card(h('div', { class: 'card-h' }, h('h2', {}, 'Recent jobs')), h('div', { class: 'tbl-wrap' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['When', 'Job', 'Built by', 'Score', 'What went wrong'].map((x) => h('th', {}, x)))), h('tbody', {}, ...rows.slice(0, 30).map(jobRow)))));
 }
 export const improvePage = {
-  async load() { const [d, rows] = await Promise.all([api(`/improvements?days=${state.days}`), api(`/runscores?days=${state.days}&limit=60`).catch(() => [])]); return { d, rows }; },
-  draw({ d, rows }, ctx) {
+  async load() { const [d, rows, hz] = await Promise.all([api(`/improvements?days=${state.days}`), api(`/runscores?days=${state.days}&limit=60`).catch(() => []), api(`/harness?days=${state.days}`).catch(() => null)]); return { d, rows, hz }; },
+  draw({ d, rows, hz }, ctx) {
     const range = h('div', { class: 'segctl', role: 'group', 'aria-label': 'Time range' }, RANGES.map(([n, label]) => h('button', { type: 'button', class: state.days === n ? 'on' : '', 'aria-pressed': String(state.days === n), onclick: () => { state.days = n; ctx.rerender(); } }, label)));
-    return [head(range), tiles(d), ideasCard(d, ctx.rerender), problemsCard(d), providersCard(d), jobsCard(rows)].filter(Boolean);
+    return [head(range), tiles(d), harnessCard(hz), ideasCard(d, ctx.rerender), problemsCard(d), providersCard(d), jobsCard(rows)].filter(Boolean);
   },
 };

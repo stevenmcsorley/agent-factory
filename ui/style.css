@@ -620,3 +620,4 @@ nav .menu a { display: grid; gap: 1px; padding: 9px 12px; height: auto; border-b
 @keyframes ln-idleghost { 0% { transform: translate(1160px, 374px) rotate(-19deg); opacity: 0; } 15% { opacity: .6; } 85% { opacity: .6; } 100% { transform: translate(1126px, 268px) rotate(-19deg); opacity: 0; } }
 /* a job that stopped without shipping: its parcel greys out as it drops off the belt */
 .lineart .bob.rejected { filter: grayscale(.8) brightness(.65); transition: filter .4s ease; } .lineart .l-part-g { transition: transform .95s cubic-bezier(.45, 0, .2, 1), opacity .9s ease; }
+.big-line { font-size: 16px; line-height: 1.5; margin: 4px 0 14px; max-width: 70ch; }

@@ -6,10 +6,25 @@ import { readRuns } from './budget.mjs';
 import { readUsage } from './usage.mjs';
 import * as sk from './skills.mjs';
 import { scoreRuns, buildImprovements, TAGS } from './improve.mjs';
+import { HARNESS_SINCE, costByModel, harnessVerdict } from './harness.mjs';
 
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const ID = /^[a-f0-9]{10}$/;
 export const improveMethods = {
+  // Is the harness working? What it caught, how often it stepped a job up, and whether the cheaper models are holding up, all from the recorded runs, usage and audit log.
+  harnessReport({ days = 30 } = {}) {
+    const d = Math.min(90, Math.max(1, Number(days) || 30)); const since = this.cfg.harness?.since ?? HARNESS_SINCE; const cutoff = Date.now() - d * 86_400_000;
+    const runs = readRuns(this.cfg.stateDir).filter((r) => Date.parse(r.started) >= cutoff); const usage = readUsage(this.cfg.stateDir).filter((u) => Date.parse(u.at) >= cutoff);
+    const audit = (() => { try { return fs.readFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).slice(-8000).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((a) => a && a.what === 'harness' && Date.parse(a.at) >= cutoff); } catch { return []; } })();
+    const claims = runs.filter((r) => r.claims && r.claims.findings?.length).map((r) => ({ run: r.id, project: r.project, title: r.title, at: r.started, findings: r.claims.findings.filter((f) => f.blocking).map((f) => f.detail) }));
+    const imp = this.improvements({ days: d }); const usual = this.cfg.agent?.model ?? null; const cost = costByModel(usage);
+    const cheaperJobs = imp.byModel.filter((m) => m.model !== usual).reduce((n, m) => n + m.jobs, 0);
+    const steps = audit.filter((a) => a.action === 'step-up'); const byRole = {}; for (const a of steps) byRole[a.role] = (byRole[a.role] ?? 0) + 1;
+    const half = (rs) => rs.length ? { jobs: rs.length, firstTry: rs.filter((r) => (r.attempts ?? 1) === 1).length / rs.length, reviewerChanges: rs.filter((r) => r.review?.verdict === 'changes').length / rs.length } : null;
+    const primary = runs.filter((r) => !r.fixRound && !r.round && (r.status === 'ok' || r.status === 'verify-failed'));
+    return { days: d, since, usual, claims: { caught: claims.length, recent: claims.slice(-5).reverse() }, stepUps: { count: steps.length, byRole, recent: steps.slice(-5).reverse().map((a) => ({ at: a.at, role: a.role, from: a.from, to: a.to, why: a.why, project: a.project })) },
+      models: imp.byModel.map((m) => ({ ...m, ...(cost.find((c) => c.model === m.model) ?? {}) })), cheaperJobs, before: half(primary.filter((r) => r.started < since)), after: half(primary.filter((r) => r.started >= since)), verdict: harnessVerdict({ models: imp.byModel, cost, usual }) };
+  },
   _impFile() { return path.join(this.cfg.stateDir, 'improvements.json'); },
   _impLoad() { try { const j = JSON.parse(fs.readFileSync(this._impFile(), 'utf8')); return j && typeof j.decisions === 'object' ? j : { decisions: {} }; } catch { return { decisions: {} }; } },
   _impSave(j) { fs.mkdirSync(this.cfg.stateDir, { recursive: true }); const f = this._impFile(); fs.writeFileSync(`${f}.tmp`, JSON.stringify(j)); fs.renameSync(`${f}.tmp`, f); },

@@ -16,7 +16,7 @@ const JARGON = [/weighted/i, /\btag\b/i, /\bprovider id\b/i, /\bheuristic/i, /\b
 let n = 0; const run = (o = {}) => ({ id: `r${(++n).toString(16).padStart(8, '0')}`, project: 'shop', ticket: n, title: `Ticket ${n}`, started: new Date(Date.now() - 86_400_000).toISOString(), status: 'ok', attempts: 1, tokens: { input: 1000, output: 100 }, review: { verdict: 'approve', findings: [] }, ...o });
 const changes = (issue) => ({ review: { verdict: 'changes', summary: 'needs work', findings: [{ severity: 'major', issue }] } });
 const engine = (runs) => { const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ui-imp-')); const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [] }), { configPath: path.join(root, 'c.json'), env: {}, factories: {} }); for (const r of runs) recordRun(e.cfg.stateDir, r); return e; };
-const load = (e) => ({ d: e.improvements({ days: 14 }), rows: e.runScores({ days: 14, limit: 60 }) });
+const load = (e) => ({ d: e.improvements({ days: 14 }), rows: e.runScores({ days: 14, limit: 60 }), hz: e.harnessReport({ days: 14 }) });
 const all = (nodes) => nodes.flatMap((x) => (x.all ? x.all() : []));
 
 test('improvements: scores, what keeps going wrong, a suggestion with editable wording and plain buttons, and recent jobs', () => {
@@ -31,4 +31,11 @@ test('improvements: an applied fix says whether it helped; a dismissed one can b
   assert.match(t, /Applied/); assert.match(t, /It helped\./); assert.match(t, /Since you applied it: 0%/); assert.doesNotMatch(t, /Give agents this instruction/, 'an applied fix has no apply button');
   const e2 = engine([...Array.from({ length: 4 }, () => run(changes('outside the ticket scope'))), ...Array.from({ length: 6 }, () => run())]); e2.dismissImprovement(e2.improvements({}).ideas[0].id); const t2 = text(improvePage.draw(load(e2), { rerender() {} })); assert.match(t2, /Bring it back/); assert.match(t2, /Not now/);
   const t3 = text(improvePage.draw(load(engine([run(), run()])), { rerender() {} })); assert.match(t3, /Not enough finished jobs yet/); assert.match(t3, /at least 5/); assert.match(text(improvePage.draw(load(engine([])), { rerender() {} })), /jobs scored/, 'an empty factory still draws');
+});
+
+test('the harness panel answers "is it working?" in plain words: the verdict, what was caught, step-ups, and the models side by side', () => {
+  const e = engine([...Array.from({ length: 6 }, () => run())]); e._audit({ what: 'harness', action: 'step-up', role: 'reviewer', from: 'gpt-6-luna', to: 'gpt-6.2-astra', why: 'it did not give a clear verdict', project: 'p' });
+  const r0 = run({ claims: { ok: false, findings: [{ kind: 'claimed-tests-missing', blocking: true, detail: 'The summary says tests were added, but no test file changed.' }] } }); recordRun(e.cfg.stateDir, r0); const t = text(improvePage.draw(load(e), { rerender() {} }));
+  for (const re of [/Is the harness working\?/, /Too early to say/, /problems caught/, /jobs stepped up/, /jobs on cheaper models/, /Before the harness/, /Since it went live/, /Right first time/, /reviewer: gpt-6-luna gave way to gpt-6\.2-astra, because it did not give a clear verdict/, /The summary says tests were added/, /Check your plan usage/]) assert.match(t, re, String(re));
+  for (const j of JARGON) assert.doesNotMatch(t, j, `developer wording: ${j}`); assert.doesNotMatch(t, /weighted/i);
 });

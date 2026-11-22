@@ -36,3 +36,23 @@ export function validateOutput(role, out) {
   if ((role === 'spec-writer' || role === 'skill-writer') && t.length < 80) return { ok: false, why: 'it wrote almost nothing' };
   return { ok: true };
 }
+
+// ---- is the harness working? Everything is measured from what the factory recorded; nothing here is a claim.
+export const HARNESS_SINCE = '2026-11-22T16:35:00Z';   // when the claims check and the model steps went live (override: cfg.harness.since)
+const W = (u) => (u.input - (u.cached ?? 0)) + (u.cached ?? 0) * 0.1 + (u.output ?? 0) * 6;
+const med = (xs) => { const a = xs.filter(Number.isFinite).sort((p, q) => p - q); return a.length ? a[Math.floor(a.length / 2)] : null; };
+// usage rows of one provider's builder calls grouped by model: how many jobs, and what a typical job costs
+export function costByModel(usage, since = null) {
+  const by = {}; for (const u of usage) { if (u.role !== 'builder' || (u.via && u.via !== 'codex') || !u.model) continue; if (since && u.at < since) continue; (by[u.model] ??= []).push(W(u)); }
+  return Object.entries(by).map(([model, xs]) => ({ model, costJobs: xs.length, medianTokens: Math.round(med(xs)), totalTokens: Math.round(xs.reduce((a, b) => a + b, 0)) })).sort((a, b) => b.costJobs - a.costJobs);
+}
+// the plain verdict. `models` = [{ model, jobs, average }] (scores), `cost` = costByModel output, `usual` = the model everything used to run on.
+export function harnessVerdict({ models = [], cost = [], usual, minJobs = 6 }) {
+  const cheap = models.filter((m) => m.model !== usual); const main = models.find((m) => m.model === usual); const c = (m) => cost.find((x) => x.model === m);
+  const best = cheap.sort((a, b) => b.jobs - a.jobs)[0];
+  if (!best || best.jobs < minJobs || !main || main.jobs < minJobs) return { state: 'early', text: `Too early to say. ${best ? `${best.model} has built ${best.jobs} job${best.jobs === 1 ? '' : 's'}; ` : 'No cheaper model has built a job yet; '}it needs at least ${minJobs} on each side to compare.`, needs: minJobs };
+  const gap = main.average - best.average; const ct = c(best.model)?.medianTokens, cu = c(usual)?.medianTokens; const tokens = ct && cu ? Math.round((100 * (ct - cu)) / cu) : null;
+  if (gap > 3) return { state: 'revert', text: `Not holding up: jobs started on ${best.model} score ${best.average}, against ${main.average} on ${usual}. I would put the builder back on the usual model.`, gap, tokens };
+  if (tokens != null && tokens > 10) return { state: 'mixed', text: `Same quality (${best.average} against ${main.average}), but ${best.model} uses ${tokens}% more tokens per job. Whether it costs less of your Codex plan cannot be measured here: check your plan usage before keeping it.`, gap, tokens };
+  return { state: 'holding', text: `Holding up: same quality (${best.average} against ${main.average})${tokens != null ? ` and ${tokens <= 0 ? `${-tokens}% fewer` : `${tokens}% more`} tokens per job` : ''}.`, gap, tokens };
+}

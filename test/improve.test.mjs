@@ -84,3 +84,19 @@ test('engine: dismissing hides a suggestion until you reopen it; a route suggest
   for (let i = 0; i < 7; i++) { recordRun(e2.cfg.stateDir, run({ id: `c${i}`, started: ago(2) })); recordUsage(e2.cfg.stateDir, { run: `c${i}`, role: 'builder', via: null, input: 1, output: 1 }); recordRun(e2.cfg.stateDir, run({ id: `l${i}`, started: ago(2), ...changes('Does not implement the second point') })); recordUsage(e2.cfg.stateDir, { run: `l${i}`, role: 'builder', via: 'local', input: 1, output: 1 }); }
   const r = e2.improvements({}).ideas.find((x) => x.kind === 'route'); assert.ok(r); e2.applyImprovement(r.id); assert.equal(e2.agentPolicy().roles.builder.route, 'codex'); assert.equal(e2.agentPolicy().roles.fixer.route, 'codex');
 });
+
+import { harnessVerdict, costByModel } from '../src/harness.mjs';
+test('the harness verdict is honest: too early, holding up, not cheaper, or revert, from scores and tokens', () => {
+  const sc = (a, b) => [{ model: 'astra', jobs: 20, average: a }, { model: 'luna', jobs: 8, average: b }]; const cost = (cu, cl) => [{ model: 'astra', medianTokens: cu, costJobs: 20 }, { model: 'luna', medianTokens: cl, costJobs: 8 }];
+  assert.equal(harnessVerdict({ models: [{ model: 'astra', jobs: 20, average: 90 }, { model: 'luna', jobs: 2, average: 100 }], cost: [], usual: 'astra' }).state, 'early'); assert.match(harnessVerdict({ models: [], cost: [], usual: 'astra' }).text, /No cheaper model/);
+  assert.equal(harnessVerdict({ models: sc(90, 89), cost: cost(40_000, 30_000), usual: 'astra' }).state, 'holding'); assert.match(harnessVerdict({ models: sc(90, 89), cost: cost(40_000, 30_000), usual: 'astra' }).text, /25% fewer tokens/);
+  const mixed = harnessVerdict({ models: sc(90, 90), cost: cost(40_000, 57_000), usual: 'astra' }); assert.equal(mixed.state, 'mixed'); assert.match(mixed.text, /43% more tokens/); assert.match(mixed.text, /plan usage/);
+  const bad = harnessVerdict({ models: sc(92, 80), cost: cost(40_000, 30_000), usual: 'astra' }); assert.equal(bad.state, 'revert'); assert.match(bad.text, /usual model/);
+  assert.deepEqual(costByModel([{ role: 'builder', model: 'm', input: 1000, cached: 0, output: 10, at: 'x' }, { role: 'builder', via: 'openrouter', model: 'f', input: 1, output: 1, at: 'x' }, { role: 'reviewer', model: 'm', input: 9, output: 9, at: 'x' }]).map((c) => [c.model, c.costJobs, c.medianTokens]), [['m', 1, 1060]], 'only Codex builds count');
+});
+test('engine: the harness report brings it together and is available over MCP', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hr-')); const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: { kind: 'shell', model: 'gpt-6.2-astra' }, sandbox: { kind: 'local' }, projects: [] }), { configPath: path.join(root, 'c.json'), env: {}, factories: {} });
+  const now = Date.now(); recordRun(e.cfg.stateDir, { id: 'a1', project: 'p', ticket: 1, title: 't', started: new Date(now - 3600_000).toISOString(), status: 'ok', attempts: 1, claims: { ok: false, findings: [{ kind: 'test-switched-off', blocking: true, detail: 'a test was switched off' }] }, review: { verdict: 'approve', findings: [] } });
+  e._audit({ what: 'harness', action: 'step-up', role: 'reviewer', from: 'gpt-6-luna', to: 'gpt-6.2-astra', why: 'it did not give a clear verdict', project: 'p' }); recordUsage(e.cfg.stateDir, { run: 'a1', role: 'builder', via: null, model: 'gpt-6.2-astra', input: 1000, output: 10, at: new Date(now).toISOString() });
+  const r = await callOp(e, 'harness_report', { days: 7 }); assert.equal(r.claims.caught, 1); assert.match(r.claims.recent[0].findings[0], /switched off/); assert.equal(r.stepUps.count, 1); assert.equal(r.stepUps.byRole.reviewer, 1); assert.equal(r.verdict.state, 'early'); assert.ok(r.since && r.models.length >= 0);
+});
