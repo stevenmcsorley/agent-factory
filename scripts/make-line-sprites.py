@@ -22,6 +22,12 @@ def key_solid(img, size=13, lo=LO, hi=HI):
     rgba = key(img, lo, hi); a = np.asarray(rgba).copy(); m = Image.fromarray(((a[..., 3] > 60) * 255).astype(np.uint8), 'L').filter(ImageFilter.MaxFilter(size)).filter(ImageFilter.MinFilter(size)); closed = np.asarray(m) > 128
     a[..., 3] = np.where(closed, np.maximum(a[..., 3], 255), a[..., 3]); return Image.fromarray(a)
 
+def silhouette(img, box, poly, lo=LO, hi=HI):
+    """Keep EVERYTHING inside a hand-drawn outline (artwork coordinates), dark metal included, and nothing outside it. For machines whose dark faces the plain key would eat."""
+    from PIL import ImageDraw
+    rgba = key(img, lo, hi); w, h = rgba.size; m = Image.new('L', (w * 4, h * 4), 0); ImageDraw.Draw(m).polygon([((x - box[0]) * 4, (y - box[1]) * 4) for x, y in poly], fill=255); m = np.asarray(m.resize((w, h), Image.LANCZOS)).astype(np.float32) / 255
+    a = np.asarray(rgba).copy(); a[..., 3] = (np.maximum(a[..., 3].astype(np.float32), 255 * (m > 0.5)) * m).astype(np.uint8); return Image.fromarray(a)
+
 def paint(img, box, rgb):
     a = np.asarray(img).copy(); x0, y0, x1, y1 = box; a[y0:y1, x0:x1] = rgb; return Image.fromarray(a)
 
@@ -44,7 +50,9 @@ BG_DARK = (12, 13, 12)
 emit('claim', key_solid(SRC.crop((298, 222, 482, 396))), (298, 222, 482, 396))
 emit('sandbox', key_solid(SRC.crop((506, 222, 664, 396))), (506, 222, 664, 396))
 gate = key_solid(SRC.crop((868, 226, 1036, 398))); emit('gate', gate, (868, 226, 1036, 398))
-emit('push', key_solid(SRC.crop((1054, 256, 1212, 398))), (1054, 256, 1212, 398))
+PUSH_BOX = (1054, 256, 1212, 398)
+PUSH_POLY = [(1066, 306), (1080, 298), (1094, 294), (1094, 262), (1126, 258), (1180, 262), (1186, 280), (1192, 298), (1203, 310), (1206, 386), (1190, 388), (1176, 386), (1140, 386), (1100, 386), (1066, 386)]
+emit('push', silhouette(SRC.crop(PUSH_BOX), PUSH_BOX, PUSH_POLY), PUSH_BOX)
 # press: paint out the parcel that is baked in under it (a real parcel now rides there)
 pr = paint(SRC, (1272, 300, 1352, 357), BG_DARK); emit('press', key_solid(pr.crop((1222, 212, 1408, 398))), (1222, 212, 1408, 398))
 # the parcel itself, cut from that same spot of the artwork
