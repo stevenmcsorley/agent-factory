@@ -599,7 +599,7 @@ export class Engine {
   }
   // Keep plan ticket statuses in step with the tracker: planned -> queued/working/review -> done (closed).
   async syncPlan(id) {
-    const dir = this._packDir(id); const pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return pack;
+    const dir = this._packDir(id); const pack = pk.loadPack(dir); if (!['launched', 'complete'].includes(pack.plan?.status)) return pack;   // a complete plan is re-checked too: unmerged work reopens it
     // fresh read: dependents are released the moment a ticket closes
     this.cache.delete(`t:${id}`); const live = await this.listTickets(id).catch(() => null); if (!live) return pack; const byId = new Map(live.map((t) => [String(t.id), t])); let changed = false;
     // On a local forge a ticket can be closed while its pull request is still open (closed by hand). That is not done: the code is not in the base branch, so nothing that depends on it may start.
@@ -609,7 +609,9 @@ export class Engine {
       const unmerged = tk.state === 'CLOSED' && openBranches.some((b) => b.startsWith(`agent/${t.ticketId}-`));
       const next = unmerged ? 'review' : tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels); const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
     }
-    if (pack.plan.epics.every((e) => e.tickets.every((t) => t.status === 'done')) && pack.plan.status !== 'complete') { pack.plan.status = 'complete'; changed = true; }
+    const allDone = pack.plan.epics.every((e) => e.tickets.every((t) => t.status === 'done'));
+    if (allDone && pack.plan.status !== 'complete') { pack.plan.status = 'complete'; changed = true; }
+    else if (!allDone && pack.plan.status === 'complete') { pack.plan.status = 'launched'; changed = true; }   // something that was done is not (its pull request is open)
     if (changed) pk.savePack(dir, pack); return pack;
   }
   // A ticket is created only when everything it depends on is done (merged and closed), so each one builds on real code.

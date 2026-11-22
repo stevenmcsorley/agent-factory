@@ -79,3 +79,10 @@ test('a ticket closed by hand while its pull request is still open is NOT done: 
   w.e.cache.clear(); const g = await w.e.getPlan('app'); assert.equal(g.progress.done, 0, 'not done'); assert.equal(g.progress.review, 1); assert.equal((await w.e.releasePlan('app')).released, 0, 'the dependent does not start');
   const pr = (await w.e.listPrs('app'))[0]; await w.e.prAction('app', pr.number, 'merge', {}); w.e.cache.clear(); assert.equal((await w.e.getPlan('app')).progress.done, 1, 'merged: now it is done'); assert.equal((await w.e.releasePlan('app')).released, 1);
 });
+
+test('a plan that was marked complete reopens when a "done" ticket turns out to be unmerged, and completes again once it is merged', async () => {
+  const w = world(); await mkProject(w); const { ticket } = await buildReviewed(w, 'Only piece', { 'a.js': 'export const a = 1;\n' });
+  const dir = pk.packDir(w.e.cfg.stateDir, 'app'); const pack = pk.loadPack(dir); pack.plan = { status: 'complete', epics: [{ id: 'e', title: 'E', goal: 'g', tickets: [{ id: 'one', title: 'Only piece', body: 'Only piece in a.js with a test that checks it works', size: 'S', dependsOn: [], status: 'done', ticketId: String(ticket) }] }] }; pk.savePack(dir, pack);
+  await w.e.deps(w.e.project('app')).tickets.close(ticket); w.e.cache.clear(); const g = await w.e.getPlan('app'); assert.equal(g.plan.status, 'launched', 'reopened'); assert.equal(g.progress.review, 1);
+  const pr = (await w.e.listPrs('app'))[0]; await w.e.prAction('app', pr.number, 'merge', {}); w.e.cache.clear(); const g2 = await w.e.getPlan('app'); assert.equal(g2.plan.status, 'complete'); assert.equal(g2.progress.done, 1);
+});
