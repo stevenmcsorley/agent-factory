@@ -24,7 +24,7 @@ export const s = (tag, props, ...kids) => { const el = document.createElementNS(
 
 // ---- icons: 24px stroke icons, hand-drawn paths
 const ICONS = {
-  check: 'M5 12.5l4.5 4.5L19 7.5', x: 'M6 6l12 12M18 6L6 18', clock: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z', pause: 'M9 6v12M15 6v12', play: 'M7 5l12 7-12 7z',
+  check: 'M5 12.5l4.5 4.5L19 7.5', chevron: 'M6 9l6 6 6-6', x: 'M6 6l12 12M18 6L6 18', clock: 'M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z', pause: 'M9 6v12M15 6v12', play: 'M7 5l12 7-12 7z',
   pr: 'M6 3v12M6 15a3 3 0 100 6 3 3 0 000-6zM18 21V9a3 3 0 00-3-3h-3M18 9a3 3 0 100-6 3 3 0 000 6z', ticket: 'M4 8a2 2 0 002-2h12a2 2 0 002 2v2a2 2 0 000 4v2a2 2 0 00-2 2H6a2 2 0 00-2-2v-2a2 2 0 000-4z',
   alert: 'M12 8v5M12 17h.01M10.3 3.9L2.4 18a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z', spark: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z',
   plug: 'M9 2v5M15 2v5M6 7h12v4a6 6 0 01-12 0zM12 17v5', pulse: 'M3 12h4l3-8 4 16 3-8h4', folder: 'M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z',

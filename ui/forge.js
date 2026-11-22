@@ -1,16 +1,9 @@
 // Views for the local forge: review a pull request (diff, comments, merge, close) and publish the project to a real remote.
 import { h, icon, api, ago, act } from './lib.js';
+import { diffViewer } from './diff.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
 const TAG = { open: 'ok', merged: 'live', closed: '' };
-
-// A unified diff, coloured by line type. Capped so a huge change cannot freeze the page.
-function diffView(text) {
-  const lines = text.split('\n'); const cap = 4000; const box = h('pre', { class: 'diff' });
-  for (const l of lines.slice(0, cap)) { const c = l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'd-meta' : l.startsWith('@@') ? 'd-hunk' : l[0] === '+' ? 'd-add' : l[0] === '-' ? 'd-del' : ''; box.append(h('span', { class: `dl ${c}` }, `${l}\n`)); }
-  if (lines.length > cap) box.append(h('span', { class: 'dl d-meta' }, `… ${lines.length - cap} more lines not shown`));
-  return box;
-}
 
 export function prRowsLocal(prs, { open }) {
   if (!prs.length) return card(h('div', { class: 'empty' }, h('b', {}, 'No pull requests yet'), h('p', {}, 'When the factory finishes a ticket, its branch appears here for you to review and merge.')));
@@ -29,8 +22,7 @@ export function prPage(d, { id, back, rerender }) {
       h('pre', { class: 'log-pre' }, pr.body || ''),
       open ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: pr.stale, onclick: merge }, 'Merge and close the ticket'), h('button', { class: 'btn', title: 'Serve this branch on your machine so you can click around the site before merging', onclick: act(async () => { const r = await api(`/projects/${id}/live`, { method: 'POST', body: { pr: pr.number } }); window.open(r.url, '_blank', 'noopener'); }, 'Preview opened in a new tab (only this machine can see it)', rerender) }, icon('play', 13), 'Preview this branch'), h('button', { class: 'btn danger', title: 'The ticket is NOT done: it goes back to failed, and anything waiting on it keeps waiting. Your comment below goes on the ticket.', onclick: post('close', () => ({ reason: text.value.trim() || undefined }), 'Rejected: the ticket is marked failed') }, 'Reject (close without merging)'))
         : pr.state === 'merged' ? h('p', { class: 'small muted' }, `Merged as ${String(pr.mergedSha).slice(0, 10)}.`) : null),
-    card(h('h2', {}, `Files changed (${d.files.length})`), h('ul', { class: 'plain' }, d.files.map((f) => h('li', { class: 'row between' }, h('code', {}, f.path), h('span', { class: 'small mono' }, f.added === null ? 'binary' : `+${f.added} −${f.removed}`)))),
-      d.diff ? diffView(d.diff) : h('p', { class: 'muted small' }, d.note ?? 'No changes.'), d.truncated ? h('p', { class: 'small muted' }, 'The diff was cut at 400 KB.') : null),
+    card(h('h2', {}, `Files changed (${d.files.length})`), d.diff ? diffViewer(d.diff) : h('p', { class: 'muted small' }, d.note ?? 'No changes.'), d.truncated ? h('p', { class: 'small muted' }, 'The diff was cut at 400 KB, so the last file may be incomplete.') : null),
     card(h('h2', {}, `Comments (${pr.comments.length})`), h('ul', { class: 'plain' }, pr.comments.map((c) => h('li', { class: 'cmt' }, h('div', { class: 'small muted' }, `${c.author}${c.at ? ` · ${ago(c.at)}` : ''}`), h('div', {}, c.body)))),
       text, h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: () => { if (!text.value.trim()) return; return post('comment', { text: text.value }, 'Comment added')(); } }, 'Comment')))];
 }
