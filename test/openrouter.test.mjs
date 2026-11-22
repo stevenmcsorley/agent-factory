@@ -205,7 +205,7 @@ test('buying credit lifts the cap: on the next refresh a key that is no longer f
   const c = clock(Date.UTC(2026, 10, 22, 12)); let free = true; const client = { models: async () => CATALOGUE, keyInfo: async () => ({ ok: true, freeTier: free, usage: 0, limit: 50, remaining: 50 }) };
   const r = new ModelRouter({ dir: tmp(), client, now: c.now, config: () => ({}) }); await r.refresh(); r.noteFail('mid/gemma-31b:free', { kind: 'daily-limit', message: 'free-models-per-day', retryAtMs: Date.UTC(2026, 10, 23), limit: 50 });
   assert.equal(r.budget().cap, 50); assert.equal(r.pick({}), null, 'the free allowance is used'); free = false; await r.refresh();
-  assert.equal(r.budget().cap, 1000, 'now 1000 a day'); assert.ok(r.pick({}), 'free models are usable again straight away'); assert.equal(r.status().freeUntil, null);
+  assert.equal(r.budget().cap, 1000, 'now 1000 a day'); assert.ok(r.pick({}), 'free models are usable again straight away'); assert.equal(r.status().freeUntil, null); assert.equal(r.resting('mid/gemma-31b:free'), null, 'the model that hit the daily limit is not left resting until midnight');
 });
 
 // ---- the delegation policy through the engine
