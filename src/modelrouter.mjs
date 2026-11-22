@@ -19,9 +19,9 @@ export function priorScore(m, role = 'builder') {
 }
 
 export class ModelRouter {
-  constructor({ dir, client, now = () => Date.now(), config = () => ({}) }) { this.dir = dir; this.client = client; this.now = now; this.config = config; this.file = path.join(dir, 'openrouter.json'); this.callsFile = path.join(dir, 'openrouter-calls.jsonl'); this.s = this._load(); }
+  constructor({ dir, client, now = () => Date.now(), config = () => ({}), onChange = () => {} }) { this.onChange = onChange; this.dir = dir; this.client = client; this.now = now; this.config = config; this.file = path.join(dir, 'openrouter.json'); this.callsFile = path.join(dir, 'openrouter-calls.jsonl'); this.s = this._load(); }
   _load() { try { const s = JSON.parse(fs.readFileSync(this.file, 'utf8')); return { models: s.models ?? {}, stats: s.stats ?? {}, refreshedAt: s.refreshedAt ?? null, freeUntil: s.freeUntil ?? 0, authFailed: !!s.authFailed, day: s.day ?? { date: null, requests: 0 }, keyInfo: s.keyInfo ?? null, dailyCap: s.dailyCap ?? null }; } catch { return { models: {}, stats: {}, refreshedAt: null, freeUntil: 0, authFailed: false, day: { date: null, requests: 0 }, keyInfo: null, dailyCap: null }; } }
-  _save() { try { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.s)); fs.renameSync(`${this.file}.tmp`, this.file); } catch { /* the router must never break a run */ } }
+  _save() { try { this.onChange('models'); } catch { /* never break a run */ } try { fs.mkdirSync(this.dir, { recursive: true }); fs.writeFileSync(`${this.file}.tmp`, JSON.stringify(this.s)); fs.renameSync(`${this.file}.tmp`, this.file); } catch { /* the router must never break a run */ } }
   _stat(id) { return (this.s.stats[id] ??= { calls: 0, ok: 0, limited: 0, unavailable: 0, badTools: 0, otherFail: 0, ms: 0, input: 0, output: 0, cached: 0, lastOk: null, lastErr: null, lastKind: null, lastMsg: null, cooldown: null, level: 0, restEma: null, rests: 0 }); }
 
   // After credit is added the key is no longer free tier: the old daily cap and the wait for the reset no longer apply.

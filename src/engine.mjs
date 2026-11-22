@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { EventEmitter } from 'node:events';
 import os from 'node:os';
 import path from 'node:path';
 import { run } from './util.mjs';
@@ -79,6 +80,7 @@ const sanitizeProfile = (p) => { const str = (v, n = 200) => (typeof v === 'stri
 export class Engine {
   constructor(cfg, { configPath, env = process.env, factories = {}, github = { inspectRepo, ensureLabels, createProjectRepo, whoami } } = {}) {
     this.cfg = cfg; this.configPath = configPath; this.env = env; this.f = factories; this.gh = github;
+    this.bus = new EventEmitter(); this.bus.setMaxListeners(50); this._changed = new Set(); this._changeT = null;
     this.events = []; this.active = new Map(); this.outcomes = new Map();
     this.pluginReport = []; this.lanes = new Map(); this.jobs = new Map(); this.planJobs = new Map(); this._libCat = null; this._libPulledAt = 0;
     this.busy = false; this.egress = null; this.last = { tick: null, feedback: null }; this.timer = null; this.cache = new Map();
@@ -137,8 +139,8 @@ export class Engine {
 
   async _exclusive(kind, fn) {
     if (this.busy) return { skipped: 'busy' };
-    this.busy = true;
-    try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; }
+    this.busy = true; this.notify('status');
+    try { const r = await fn(); this.last[kind] = { at: new Date().toISOString(), results: r.length }; return r; } finally { this.busy = false; this.notify('status'); }
   }
   // Projects take turns by default; limits.parallelProjects (1 to 8) lets that many projects build at the same time, each in its own lane. Mind disk and the agent's rate limits.
   tickAll() { return this._exclusive('tick', async () => { const out = []; if (this.cfg.library?.remote && Date.now() - this._libPulledAt > 300_000) await this.libraryPull().catch(() => {}); await sc.advanceAll(this, this.scenarios()).catch(() => {});
@@ -155,9 +157,12 @@ export class Engine {
   }
   halt() { clearTimeout(this.timer); this.stopAllLivePreviews?.().catch(() => {}); if (this.previewGateway) { clearInterval(this.previewGateway.timer); this.previewGateway.server.closeAllConnections?.(); this.previewGateway.server.close(); this.previewGateway = null; } }
 
+  // ---- push: anything that changes what a screen shows says so here ("activity", "usage", "models", "audit", "config", "status"). Bursts are merged (a quarter of a second),
+  // and the UI hears them over /api/stream, so it refreshes when something happened instead of asking every few seconds.
+  notify(topic) { this._changed.add(topic); if (this._changeT) return; this._changeT = setTimeout(() => { this._changeT = null; const topics = [...this._changed]; this._changed.clear(); try { this.bus.emit('change', topics); } catch { /* a listener must never break a run */ } }, 250); this._changeT.unref?.(); }
   // ---- live activity: runs publish phase events; we keep a ring buffer and the set of runs in flight
   _event(e) {
-    this.events.push(e); if (this.events.length > 300) this.events.shift();
+    this.notify('activity'); this.events.push(e); if (this.events.length > 300) this.events.shift();
     if (e.type === 'start' || e.type === 'end') this.cache.clear(); // queue counts must reflect a run starting/finishing immediately, not 15s later
     if (e.type === 'start') this.active.set(e.run, { run: e.run, project: e.project, ticket: e.ticket, pr: e.pr, title: e.title, started: e.at, phase: 'queued', phaseStarted: e.at, phases: [], feedback: /^Feedback round/.test(e.title ?? '') });
     const a = this.active.get(e.run);
@@ -360,7 +365,7 @@ export class Engine {
     if (Object.keys(changes).length) { this._persist(); this._audit({ what: 'settings', changes }); }
     return { ...this.settings(), changed: Object.keys(changes).length > 0, appliesTo: 'the next run' };
   }
-  _audit(entry) { try { fs.appendFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n'); } catch { /* never block a change on its log */ } }
+  _audit(entry) { this.notify('audit'); try { fs.appendFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n'); } catch { /* never block a change on its log */ } }
   _settingsHistory(n) { try { return fs.readFileSync(path.join(this.cfg.stateDir, 'audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.what === 'settings').slice(-n).reverse(); } catch { return []; } }
   _readProbe() { try { return JSON.parse(fs.readFileSync(path.join(this.cfg.stateDir, 'agent-probe.json'), 'utf8')); } catch { return null; } }
   // Ask the agent container itself what it would use, with one tiny prompt: the only reliable answer when no model is pinned, because
@@ -421,7 +426,7 @@ export class Engine {
   }
 
   // ---- project management (persisted to the config file)
-  _persist() { if (this.configPath) saveConfig(this.configPath, this.cfg); }
+  _persist() { this.notify('config'); if (this.configPath) saveConfig(this.configPath, this.cfg); }
   // Persist a token in the owner-only secrets file and make it visible to this process. Names are restricted to AF_* so a project
   // can only ever reference secrets the factory itself stored (never arbitrary environment variables).
   saveSecret(name, value) {

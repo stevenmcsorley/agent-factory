@@ -44,7 +44,7 @@ export const delegationMethods = {
     return { out: `You've hit your usage limit: ${dec.why}. Try again at ${clockOf(until)}.`, costUsd: 0, tokens: { ...ZERO }, model: null, limited: true };
   },
   _recordUse(role, ctx, args, r, t0, via, why, extra = {}) {
-    const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via, why: String(why ?? '').slice(0, 160), input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...extra });
+    this.notify('usage'); const meta = args[3]?.meta ?? {}; recordUsage(this.cfg.stateDir, { role, project: ctx.project ?? meta.project ?? null, run: meta.run ?? null, ticket: meta.ticket ?? null, ref: meta.ref ?? null, model: r?.model ?? ((this.cfg.roles?.[role]?.agent?.model ?? this.cfg.agent.model) ?? null), via, why: String(why ?? '').slice(0, 160), input: r?.tokens?.input ?? 0, cached: r?.tokens?.cached ?? 0, output: r?.tokens?.output ?? 0, steps: r?.tokens?.steps ?? 0, ms: Date.now() - t0, ...extra });
   },
 
   // The agent the factory uses for a role: a wrapper that decides, per call, who does it.

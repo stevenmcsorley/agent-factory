@@ -17,7 +17,7 @@ export const openrouterMethods = {
   _orConf() { const c = this.cfg.openrouter ?? {}; return { enabled: c.enabled !== false, roles: Array.isArray(c.roles) ? c.roles : [], fallback: { enabled: c.fallback?.enabled !== false, roles: c.fallback?.roles === 'all' || c.fallback?.roles === undefined ? 'all' : (Array.isArray(c.fallback.roles) ? c.fallback.roles : 'all') }, allowPaid: !!c.allowPaid, banned: Array.isArray(c.banned) ? c.banned : [], pinned: c.pinned && typeof c.pinned === 'object' ? c.pinned : {} }; },
   _orKey() { return this.env?.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || ''; },
   _orClient() { const key = this._orKey(); if (!this._orC || this._orC.key !== key) this._orC = { key, client: openrouter({ key, fetchImpl: this.f.fetch ?? fetch }) }; return this._orC.client; },
-  router() { const c = this._orClient(); if (!this._router || this._router.client !== c) this._router = new ModelRouter({ dir: this.cfg.stateDir, client: c, config: () => this._orConf() }); return this._router; },
+  router() { const c = this._orClient(); if (!this._router || this._router.client !== c) this._router = new ModelRouter({ dir: this.cfg.stateDir, client: c, config: () => this._orConf(), onChange: (t) => this.notify(t) }); return this._router; },
   _orLiveMap() { return (this._orLive ??= new Map()); },
 
   // Does a role run on OpenRouter as its first choice? Does OpenRouter stand in when the plan is limited?

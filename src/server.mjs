@@ -177,6 +177,7 @@ export function createServer(engine, { token, allowedHosts }) {
     res.end(data);
   };
 
+  const streams = new Set();
   return http.createServer(async (req, res) => {
     try {
       const host = (req.headers.host ?? '').toLowerCase();
@@ -213,6 +214,12 @@ export function createServer(engine, { token, allowedHosts }) {
         const body = await readJson(req, bodyLimit(url.pathname));
         const out = Array.isArray(body) ? (await Promise.all(body.map((m) => handleRpc(engine, m, { code: url.pathname === '/mcp-code' })))).filter(Boolean) : await handleRpc(engine, body, { code: url.pathname === '/mcp-code' });
         return out === null || (Array.isArray(out) && !out.length) ? (res.writeHead(202, { 'Cache-Control': 'no-store' }), res.end()) : send(res, 200, out);
+      }
+      if (url.pathname === '/api/stream' && req.method === 'GET') {   // push: "something changed" the moment it does (text/event-stream; same bearer token as everything else)
+        if (streams.size >= 16) return send(res, 429, { error: 'Too many open live connections' });
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' }); res.write('retry: 3000\nevent: hello\ndata: {}\n\n');
+        const onChange = (topics) => { try { res.write(`event: change\ndata: ${JSON.stringify({ topics })}\n\n`); } catch { /* the connection is gone */ } }; const beat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closed */ } }, 20_000);
+        const done = () => { clearInterval(beat); engine.bus.off('change', onChange); streams.delete(res); }; streams.add(res); engine.bus.on('change', onChange); req.on('close', done); res.on('close', done); return;
       }
       const shot = /^\/api\/projects\/([a-z0-9-]+)\/visual\/(baseline|screens|[a-f0-9]{8})\/([a-z0-9-]+\.png)$/.exec(url.pathname);
       if (shot && req.method === 'GET') return send(res, 200, engine.visualFile(shot[1], shot[2], shot[3]), { 'Content-Type': 'image/png' });
