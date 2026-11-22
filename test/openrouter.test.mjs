@@ -142,11 +142,17 @@ test('engine: config is validated and the MCP operations exist (and none of them
   assert.ok(!callOpsNames().includes('set_openrouter_key')); function callOpsNames() { return Object.keys({ openrouter_status: 1, set_openrouter: 1, openrouter_refresh: 1, openrouter_test: 1, openrouter_reset: 1 }); }
 });
 
-test('engine: a role set to use OpenRouter runs on a free model, and the usage log says which model and that it came via OpenRouter', async () => {
-  const w = orEngine(); await w.e.setOpenRouterKey(KEY); w.e.setOpenRouter({ enabled: true, roles: ['reviewer'] }); const dir = tmp();
-  const reviewer = w.e._agentFor('reviewer', path.join(w.root, 'l.log'), { project: 'p' }); const r = await reviewer.run({ kind: 'local', exec: async () => ({ code: 0, out: '' }) }, { dir }, 'Judge this', { timeoutMs: 30_000, meta: { ref: 'x' } });
-  assert.equal(r.out, 'free model says hello'); assert.equal(w.log[0], 'big/ultra-550b:free'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.deepEqual([u.role, u.model, u.via, u.input, u.output], ['reviewer', 'big/ultra-550b:free', 'openrouter', 50, 5]);
-  const builder = w.e._agentFor('builder', path.join(w.root, 'l.log'), {}); assert.equal(builder.name, 'shell', 'a role that is not enabled keeps its normal agent');
+test('engine: a reviewer goes to the free models as ONE request, and the usage log says which model, that it came via OpenRouter, and why', async () => {
+  const VERDICT = '{"verdict":"approve","summary":"ok","findings":[]}'; const w = orEngine({ answers: [{ content: VERDICT }] }); await w.e.setOpenRouterKey(KEY); const dir = tmp();
+  const reviewer = w.e._agentFor('reviewer', path.join(w.root, 'l.log'), { project: 'p' }); const r = await reviewer.run({ kind: 'local', exec: async () => ({ code: 0, out: '' }) }, { dir }, 'You may read any file in this checkout, but you MUST NOT edit, create or delete files: your job is to judge, not to fix.\nJudge this', { timeoutMs: 30_000, meta: { ref: 'x' } });
+  assert.equal(r.out, VERDICT); assert.equal(w.log.length, 1, 'one request'); assert.equal(w.log[0], 'big/ultra-550b:free'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.deepEqual([u.role, u.model, u.via, u.input, u.output], ['reviewer', 'big/ultra-550b:free', 'openrouter', 50, 5]); assert.match(u.why, /one request/);
+  const builder = w.e._agentFor('builder', path.join(w.root, 'l.log'), {}); assert.equal(builder.name, 'shell', 'the agent keeps the plan agent\'s name');
+});
+
+test('engine: a free-model verdict that does not parse is redone on Codex (escalation), and the usage log says so', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: 'I think it looks fine' }] }); await w.e.setOpenRouterKey(KEY); const dir = tmp(); const GOOD = '{"verdict":"changes","summary":"s","findings":[{"severity":"major","issue":"x"}]}';
+  const r = await w.e._agentFor('reviewer', path.join(w.root, 'l.log'), { project: 'p' }).run({ kind: 'local', exec: async () => ({ code: 0, out: GOOD }) }, { dir }, 'Judge', { timeoutMs: 30_000, meta: {} });
+  assert.equal(r.out, GOOD, 'Codex gave the verdict'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.equal(u.via, 'codex'); assert.equal(u.escalated, true); assert.match(u.why, /escalated to Codex/);
 });
 
 test('engine: when the plan says it is limited, OpenRouter does the same job instead, the factory is not paused, and the swap is recorded; with the fallback off, it stays paused', async () => {
@@ -200,4 +206,47 @@ test('buying credit lifts the cap: on the next refresh a key that is no longer f
   const r = new ModelRouter({ dir: tmp(), client, now: c.now, config: () => ({}) }); await r.refresh(); r.noteFail('mid/gemma-31b:free', { kind: 'daily-limit', message: 'free-models-per-day', retryAtMs: Date.UTC(2026, 10, 23), limit: 50 });
   assert.equal(r.budget().cap, 50); assert.equal(r.pick({}), null, 'the free allowance is used'); free = false; await r.refresh();
   assert.equal(r.budget().cap, 1000, 'now 1000 a day'); assert.ok(r.pick({}), 'free models are usable again straight away'); assert.equal(r.status().freeUntil, null);
+});
+
+// ---- the delegation policy through the engine
+const sb = (out = 'codex did it') => ({ kind: 'local', exec: async () => ({ code: 0, out }) });
+const VERDICT = '{"verdict":"approve","summary":"ok","findings":[]}';
+const runAs = (w, role, meta = {}, prompt = 'Do it') => w.e._agentFor(role, path.join(w.root, 'l.log'), { project: 'p' }).run(sb(), { dir: tmp() }, prompt, { timeoutMs: 30_000, meta });
+
+test('policy: codex only never touches OpenRouter, and when Codex is limited it waits instead of quietly using the free models', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' } }); await w.e.setOpenRouterKey(KEY); w.e.setAgentPolicy({ mode: 'codex' });
+  const r = await runAs(w, 'reviewer', {}, 'Judge'); assert.equal(r.out, 'codex did it'); assert.equal(w.log.length, 0, 'no request went to OpenRouter');
+  w.e._noteLimit({ message: 'You have hit your usage limit', retryAt: '11:59 PM' }); assert.equal(w.e._fallbackAny(), false); assert.throws(() => w.e.assertAgentAvailable(), /usage limit is reached/, 'paused as before');
+  const waiting = await runAs(w, 'reviewer', {}, 'Judge'); assert.equal(waiting.limited, true); assert.match(waiting.out, /Codex only, and Codex is not available/); assert.equal(w.log.length, 0);
+});
+
+test('policy: openrouter only runs everything on the free models, never on Codex, and says when it cannot', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: 'built it with free models' }, { error: 429 }, { error: 429 }, { error: 429 }, { error: 429 }] }); await w.e.setOpenRouterKey(KEY); w.e.setAgentPolicy({ mode: 'openrouter' }); w.e._ticketSize = () => 'L';
+  const r = await runAs(w, 'builder', { run: 'r1', ticket: 1 }); assert.equal(r.out, 'built it with free models', 'even a big ticket: that is what you asked for'); const u = (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1); assert.equal(u.via, 'openrouter');
+  for (const m of ['big/ultra-550b:free', 'mid/gemma-31b:free', 'acme/lfm-1.7b:free']) w.e.router().noteFail(m, { kind: 'rate-limit', message: 'x' }); const stuck = await runAs(w, 'builder', { run: 'r2', ticket: 1 }); assert.equal(stuck.limited, true); assert.match(stuck.out, /every free model is resting/); assert.ok(parseUsageLimit(stuck.out), 'reported in words the factory requeues on');
+});
+
+test('policy: mix sends a small first attempt to the free models and a retry to Codex; a big ticket goes straight to Codex', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: 'free built it' }] }); await w.e.setOpenRouterKey(KEY); const U = async () => (await import('../src/usage.mjs')).readUsage(w.e.cfg.stateDir).at(-1);
+  w.e._ticketSize = () => 'S'; assert.equal((await runAs(w, 'builder', { run: 'run1', ticket: 5 })).out, 'free built it'); assert.equal((await U()).via, 'openrouter'); assert.match((await U()).why, /size S|small/);
+  assert.equal((await runAs(w, 'builder', { run: 'run1', ticket: 5 })).out, 'codex did it', 'the second call in the SAME run is attempt 2: Codex'); assert.equal((await U()).via, 'codex'); assert.match((await U()).why, /retry/);
+  w.e._ticketSize = () => 'L'; assert.equal((await runAs(w, 'builder', { run: 'run2', ticket: 6 })).out, 'codex did it'); assert.match((await U()).why, /size L/); assert.equal(w.log.length, 1, 'only the one small first attempt used the free models');
+});
+
+test('policy: your own routes win and are validated; the setting survives and is exposed over MCP', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: VERDICT }] }); await w.e.setOpenRouterKey(KEY);
+  assert.throws(() => w.e.setAgentPolicy({ mode: 'both' }), /mode must be/); assert.throws(() => w.e.setAgentPolicy({ routes: { wizard: 'codex' } }), /Unknown role/); assert.throws(() => w.e.setAgentPolicy({ routes: { reviewer: 'sometimes' } }), /must be codex, openrouter, auto/);
+  const s = await callOp(w.e, 'set_agent_policy', { routes: { reviewer: 'codex' } }); assert.equal(s.roles.reviewer.route, 'codex'); assert.equal(s.roles.reviewer.source, 'you'); assert.equal(s.roles.security.source, 'default'); assert.equal(s.roles.reviewer.first, 'codex');
+  assert.equal((await runAs(w, 'reviewer', {}, 'Judge')).out, 'codex did it'); assert.equal(w.log.length, 0); await callOp(w.e, 'set_agent_policy', { routes: { reviewer: 'default' } }); assert.equal((await callOp(w.e, 'agent_policy', {})).roles.reviewer.source, 'default');
+  assert.equal((await runAs(w, 'reviewer', {}, 'Judge')).out, VERDICT, 'back to the default: the free models');
+});
+
+test('policy: the legacy "roles that use OpenRouter first" list still works, and an explicit route beats it', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' } }); await w.e.setOpenRouterKey(KEY); w.e.setOpenRouter({ roles: ['planner'] }); assert.equal(w.e.agentPolicy().roles.planner.route, 'openrouter'); w.e.setAgentPolicy({ routes: { planner: 'codex' } }); assert.equal(w.e.agentPolicy().roles.planner.route, 'codex');
+});
+
+test('usage by provider: where the tokens went, per provider and per role, with escalations counted', async () => {
+  const w = orEngine({ agent: { kind: 'shell', command: 'x' }, answers: [{ content: VERDICT }, { content: 'not a verdict' }] }); await w.e.setOpenRouterKey(KEY);
+  await runAs(w, 'reviewer', {}, 'Judge'); await runAs(w, 'reviewer', {}, 'Judge'); await runAs(w, 'planner', {}, 'Plan');   // free verdict; free garbage -> Codex; Codex planner
+  const u = w.e.usageByProvider(1); assert.equal(u.byProvider.openrouter.calls, 1, 'one verdict from a free model'); assert.ok(u.byProvider.codex.calls >= 2); assert.equal(u.byProvider.codex.escalated, 1); assert.equal(u.byRole.reviewer.openrouter.calls, 1); assert.ok(u.byRole.planner.codex.calls === 1); assert.ok(w.e.agentPolicy().usage.byProvider);
 });

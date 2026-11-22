@@ -49,6 +49,7 @@ import { reviewMethods } from './engine-review.mjs';
 import { unattendedMethods } from './engine-unattended.mjs';
 import { designPhaseMethods } from './engine-designphase.mjs';
 import { openrouterMethods } from './engine-openrouter.mjs';
+import { delegationMethods } from './engine-delegation.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -935,4 +936,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods, unattendedMethods, designPhaseMethods, openrouterMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods, unattendedMethods, designPhaseMethods, openrouterMethods, delegationMethods);

@@ -1,0 +1,943 @@
+{
+  "at": "2026-11-22T11:17:51.532Z",
+  "agent": "codexContainer",
+  "model": "gpt-6.2-astra",
+  "effort": "low",
+  "rows": [
+    {
+      "strategy": "shot",
+      "case": "missing-alt",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The <img> element is missing an alt attribute. Project constraints require every image to have alt text for accessibility.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 799,
+        "cached": 0,
+        "output": 585,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 11950
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "missing-alt",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The <img> element lacks an alt attribute. Rule 3 requires every image to have alt text and explicit width/height.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 876,
+        "cached": 0,
+        "output": 442,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 8289
+    },
+    {
+      "strategy": "atoms",
+      "case": "missing-alt",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The added <img src=\"images/hero.svg\" width=\"160\" height=\"100\"> has no alt attribute. Every image must have non-empty alt text for accessibility. | about.html The <img> tag lacks an alt attribute. Rule 3 requires every image to have alt text and explicit width and height. The image has width and height but no alt text. | about.html The <img> element lacks an alt attribute. Project constraints require every image to have alt text for accessibility.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 3371,
+        "cached": 0,
+        "output": 1778,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 41282
+    },
+    {
+      "strategy": "agent",
+      "case": "missing-alt",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The <img> tag for hero.svg lacks an alt attribute. Project constraints require every image to have alt text, and the test 'images have alt text' fails.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 6932,
+        "cached": 0,
+        "output": 627,
+        "steps": 4,
+        "calls": 1
+      },
+      "ms": 13998
+    },
+    {
+      "strategy": "shot",
+      "case": "inline-script",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html An inline <script> tag was added to append '!' to the h1 text. The project constraints explicitly forbid inline scripts (plain HTML and CSS only).",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 785,
+        "cached": 0,
+        "output": 357,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 7972
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "inline-script",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html Inline script added to modify heading text. Project rules explicitly forbid inline scripts (rule #2 in CONTRIBUTING.md).",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 862,
+        "cached": 0,
+        "output": 365,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 6270
+    },
+    {
+      "strategy": "atoms",
+      "case": "inline-script",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html Inline <script> tag added to modify h1 text content. Project constraints explicitly forbid inline scripts (and inline styles). This also creates an accessibility risk: assistive technologies may announce the heading before the script executes, resulting in inconsistent content. | about.html Inline script tag added to modify heading text. Project rules explicitly forbid inline scripts (rule #2 in CONTRIBUTING.md). | about.html Inline script added to append '!' to the h1 text. Project constraints explicitly forbid inline scripts (plain HTML and CSS only).",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 3315,
+        "cached": 0,
+        "output": 1501,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 33699
+    },
+    {
+      "strategy": "agent",
+      "case": "inline-script",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html Inline script tag added (<script>document.querySelector('h1').textContent += '!';</script>) violates the project constraint 'plain HTML and CSS only, no inline scripts or inline styles' and will fail the existing test at site.test.js line 9 that asserts no inline scripts.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 5822,
+        "cached": 0,
+        "output": 757,
+        "steps": 2,
+        "calls": 1
+      },
+      "ms": 17183
+    },
+    {
+      "strategy": "shot",
+      "case": "external-font",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html Added <link rel=\"stylesheet\" href=\"https://fonts.example.com/css?family=Lora\"> which makes an external request to a CDN/web font service. This violates the project constraint: \"no external requests (no CDNs or web fonts)\".",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 845,
+        "cached": 0,
+        "output": 354,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 4378
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "external-font",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html Added <link rel=\"stylesheet\" href=\"https://fonts.example.com/css?family=Lora\"> which makes an external request to a CDN/web font service. The project rules explicitly forbid external requests (no CDNs or web fonts).",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 922,
+        "cached": 0,
+        "output": 475,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 6049
+    },
+    {
+      "strategy": "atoms",
+      "case": "external-font",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html Added <link rel=\"stylesheet\" href=\"https://fonts.example.com/css?family=Lora\"> points to an external CDN. Project constraints forbid external requests and require all href/src to reference files that exist in the repository. | index.html Added <link rel=\"stylesheet\" href=\"https://fonts.example.com/css?family=Lora\"> which loads a font from an external CDN. The project constraints explicitly forbid external requests including web fonts. | index.html Added external stylesheet link to https://fonts.example.com/css?family=Lora, violating the 'no external requests (no CDNs or web fonts)' constraint.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 3555,
+        "cached": 0,
+        "output": 1785,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 34480
+    },
+    {
+      "strategy": "agent",
+      "case": "external-font",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html Added <link rel=\"stylesheet\" href=\"https://fonts.example.com/css?family=Lora\"> which makes an external request to a web font service. The project constraints explicitly prohibit external requests including CDNs and web fonts.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 3769,
+        "cached": 0,
+        "output": 592,
+        "steps": 1,
+        "calls": 1
+      },
+      "ms": 8961
+    },
+    {
+      "strategy": "shot",
+      "case": "broken-link",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html The new Shop link points to shop.html, but this file is not present in the repository (files listed: CONTRIBUTING.md, about.html, images/hero.svg, index.html, site.test.js, styles.css). This creates a broken link and violates the project constraint 'relative links to files that exist'. | about.html Same issue: Shop link points to non-existent shop.html.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1245,
+        "cached": 0,
+        "output": 765,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 10344
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "broken-link",
+      "kind": "defect",
+      "outcome": "missed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 1322,
+        "cached": 0,
+        "output": 712,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 22232
+    },
+    {
+      "strategy": "atoms",
+      "case": "broken-link",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html Navigation link href=\"shop.html\" references a file that does not exist in the repository file list. | index.html Navigation link href=\"shop.html\" references a file that does not exist in the repository file list. | index.html The new navigation link points to shop.html, but shop.html is not present in the repository files list. All relative links must point to files that exist. | about.html The new navigation link points to shop.html, but shop.html is not present in the repository files list. All relative links must point to files that exist.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:approve"
+      ],
+      "tokens": {
+        "input": 5155,
+        "cached": 0,
+        "output": 3637,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 55464
+    },
+    {
+      "strategy": "agent",
+      "case": "broken-link",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "index.html The navigation links to shop.html but this file does not exist in the repository. The project constraints require 'relative links to files that exist'. | about.html The navigation links to shop.html but this file does not exist in the repository. The project constraints require 'relative links to files that exist'.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 6907,
+        "cached": 0,
+        "output": 1006,
+        "steps": 2,
+        "calls": 1
+      },
+      "ms": 20479
+    },
+    {
+      "strategy": "shot",
+      "case": "weakened-test",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The new <img> element lacks an alt attribute, violating the project constraint that every image must have alt text. | site.test.js The alt-text test is disabled with a comment, which hides the missing alt attribute instead of ensuring compliance.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1062,
+        "cached": 0,
+        "output": 752,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 13275
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "weakened-test",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The new <img> tag lacks an alt attribute. Rule 3 requires every image to have alt text and explicit width/height. | site.test.js The alt-text test was commented out (/* alt check disabled */) to make the test pass. Rule 5 forbids weakening or deleting tests to make npm test pass.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1139,
+        "cached": 0,
+        "output": 578,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 10480
+    },
+    {
+      "strategy": "atoms",
+      "case": "weakened-test",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html New <img> element lacks alt attribute. Every image must have non-empty alt text for accessibility. | about.html Added <img> element lacks alt attribute. Rule 3 requires every image to have alt text and explicit width/height. | site.test.js Test for image alt text was commented out (weakened) to make npm test pass. Rule 5 forbids weakening or deleting tests. | site.test.js The alt text assertion was replaced with a comment '/* alt check disabled */', completely disabling the test that ensures every image has alt text. | about.html The new <img> tag lacks an alt attribute, violating the project constraint that every image must have alt text. | about.html The added <img src=\"images/hero.svg\" width=\"160\" height=\"100\"> has no alt text, breaking the project rule that every image has alt text and causing the test failure. | site.test.js The images-have-alt-text test is disabled with a comment rather than fixed, which weakens the test suite and hides the underlying problem instead of resolving it.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:changes",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 4423,
+        "cached": 0,
+        "output": 2629,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 59205
+    },
+    {
+      "strategy": "agent",
+      "case": "weakened-test",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The new <img src=\"images/hero.svg\" width=\"160\" height=\"100\"> has no alt attribute, violating the project constraint that every image has alt text. | site.test.js The images-have-alt-text test was disabled with a comment instead of being fixed, so the test suite no longer enforces the requirement and the real failure is hidden.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 4739,
+        "cached": 0,
+        "output": 762,
+        "steps": 3,
+        "calls": 1
+      },
+      "ms": 6749
+    },
+    {
+      "strategy": "shot",
+      "case": "price-mismatch",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The new sentence states an example price of £9.50, whereas ticket #6 explicitly requires £8.00. This is incorrect behaviour and would mislead users about the replacement ceiling-airer rope price.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 795,
+        "cached": 0,
+        "output": 877,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 6674
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "price-mismatch",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The added sentence states an example price of £9.50, but ticket #6 requires £8.00, so the change fails to meet the specified requirement.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 872,
+        "cached": 0,
+        "output": 604,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 3897
+    },
+    {
+      "strategy": "atoms",
+      "case": "price-mismatch",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The new sentence says the replacement rope has an example price of £9.50, but the ticket and project context require £8.00, so the change misstates the price and fails to satisfy the ticket. | about.html The added sentence gives an example price of £9.50, but the ticket requires £8.00; it also omits \"ceiling-airer\". A wrong price on a shop concept page is a factual error that fails the ticket.",
+      "verdicts": [
+        "markup:approve",
+        "constraints:changes",
+        "tests:approve",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 3354,
+        "cached": 0,
+        "output": 3789,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 28550
+    },
+    {
+      "strategy": "agent",
+      "case": "price-mismatch",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "about.html The sentence gives an example price of £9.50, but the ticket requires £8.00. | about.html The sentence says \"A replacement rope\" instead of \"the replacement ceiling-airer rope\" named in the ticket.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 3834,
+        "cached": 0,
+        "output": 1184,
+        "steps": 1,
+        "calls": 1
+      },
+      "ms": 9141
+    },
+    {
+      "strategy": "shot",
+      "case": "rewrote-shared-file",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "styles.css Unrelated changes violate \"Change nothing else\": custom properties are renamed (--colour-paper, --colour-ink, --colour-forest, --radius-card, --space-4) with new values, body font/line-height and padding change, and .skip:focus left switches to var(--s). Renaming properties can break any remaining rules that reference the old names.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 907,
+        "cached": 0,
+        "output": 1383,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 10491
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "rewrote-shared-file",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "styles.css The ticket requires only changing the skip-link outline from 3px to 4px and changing nothing else, but the diff rewrites all CSS custom properties (renaming them and changing colours, spacing, and radius), changes body font-size/line-height, and changes the skip left-offset variable. These unrelated changes alter the site design and violate the ticket scope.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 984,
+        "cached": 0,
+        "output": 1574,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 11723
+    },
+    {
+      "strategy": "atoms",
+      "case": "rewrote-shared-file",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "styles.css The entire stylesheet has been rewritten: custom property names changed (--colour-paper→--paper, --colour-ink→--ink, --colour-forest→--green, --radius-card→--r, --space-4→--s), color values altered, font size/line-height changed from 1rem/1.6 to 16px/1.5, and all references updated. The ticket explicitly says \"Change nothing else.\"",
+      "verdicts": [
+        "markup:approve",
+        "constraints:error",
+        "tests:approve",
+        "scope:changes"
+      ],
+      "tokens": {
+        "input": 3802,
+        "cached": 0,
+        "output": 4120,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 37757
+    },
+    {
+      "strategy": "agent",
+      "case": "rewrote-shared-file",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "styles.css All CSS custom properties were renamed and their values changed (--colour-paper→--paper, --colour-ink→--ink, --colour-forest→--green, --radius-card→--r, --space-4→--s) with different color values and spacing. This is unrelated to the ticket. | styles.css Font size changed from 1rem to 16px and line-height from 1.6 to 1.5. This is unrelated to the ticket. | styles.css Padding changed from var(--space-4) to var(--s) (which has a different value: 16px vs 1rem). This is unrelated to the ticket.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 8829,
+        "cached": 0,
+        "output": 1582,
+        "steps": 3,
+        "calls": 1
+      },
+      "ms": 32179
+    },
+    {
+      "strategy": "shot",
+      "case": "repo-rule-description",
+      "kind": "defect",
+      "outcome": "caught-wrong-reason",
+      "changes": true,
+      "text": "contact.html The navigation in contact.html only includes Home and About links, but omits the Contact link. The ticket requires the Contact link in the navigation of every page, including the contact page itself.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1528,
+        "cached": 0,
+        "output": 664,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 10272
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "repo-rule-description",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "contact.html Missing <meta name=\"description\"> in the head. Rule 1 requires every HTML page to have a meta description. | contact.html Navigation does not include a link to contact.html. Rule 4 requires a link to every new page in the navigation of EVERY page, including the new page itself (with aria-current=\"page\").",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1605,
+        "cached": 0,
+        "output": 816,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 12145
+    },
+    {
+      "strategy": "atoms",
+      "case": "repo-rule-description",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "contact.html The navigation in contact.html only contains Home and About links, but omits the Contact link. The ticket requires the Contact page to be linked from the navigation of every page, including itself (with aria-current=\"page\"). | contact.html Missing <meta name=\"description\"> in the head, which is required by rule 1 for every HTML page. | contact.html The navigation in contact.html does not include a link to the Contact page itself, violating rule 4 which requires a link to every new page in the navigation of EVERY page.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:approve"
+      ],
+      "tokens": {
+        "input": 6287,
+        "cached": 0,
+        "output": 4016,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 60106
+    },
+    {
+      "strategy": "agent",
+      "case": "repo-rule-description",
+      "kind": "defect",
+      "outcome": "caught",
+      "changes": true,
+      "text": "contact.html The navigation on contact.html only includes Home and About links, but is missing the Contact link. The ticket requires linking the Contact page from the navigation of every page, including contact.html itself. | contact.html The contact.html page is missing a meta description tag. The project constraints and test (site.test.js line 10) require every page to have a meta description.",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 7956,
+        "cached": 0,
+        "output": 1382,
+        "steps": 2,
+        "calls": 1
+      },
+      "ms": 27063
+    },
+    {
+      "strategy": "shot",
+      "case": "clean-contact",
+      "kind": "clean",
+      "outcome": "false-block",
+      "changes": true,
+      "text": "contact.html The navigation in contact.html only includes Home and About links, omitting the Contact link entirely. The requirement states to link the Contact page from the navigation of every page, which includes the Contact page itself (typically with aria-current=\"page\").",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 1545,
+        "cached": 0,
+        "output": 750,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 24630
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "clean-contact",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 1622,
+        "cached": 0,
+        "output": 859,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 23633
+    },
+    {
+      "strategy": "atoms",
+      "case": "clean-contact",
+      "kind": "clean",
+      "outcome": "false-block",
+      "changes": true,
+      "text": "contact.html The navigation on contact.html only includes Home and About links, but is missing the Contact link with aria-current=\"page\". The ticket requires the contact link in the navigation of every page. | contact.html The navigation in contact.html only includes Home and About links, but omits the Contact link itself. Rule 4 requires the new page to be linked in the navigation of every page, including itself.",
+      "verdicts": [
+        "markup:changes",
+        "constraints:changes",
+        "tests:approve",
+        "scope:approve"
+      ],
+      "tokens": {
+        "input": 6355,
+        "cached": 0,
+        "output": 3654,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 64126
+    },
+    {
+      "strategy": "agent",
+      "case": "clean-contact",
+      "kind": "clean",
+      "outcome": "false-block",
+      "changes": true,
+      "text": "contact.html The navigation in contact.html does not include a link to contact.html itself. The ticket requires the Contact page to be linked from the navigation of every page, including the Contact page itself (with aria-current=\"page\").",
+      "verdicts": [
+        "review:changes"
+      ],
+      "tokens": {
+        "input": 2398,
+        "cached": 0,
+        "output": 938,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 13554
+    },
+    {
+      "strategy": "shot",
+      "case": "clean-css",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 648,
+        "cached": 0,
+        "output": 253,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 6861
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "clean-css",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 725,
+        "cached": 0,
+        "output": 353,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 4352
+    },
+    {
+      "strategy": "atoms",
+      "case": "clean-css",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "markup:approve",
+        "constraints:approve",
+        "tests:approve",
+        "scope:approve"
+      ],
+      "tokens": {
+        "input": 2767,
+        "cached": 0,
+        "output": 1034,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 21043
+    },
+    {
+      "strategy": "agent",
+      "case": "clean-css",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 1501,
+        "cached": 0,
+        "output": 245,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 3539
+    },
+    {
+      "strategy": "shot",
+      "case": "clean-copy",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 794,
+        "cached": 0,
+        "output": 213,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 6493
+    },
+    {
+      "strategy": "shot_rules",
+      "case": "clean-copy",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 871,
+        "cached": 0,
+        "output": 337,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 4711
+    },
+    {
+      "strategy": "atoms",
+      "case": "clean-copy",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "markup:approve",
+        "constraints:approve",
+        "tests:approve",
+        "scope:approve"
+      ],
+      "tokens": {
+        "input": 3351,
+        "cached": 0,
+        "output": 1215,
+        "steps": 0,
+        "calls": 4
+      },
+      "ms": 22446
+    },
+    {
+      "strategy": "agent",
+      "case": "clean-copy",
+      "kind": "clean",
+      "outcome": "passed",
+      "changes": false,
+      "text": "",
+      "verdicts": [
+        "review:approve"
+      ],
+      "tokens": {
+        "input": 1647,
+        "cached": 0,
+        "output": 246,
+        "steps": 0,
+        "calls": 1
+      },
+      "ms": 3660
+    }
+  ],
+  "summary": {
+    "shot": {
+      "caught": 7,
+      "wrongReason": 1,
+      "missed": 0,
+      "defects": 8,
+      "passed": 2,
+      "falseBlocks": 1,
+      "cleans": 3,
+      "input": 10953,
+      "cached": 0,
+      "output": 6953,
+      "calls": 11,
+      "steps": 0,
+      "weighted": 52671,
+      "perCase": 4788
+    },
+    "shot_rules": {
+      "caught": 7,
+      "wrongReason": 0,
+      "missed": 1,
+      "defects": 8,
+      "passed": 3,
+      "falseBlocks": 0,
+      "cleans": 3,
+      "input": 11800,
+      "cached": 0,
+      "output": 7115,
+      "calls": 11,
+      "steps": 0,
+      "weighted": 54490,
+      "perCase": 4954
+    },
+    "atoms": {
+      "caught": 8,
+      "wrongReason": 0,
+      "missed": 0,
+      "defects": 8,
+      "passed": 2,
+      "falseBlocks": 1,
+      "cleans": 3,
+      "input": 45735,
+      "cached": 0,
+      "output": 29158,
+      "calls": 44,
+      "steps": 0,
+      "weighted": 220683,
+      "perCase": 20062
+    },
+    "agent": {
+      "caught": 8,
+      "wrongReason": 0,
+      "missed": 0,
+      "defects": 8,
+      "passed": 2,
+      "falseBlocks": 1,
+      "cleans": 3,
+      "input": 54334,
+      "cached": 0,
+      "output": 9321,
+      "calls": 11,
+      "steps": 18,
+      "weighted": 110260,
+      "perCase": 10024
+    }
+  }
+}

@@ -49,3 +49,12 @@ export function combineReviews(results) {
   const tokens = results.reduce((a, r) => (r.tokens ? { input: (a?.input ?? 0) + r.tokens.input, output: (a?.output ?? 0) + r.tokens.output } : a), undefined);
   return { verdict, summary: results.map((r) => `${r.role}: ${r.summary || r.verdict}`).join(' | ').slice(0, 400), findings, passes: results.map((r) => ({ role: r.role, verdict: r.verdict })), ...(tokens ? { tokens } : {}) };
 }
+
+// What a reviewer cannot see from a diff alone and needs: the repository's own written rules and what files exist. Small and deterministic (no agent exploring for it).
+export function repoGlance(dir, { maxRuleChars = 1500, maxFiles = 80 } = {}) {
+  try {
+    const parts = []; for (const n of ['CONTRIBUTING.md', 'AGENTS.md', 'README.md']) { const f = path.join(dir, n); if (fs.existsSync(f)) parts.push(`## ${n}\n${clip(fs.readFileSync(f, 'utf8'), maxRuleChars)}`); }
+    const files = []; const walk = (d, depth) => { if (files.length >= maxFiles || depth > 3) return; for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { if (['.git', 'node_modules', '.factory-context', '.factory-design'].includes(e.name)) continue; const rel = path.relative(dir, path.join(d, e.name)); if (e.isDirectory()) walk(path.join(d, e.name), depth + 1); else if (files.length < maxFiles) files.push(rel); } }; walk(dir, 0);
+    return [parts.length ? `### The repository's written rules (every change must follow them)\n${parts.join('\n\n')}` : '', files.length ? `### Files in the repository\n${files.join('\n')}` : ''].filter(Boolean).join('\n\n');
+  } catch { return ''; }
+}

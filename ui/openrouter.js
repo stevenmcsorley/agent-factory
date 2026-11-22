@@ -12,6 +12,25 @@ const STATE_CLS = { ready: 'solid', resting: 'warn', 'free allowance used': 'war
 const back = (m) => (m.backAt ? `back in ${dur(Math.max(0, m.backAt - Date.now()))}${m.learnedRestMs ? ` · usually rests ${dur(m.learnedRestMs)}` : ''}` : '');
 const KIND = { 'rate-limit': 'rate limited', 'daily-limit': 'daily allowance used', unavailable: 'unavailable', 'bad-request': 'bad tool calls', timeout: 'timed out', network: 'network', auth: 'key refused', 'bad-tool-call': 'bad tool call', credits: 'needs credits', other: 'error' };
 
+const MODE_TEXT = { mix: ['Mix', 'Both. Free models where they suit (reviews, short writing, small tickets), Codex where it matters, Codex as the fallback when a free model cannot answer, and the free models carry on when Codex is limited. Recommended.'], codex: ['Codex only', 'Everything runs on the Codex plan. When it is limited, work waits.'], openrouter: ['Free models only', 'Everything runs on OpenRouter\'s free models. Nothing uses the Codex plan.'] };
+const ROUTE_LABEL = { codex: 'Codex', openrouter: 'Free models', auto: 'Auto' };
+const PROVIDER = { codex: 'Codex', openrouter: 'Free models', none: 'neither available' };
+function policyCard(p, rerender) {
+  if (!p) return null; const set = (body, msg) => act(async () => { await api('/agents/policy', { method: 'POST', body }); }, msg, rerender);
+  const roleRows = Object.entries(p.roles).map(([role, r]) => { const u = p.usage.byRole[role]; const sel = h('select', { 'aria-label': `Route for ${role}`, onchange: (e) => set({ routes: { [role]: e.target.value } }, `${role}: saved`)() },
+      [['default', `Default (${ROUTE_LABEL[r.default] ?? r.default})`], ['codex', 'Codex'], ['openrouter', 'Free models'], ['auto', 'Auto']].map(([v, l]) => h('option', { value: v, selected: (r.source === 'you' ? r.route : 'default') === v }, l)));
+    const tok = (s) => (s.calls ? `${s.calls} call${s.calls === 1 ? '' : 's'} · ${k(s.input)} in` : '–');
+    return h('tr', {}, h('td', {}, h('b', {}, role), r.judge ? h('div', { class: 'muted small' }, 'a verdict on a diff') : null), h('td', {}, sel, h('div', { class: 'muted small' }, r.source === 'you' ? 'your choice' : (r.defaultWhy ?? ''))),
+      h('td', {}, h('span', { class: `pill2 ${r.first === 'none' ? 'warn' : r.first === 'openrouter' ? 'solid' : ''}` }, PROVIDER[r.first] ?? r.first), h('div', { class: 'muted small' }, r.firstWhy ?? '')), h('td', { class: 'num small' }, u ? tok(u.codex) : '–'), h('td', { class: 'num small' }, u ? tok(u.openrouter) : '–')); });
+  const t = p.usage.byProvider; const total = t.codex.weighted + t.openrouter.weighted; const share = total ? Math.round(100 * t.openrouter.weighted / total) : 0;
+  return card(h('div', { class: 'card-h' }, h('h2', {}, icon('spark', 17), 'Who does the work'), h('span', { class: `stamp ${p.mode === 'mix' ? 'ok' : 'warn'}` }, MODE_TEXT[p.mode]?.[0] ?? p.mode)),
+    h('div', { class: 'modegrid' }, p.modes.map((m) => h('button', { type: 'button', class: `modebtn ${p.mode === m ? 'on' : ''}`, 'aria-pressed': String(p.mode === m), onclick: set({ mode: m }, `${MODE_TEXT[m][0]}: saved`) }, h('b', {}, MODE_TEXT[m][0]), h('span', {}, MODE_TEXT[m][1])))),
+    p.mode !== 'codex' && !p.openrouterReady ? h('div', { class: 'note info' }, icon('plug', 14), h('div', {}, 'The free models are not set up yet (add your key and switch the OpenRouter agent on below), so everything runs on Codex for now.')) : null,
+    h('div', { class: 'facts' }, [[k(t.codex.input), 'tokens in on Codex (7 days)'], [k(t.openrouter.input), 'tokens in on free models'], [`${share}%`, 'of the work (weighted) on free models'], [t.codex.escalated + t.openrouter.escalated, 'times a free model could not answer and Codex did it']].map(([n, tx]) => h('div', {}, h('b', {}, String(n)), h('span', {}, tx)))),
+    h('div', { class: 'ortable-wrap' }, h('table', { class: 'ortable' }, h('thead', {}, h('tr', {}, ['Agent', 'Route', 'First choice right now', 'Codex (7 days)', 'Free models (7 days)'].map((x) => h('th', {}, x)))), h('tbody', {}, ...roleRows))),
+    h('p', { class: 'muted small' }, 'Auto means: the free models first for small first attempts and short jobs, Codex for bigger tickets, retries and anything a free model cannot answer. Anything you set here beats the default. In Mix, when Codex is limited the free models take over automatically, except for a role you set to Codex.'));
+}
+
 function keyCard(d, rerender) {
   const input = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: 'sk-or-v1-…', 'aria-label': 'OpenRouter API key' });
   const save = act(async () => { const r = await post('/key', { key: input.value.trim() }); input.value = ''; if (r.error) throw new Error(r.error); }, 'Key saved. Models loaded.', rerender);
@@ -66,9 +85,9 @@ function recentCard(d) {
 }
 
 export const openrouterPage = {
-  async load() { return { d: await api('/openrouter') }; },
-  draw({ d }, ctx) {
-    return [head('OpenRouter agent', 'Free models at full capacity. When one runs out it swaps to the next, remembers when the first should be back, and can carry on when the Codex plan is limited.'),
-      overviewCard(d), d.key.set ? configCard(d, ctx.rerender) : null, keyCard(d, ctx.rerender), d.key.set ? modelsCard(d, ctx.rerender) : null, d.key.set ? recentCard(d) : null].filter(Boolean);
+  async load() { const [d, p] = await Promise.all([api('/openrouter'), api('/agents/policy').catch(() => null)]); return { d, p }; },
+  draw({ d, p }, ctx) {
+    return [head('Agents and models', 'Who does which job: Codex, free models on OpenRouter, or both. A free model that runs out is swapped for the next, and remembered until it is back.'),
+      policyCard(p, ctx.rerender), overviewCard(d), d.key.set ? configCard(d, ctx.rerender) : null, keyCard(d, ctx.rerender), d.key.set ? modelsCard(d, ctx.rerender) : null, d.key.set ? recentCard(d) : null].filter(Boolean);
   },
 };

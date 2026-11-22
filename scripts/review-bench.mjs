@@ -2,6 +2,7 @@
 // Reviewer strategy benchmark with the REAL agent: `node scripts/review-bench.mjs [--strategies=shot,shot_rules,atoms,agent] [--cases=missing-alt,clean-css] [--save] [--json]`
 // Runs planted defects and clean changes (src/reviewbench.mjs) through different ways of reviewing and reports what each catches, wrongly blocks, and costs in tokens.
 // It uses your agent's usage: a rough guide is printed first. Everything happens in a throwaway state folder and throwaway repositories; nothing touches your projects.
+//   --provider=openrouter  run the reviewers on OpenRouter's free models instead of the configured agent (the key is read from the factory's secrets). The one-call strategies are ONE request each.
 // The cheap strategies run first; `agent` (the current reviewer, which explores a checkout) is the expensive one and is opt-in.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +14,7 @@ const { Engine } = await import(path.join(root, 'src/engine.mjs'));
 const { withDefaults } = await import(path.join(root, 'src/config.mjs'));
 const { CASES, STRATEGIES, runBench } = await import(path.join(root, 'src/reviewbench.mjs'));
 const { readUsage } = await import(path.join(root, 'src/usage.mjs'));
+const { loadSecrets } = await import(path.join(root, 'src/config.mjs'));
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const i = a.indexOf('='); return i < 0 ? [a.slice(2), true] : [a.slice(2, i), a.slice(i + 1)]; }));
 const real = JSON.parse(fs.readFileSync(path.resolve(flags.config ?? path.join(root, 'agent-factory.json')), 'utf8'));
 const strategies = typeof flags.strategies === 'string' ? flags.strategies.split(',') : ['shot', 'shot_rules', 'atoms']; const bad = strategies.filter((s) => !STRATEGIES[s]); if (bad.length) { console.error(`Unknown strategy: ${bad.join(', ')}. Choose from ${Object.keys(STRATEGIES).join(', ')}`); process.exit(2); }
@@ -24,8 +26,11 @@ if (planned > maxCalls) { console.error(`That is ${planned} calls, over --max-ca
 
 const state = fs.mkdtempSync(path.join(os.tmpdir(), 'rb-state-')); const cfg = { stateDir: path.join(state, 's'), agent: real.agent, roles: { reviewer: real.roles?.reviewer ?? {} }, sandbox: real.sandbox, limits: { maxConcurrent: 1, maxAttempts: 1, timeoutMs: real.limits?.timeoutMs ?? 900000, maxRunsPerDay: 500 }, projects: [] };
 const cfgPath = path.join(state, 'c.json'); fs.writeFileSync(cfgPath, JSON.stringify(cfg)); const e = new Engine(withDefaults(cfg), { configPath: cfgPath, env: {}, factories: {} });
-const log = path.join(state, 'bench.log'); const agent = e._agentFor('reviewer', log, { project: 'bench' }); const sandbox = e._sandboxFor(log); let calls = 0;
-const runAgent = async ({ prompt, dir, meta }) => { const r = await agent.run(sandbox, { dir }, prompt, { timeoutMs: cfg.limits.timeoutMs, meta }); calls++;
+const log = path.join(state, 'bench.log'); const viaOr = flags.provider === 'openrouter';
+if (viaOr) { for (const [k2, v2] of Object.entries(loadSecrets(path.join(path.resolve(root, real.stateDir ?? 'state'), 'secrets.env')))) e.env[k2] ??= v2; if (!e._orKey()) { console.error('No OpenRouter key found in the factory secrets.'); process.exit(2); } e.setOpenRouter({ enabled: true }); await e.refreshOpenRouter(); }
+const agent = viaOr ? e._orAgent('reviewer', log, { project: 'bench' }) : e._agentFor('reviewer', log, { project: 'bench' }); const sandbox = e._sandboxFor(log); let calls = 0;
+const runAgent = async ({ prompt, dir, meta }) => { const r = await agent.run(sandbox, { dir }, prompt, { timeoutMs: cfg.limits.timeoutMs, meta: { ...meta, ...(viaOr && meta.strategy !== 'agent' ? { shot: true } : {}) } }); calls++;
+  if (viaOr && r?.tokens) { const { recordUsage } = await import(path.join(root, 'src/usage.mjs')); recordUsage(e.cfg.stateDir, { role: 'reviewer', project: 'bench', ref: meta.ref, model: r.model, via: 'openrouter', input: r.tokens.input, cached: r.tokens.cached, output: r.tokens.output, steps: r.tokens.steps, ms: 0 }); }
   if (/usage limit|rate.?limit|try again at/i.test(String(r?.out)) && !/"verdict"/.test(String(r?.out))) throw Object.assign(new Error(`The agent is limited: ${String(r.out).slice(0, 160)}`), { limited: true }); return r?.out ?? ''; };
 const usageFor = (ref) => { const u = readUsage(e.cfg.stateDir).filter((x) => x.ref === ref); if (!u.length) return null; return u.reduce((a, x) => ({ input: a.input + x.input, cached: a.cached + x.cached, output: a.output + x.output, steps: a.steps + (x.steps ?? 0) }), { input: 0, cached: 0, output: 0, steps: 0 }); };
 const pad = (s, n) => String(s).padEnd(n);

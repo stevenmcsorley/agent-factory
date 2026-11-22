@@ -148,6 +148,8 @@ export function createServer(engine, { token, allowedHosts }) {
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/(pause|resume)$/, async (m) => engine.setProjectPaused(m[1], m[2] === 'pause')],
     ['GET', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m) => engine.listTickets(m[1])],
     ['POST', /^\/api\/projects\/([a-z0-9-]+)\/tickets$/, async (m, b) => engine.createTicket(m[1], b)],
+    ['GET', /^\/api\/agents\/policy$/, async () => engine.agentPolicy()],
+    ['POST', /^\/api\/agents\/policy$/, async (_m, b) => engine.setAgentPolicy(b ?? {})],
     ['GET', /^\/api\/openrouter$/, async () => engine.openrouterStatus()],
     ['POST', /^\/api\/openrouter\/key$/, async (_m, b) => engine.setOpenRouterKey(b?.key)],
     ['POST', /^\/api\/openrouter\/config$/, async (_m, b) => engine.setOpenRouter(b ?? {})],

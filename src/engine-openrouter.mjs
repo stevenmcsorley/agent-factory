@@ -14,7 +14,7 @@ const KEY_RE = /^sk-or-[A-Za-z0-9_-]{16,200}$/;
 const MODEL_RE = /^[A-Za-z0-9._~\/:@+-]{1,120}$/;
 
 export const openrouterMethods = {
-  _orConf() { const c = this.cfg.openrouter ?? {}; return { enabled: !!c.enabled, roles: Array.isArray(c.roles) ? c.roles : [], fallback: { enabled: !!c.fallback?.enabled, roles: c.fallback?.roles === 'all' || c.fallback?.roles === undefined ? 'all' : (Array.isArray(c.fallback.roles) ? c.fallback.roles : 'all') }, allowPaid: !!c.allowPaid, banned: Array.isArray(c.banned) ? c.banned : [], pinned: c.pinned && typeof c.pinned === 'object' ? c.pinned : {} }; },
+  _orConf() { const c = this.cfg.openrouter ?? {}; return { enabled: c.enabled !== false, roles: Array.isArray(c.roles) ? c.roles : [], fallback: { enabled: c.fallback?.enabled !== false, roles: c.fallback?.roles === 'all' || c.fallback?.roles === undefined ? 'all' : (Array.isArray(c.fallback.roles) ? c.fallback.roles : 'all') }, allowPaid: !!c.allowPaid, banned: Array.isArray(c.banned) ? c.banned : [], pinned: c.pinned && typeof c.pinned === 'object' ? c.pinned : {} }; },
   _orKey() { return this.env?.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || ''; },
   _orClient() { const key = this._orKey(); if (!this._orC || this._orC.key !== key) this._orC = { key, client: openrouter({ key, fetchImpl: this.f.fetch ?? fetch }) }; return this._orC.client; },
   router() { const c = this._orClient(); if (!this._router || this._router.client !== c) this._router = new ModelRouter({ dir: this.cfg.stateDir, client: c, config: () => this._orConf() }); return this._router; },
@@ -22,9 +22,6 @@ export const openrouterMethods = {
 
   // Does a role run on OpenRouter as its first choice? Does OpenRouter stand in when the plan is limited?
   _roleUsesOpenRouter(role) { const c = this._orConf(); return c.enabled && !!this._orKey() && (c.roles.includes('*') || c.roles.includes(role)); },
-  _fallbackCovers(role) { const c = this._orConf(); if (!c.enabled || !c.fallback.enabled || !this._orKey()) return false; if (c.fallback.roles !== 'all' && !c.fallback.roles.includes(role)) return false; const r = this.router(); return !r.s.authFailed && (!!r.pick({ role }) || !!r.nextReady({ role })); },
-  _fallbackAny() { return ROLE_KEYS.some((r) => this._fallbackCovers(r)); },
-
   _orAgent(role, log, ctx = {}) {
     const id = randomBytes(4).toString('hex'); const live = this._orLiveMap(); const base = openrouterAgent({ router: this.router(), client: this._orClient(), role, project: ctx.project ?? null, onEvent: (e) => { const x = live.get(id); if (!x) return; if (e.type === 'model') { x.model = e.model; x.step = e.step; } if (e.type === 'fail') { x.lastFail = `${e.model}: ${e.kind}`; } } });
     return { ...base, run: async (...args) => { live.set(id, { role, project: ctx.project ?? null, model: null, since: Date.now(), ref: args[3]?.meta?.ref ?? null }); try { return await base.run(...args); } finally { live.delete(id); } } };

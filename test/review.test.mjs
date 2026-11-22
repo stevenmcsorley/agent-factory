@@ -90,3 +90,10 @@ test('every built-in skill has a source line and goes to at least one real role'
   for (const role of ['builder', 'fixer', 'reviewer', 'security', 'designer', 'planner', 'spec-writer', 'skill-writer']) assert.ok(sk.skillsFor(dir, { role, project: 'a' }).names.length > 0, `${role} gets no skills`);
   assert.ok(sk.skillsFor(dir, { role: 'builder', project: 'a' }).text.length < 6000);
 });
+
+test('repoGlance: a reviewer gets the repository\'s own written rules and its file list, bounded, without exploring for them', async () => {
+  const { repoGlance } = await import('../src/review.mjs'); const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path'); const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rg-'));
+  fs.mkdirSync(path.join(d, 'src')); fs.mkdirSync(path.join(d, 'node_modules/x'), { recursive: true }); fs.writeFileSync(path.join(d, 'CONTRIBUTING.md'), '1. Every page has a meta description.\n'); fs.writeFileSync(path.join(d, 'src/a.js'), 'x'); fs.writeFileSync(path.join(d, 'node_modules/x/y.js'), 'x');
+  const g = repoGlance(d); assert.match(g, /written rules/); assert.match(g, /Every page has a meta description/); assert.match(g, /src\/a\.js/); assert.doesNotMatch(g, /node_modules/); assert.equal(repoGlance(fs.mkdtempSync(path.join(os.tmpdir(), 'rg2-'))), '', 'an empty repo adds nothing');
+  fs.writeFileSync(path.join(d, 'AGENTS.md'), 'z'.repeat(5000)); assert.ok(repoGlance(d).length < 3500, 'the rules are cut, not dumped');
+});
