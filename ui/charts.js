@@ -1,6 +1,7 @@
 import { qrPath } from './qr.js';
 import { s, h, anim } from './lib.js';
 import { SPRITES as SP } from './linesprites.js';
+import { stationOf, nextStep, dwellFor } from './journey.js';
 
 // Dependency-free SVG/DOM visuals. Colours come from CSS classes so both themes work. No inline style attributes (strict CSP):
 // geometry goes in SVG attributes, animation timing through the CSSOM.
@@ -215,7 +216,7 @@ export function createLine3D(stages) {
 
   // ---- a parcel: the cardboard box from the artwork. It picks up a label, a code stripe, a check mark and a strap as it goes down the line.
   const OFF = { agent: 52 }; const lane = (key) => (key === 'pr' ? 362 : LANE);
-  const parts = new Map(); let ready = false; const last = { q: null, s: null }; const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
+  const parts = new Map(); let ready = false; let timer = null; let pausedNow = false; const keys0 = stages.map(([k]) => k); const HOPPER_MOUTH = BELT0 + 20; const last = { q: null, s: null }; const place = (g, x, y) => { g.style.transform = `translate(${x}px, ${y}px)`; };
   const setCount = (el, key, v) => { if (last[key] === v) return; el.textContent = String(v); if (last[key] !== null) { el.classList.remove('l-flash'); void el.getBoundingClientRect(); el.classList.add('l-flash'); } last[key] = v; };
   const makePart = () => { const inner = s('g', { class: 'bob' }, s('image', { href: `${ART}parcel.webp`, x: -38, y: -58, width: 76, height: 58 }),
       s('g', { class: 'p-label' }, s('rect', { x: -27, y: -34, width: 26, height: 17, fill: '#f8f4e8', stroke: '#b9b3a2', 'stroke-width': 0.8 }), s('rect', { x: -23, y: -29, width: 17, height: 2.2, fill: '#8d887a' }), s('rect', { x: -23, y: -24, width: 11, height: 2.2, fill: '#8d887a' })),
@@ -223,19 +224,40 @@ export function createLine3D(stages) {
       s('rect', { x: -3, y: -50, width: 11, height: 49, fill: '#2fe0a0', opacity: 0.85, class: 'p-tape' }));
     const g = s('g', { class: 'l-part-g' }, s('g', { transform: 'scale(.96)' }, inner)); layer.append(g); const lab = s('g', { class: 'l-part-g l-lab' }, s('text', { x: 0, y: 0, class: 'ln-part-label', 'text-anchor': 'middle' }, '')); labels.append(lab); return { g, inner, lab, label: lab.firstChild }; };
   function update({ queued = 0, shipped = 0, active = [], paused = false }) {
-    svg.classList.toggle('running', active.length > 0 && !paused); svg.classList.toggle('shipping', shipped > 0);
+    svg.classList.toggle('shipping', shipped > 0);
     svg.setAttribute('aria-label', `Assembly line: ${queued} queued, ${active.length} in progress, ${shipped} shipped today`);
     pileEls.forEach((e, i) => e.classList.toggle('show', i < Math.min(queued, 5)));
     const trays = Math.min(shipped, 4); trayClip.firstChild.setAttribute('y', trays ? TRAY_TOP[trays - 1] - 4 : 400); trayClip.firstChild.setAttribute('height', trays ? 392 - (TRAY_TOP[trays - 1] - 4) : 0);
-    setCount(qText, 'q', queued); setCount(sText, 's', shipped); qLabel.textContent = queued === 1 ? 'TICKET WAITING' : 'TICKETS WAITING'; pausedG.classList.toggle('svg-hide', !paused);
-    const per = {}; const seen = new Set(); const lit = new Set();
-    for (const a of active) { seen.add(a.run); const ph = a.phase === 'review' || a.phase === 'visual' ? 'verify' : a.phase; const si = Math.max(0, stages.findIndex(([k]) => k === ph)); lit.add(si); const key = stages[si][0]; const k = (per[si] = (per[si] ?? -1) + 1);
-      const x = stX(si) + (OFF[key] ?? 0) - k * 84, y = lane(key); let p = parts.get(a.run);
-      if (!p) { p = makePart(); parts.set(a.run, p); for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? BELT0 + 40 : x, LANE); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } }
-      const cls = `bob at-${key} s${si}`; if (p.inner.getAttribute('class') !== cls) p.inner.setAttribute('class', cls);
-      const t = a.title ?? ''; const short = t.length > 19 ? `${t.slice(0, 18)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; place(p.g, x, y); place(p.lab, stX(si), 204); p.lab.style.display = k > 0 ? 'none' : ''; }
-    for (const [id, p] of parts) if (!seen.has(id)) { parts.delete(id); place(p.g, slotX(7) - 40, 340); p.g.style.opacity = '0'; p.lab.style.opacity = '0'; setTimeout(() => { p.g.remove(); p.lab.remove(); }, 1400); }
-    stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(Math.floor(i / 2)))); names.forEach((n, i) => n.classList.toggle('on', lit.has(i))); glyphs.forEach((n, i) => n.classList.toggle('on', lit.has(i))); field.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'sandbox'))); lift.classList.toggle('on', lit.has(stages.findIndex(([k]) => k === 'push'))); ready = true;
+    setCount(qText, 'q', queued); setCount(sText, 's', shipped); qLabel.textContent = queued === 1 ? 'TICKET WAITING' : 'TICKETS WAITING'; pausedG.classList.toggle('svg-hide', !paused); pausedNow = paused;
+    // data in: note how far each real job has got (never going backwards) and which have finished. The parcels' own journey (below) decides what is drawn.
+    const seen = new Set(); const keys = stages.map(([k]) => k); const now = Date.now();
+    for (const a of active) { seen.add(a.run); const target = stationOf(a.phase, keys); let p = parts.get(a.run);
+      if (!p) { p = makePart(); p.target = target ?? 0; p.done = false; p.exiting = false; p.title = a.title ?? ''; p.vis = ready ? -1 : p.target; p.readyAt = now + (ready ? 800 : 0); parts.set(a.run, p);
+        for (const e of [p.g, p.lab]) { e.style.transition = 'none'; e.style.opacity = '0'; place(e, ready ? HOPPER_MOUTH : stX(p.vis) + (OFF[keys[p.vis]] ?? 0), ready ? LANE : lane(keys[p.vis])); } void p.g.getBoundingClientRect(); for (const e of [p.g, p.lab]) { e.style.transition = ''; e.style.opacity = ''; } if (!ready) show(p); }
+      else if (target != null) p.target = Math.max(p.target, target); p.title = a.title ?? p.title; }
+    for (const p of parts.values()) if (![...seen].some((id) => parts.get(id) === p)) p.done = true;
+    ensureTicker(); redraw(); ready = true;
   }
+  // ---- the journey: one step at a time, each station for as long as its motion takes
+  const placeAt = (p, k) => { const key = keys0[p.vis]; place(p.g, stX(p.vis) + (OFF[key] ?? 0) - k * 84, lane(key)); place(p.lab, stX(p.vis), 204); p.lab.style.display = k > 0 ? 'none' : ''; };
+  function show(p) { const key = keys0[p.vis]; if (key == null) return; const cls = `bob at-${key} s${p.vis}`; if (p.inner.getAttribute('class') !== cls) p.inner.setAttribute('class', cls); const t = p.title ?? ''; const short = t.length > 19 ? `${t.slice(0, 18)}…` : t; if (p.label.textContent !== short) p.label.textContent = short; }
+  function redraw() {
+    const at = {}; const lit = new Set();
+    for (const p of parts.values()) { if (p.exiting || p.vis < 0) continue; show(p); placeAt(p, (at[p.vis] = (at[p.vis] ?? -1) + 1)); lit.add(p.vis); }
+    const moving = [...parts.values()].some((p) => !p.exiting); svg.classList.toggle('running', moving && !pausedNow);
+    stationEls.forEach((g, i) => g.classList.toggle('on', lit.has(Math.floor(i / 2)))); names.forEach((n, i) => n.classList.toggle('on', lit.has(i))); glyphs.forEach((n, i) => n.classList.toggle('on', lit.has(i))); field.classList.toggle('on', lit.has(keys0.indexOf('sandbox'))); lift.classList.toggle('on', lit.has(keys0.indexOf('push')));
+  }
+  function exitToBin(p) {
+    p.exiting = true; place(p.g, BELT1 - 24, LANE); place(p.lab, BELT1 - 24, 204); p.lab.style.opacity = '0';   // along the belt to its end, then into the bin
+    setTimeout(() => { place(p.g, slotX(7) - 10, 330); p.g.style.opacity = '0'; }, 1100); setTimeout(() => { p.g.remove(); p.lab.remove(); }, 2600);
+    for (const [id, q] of parts) if (q === p) parts.delete(id); redraw();
+  }
+  function tick() {
+    if (!svg.isConnected) { clearInterval(timer); timer = null; return; } const now = Date.now(); let changed = false;
+    for (const p of [...parts.values()]) { if (p.exiting || now < p.readyAt) continue; const nx = nextStep({ vis: p.vis, target: p.target, done: p.done, last: keys0.length - 1 });
+      if (!nx) continue; if (nx.exit) { exitToBin(p); continue; } p.vis = nx.move; p.readyAt = now + dwellFor(keys0[p.vis]) + (p.vis === 0 ? 0 : 0); changed = true; }
+    if (changed) redraw(); if (!parts.size && timer) { clearInterval(timer); timer = null; }
+  }
+  function ensureTicker() { if (!timer) timer = setInterval(tick, 200); }
   return { svg, update };
 }
