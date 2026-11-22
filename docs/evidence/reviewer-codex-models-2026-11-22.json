@@ -1,0 +1,71 @@
+{
+ "at": "2026-11-22",
+ "what": "Reviewer benchmark (11 cases: 8 planted defects, 3 clean changes), strategy shot_rules (one request, the production reviewer shape), effort low, run on older and cheaper Codex models through the factory harness",
+ "note": "One run per model on a small corpus: a strong signal, not a guarantee. Token totals are about equal; the saving comes from older models using less of the Codex plan per token (not measured here).",
+ "baseline_gpt-6.2-astra": {
+  "caught": 7,
+  "wrongReason": 0,
+  "missed": 1,
+  "defects": 8,
+  "passed": 3,
+  "falseBlocks": 0,
+  "cleans": 3,
+  "input": 11800,
+  "cached": 0,
+  "output": 7115,
+  "calls": 11,
+  "steps": 0,
+  "weighted": 54490,
+  "perCase": 4954
+ },
+ "results": {
+  "gpt-6-luna": {
+   "caught": 8,
+   "wrongReason": 0,
+   "missed": 0,
+   "defects": 8,
+   "passed": 3,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 165593,
+   "cached": 127616,
+   "output": 1152,
+   "calls": 11,
+   "steps": 0,
+   "weighted": 57651,
+   "perCase": 5241
+  },
+  "gpt-5.6-luna": {
+   "caught": 8,
+   "wrongReason": 0,
+   "missed": 0,
+   "defects": 8,
+   "passed": 3,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 146739,
+   "cached": 111232,
+   "output": 1636,
+   "calls": 11,
+   "steps": 0,
+   "weighted": 56446,
+   "perCase": 5131
+  },
+  "gpt-6.1-sol": {
+   "caught": 8,
+   "wrongReason": 0,
+   "missed": 0,
+   "defects": 8,
+   "passed": 3,
+   "falseBlocks": 0,
+   "cleans": 3,
+   "input": 173194,
+   "cached": 136064,
+   "output": 1052,
+   "calls": 11,
+   "steps": 0,
+   "weighted": 57048,
+   "perCase": 5186
+  }
+ }
+}

@@ -100,3 +100,8 @@ test('start cheaper, step up if it fails: the card explains it in plain words an
   for (const re of [/Start cheaper, step up if it fails/, /older Codex model/, /uses less of your plan/, /Start with/, /step up to/, /GPT-6-Luna/, /The checks decide/]) assert.match(t, re, String(re)); for (const j of JARGON) assert.doesNotMatch(t, j);
   e.setAgentPolicy({ tiers: { builder: ['gpt-6-luna', 'gpt-6.2-astra'] } }); const d2 = await load(e, 'policy'); d2.codexModels = d.codexModels; assert.match(text(agentsPage.draw(d2, { rerender() {} })), /\bOn\b/);
 });
+
+test('every agent shows its harness: what it is held to, and the model steps it goes through', async () => {
+  const e = await world(); e.setAgentPolicy({ tiers: { reviewer: ['gpt-6-luna', 'gpt-6.2-astra'] } }); const d = await load(e, 'policy'); d.codexModels = [{ id: 'gpt-6-luna', name: 'GPT-6-Luna' }, { id: 'gpt-6.2-astra', name: 'GPT-6.2-Astra' }]; const t = text(agentsPage.draw(d, { rerender() {} }));
+  for (const re of [/Model and harness/, /What it is held to/, /GPT-6-Luna first/, /then GPT-6\.2-Astra if it fails its checks/, /The answer must be a clear verdict/, /The usual model/, /Its summary must match what it changed/]) assert.match(t, re, String(re)); for (const j of JARGON) assert.doesNotMatch(t, j);
+});

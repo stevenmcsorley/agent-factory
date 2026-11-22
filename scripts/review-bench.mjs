@@ -2,6 +2,7 @@
 // Reviewer strategy benchmark with the REAL agent: `node scripts/review-bench.mjs [--strategies=shot,shot_rules,atoms,agent] [--cases=missing-alt,clean-css] [--save] [--json]`
 // Runs planted defects and clean changes (src/reviewbench.mjs) through different ways of reviewing and reports what each catches, wrongly blocks, and costs in tokens.
 // It uses your agent's usage: a rough guide is printed first. Everything happens in a throwaway state folder and throwaway repositories; nothing touches your projects.
+//   --codex-model=NAME [--effort=low]  run the reviewers on that Codex model instead of the configured one
 //   --provider=local   run the reviewers on a local model (Ollama on this machine); --model=NAME picks it (default: the biggest that fits). Measures whether local models are good enough BEFORE a role is routed to them.
 //   --provider=openrouter  run the reviewers on OpenRouter's free models instead of the configured agent (the key is read from the factory's secrets). The one-call strategies are ONE request each.
 // The cheap strategies run first; `agent` (the current reviewer, which explores a checkout) is the expensive one and is opt-in.
@@ -18,6 +19,7 @@ const { readUsage } = await import(path.join(root, 'src/usage.mjs'));
 const { loadSecrets } = await import(path.join(root, 'src/config.mjs'));
 const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const i = a.indexOf('='); return i < 0 ? [a.slice(2), true] : [a.slice(2, i), a.slice(i + 1)]; }));
 const real = JSON.parse(fs.readFileSync(path.resolve(flags.config ?? path.join(root, 'agent-factory.json')), 'utf8'));
+if (flags['codex-model']) real.agent = { ...real.agent, model: String(flags['codex-model']), ...(flags.effort ? { reasoningEffort: String(flags.effort) } : {}) }; if (flags['codex-model'] && real.roles?.reviewer?.agent) delete real.roles.reviewer.agent;   // --codex-model=NAME runs the reviewer on that Codex model (an older or cheaper one)
 const strategies = typeof flags.strategies === 'string' ? flags.strategies.split(',') : ['shot', 'shot_rules', 'atoms']; const bad = strategies.filter((s) => !STRATEGIES[s]); if (bad.length) { console.error(`Unknown strategy: ${bad.join(', ')}. Choose from ${Object.keys(STRATEGIES).join(', ')}`); process.exit(2); }
 const cases = typeof flags.cases === 'string' ? CASES.filter((c) => flags.cases.split(',').includes(c.id)) : CASES; if (!cases.length) { console.error('No such cases.'); process.exit(2); }
 const maxCalls = Number(flags['max-calls'] ?? 0) || Infinity; const say = (s) => { if (!flags.json) console.log(s); };

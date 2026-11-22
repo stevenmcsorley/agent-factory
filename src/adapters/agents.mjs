@@ -91,8 +91,8 @@ export const agents = {
     run: (_sb, ws, prompt, { timeoutMs }) => run('codex', ['exec', '--full-auto', prompt], { cwd: ws.dir, timeoutMs, log }),
   }),
   // Arbitrary command through the sandbox; prompt arrives on stdin and in $FACTORY_PROMPT. Used for tests.
-  shell: ({ command }) => ({
+  shell: ({ command, model }) => ({
     name: 'shell',
-    run: (sb, ws, prompt, { timeoutMs }) => sb.exec(ws, 'sh', ['-c', command], { timeoutMs, input: prompt, env: { FACTORY_PROMPT: prompt } }),
+    run: (sb, ws, prompt, { timeoutMs }) => sb.exec(ws, 'sh', ['-c', command], { timeoutMs, input: prompt, env: { FACTORY_PROMPT: prompt, ...(model ? { AGENT_MODEL: String(model) } : {}) } }),
   }),
 };
