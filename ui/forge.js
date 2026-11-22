@@ -19,15 +19,15 @@ export function prRowsLocal(prs, { open }) {
 
 export function prPage(d, { id, back, rerender }) {
   const pr = d.pr; const text = h('textarea', { rows: 3, placeholder: 'Comment for the factory. If you re-queue the ticket, it reads these.' });
-  const post = (action, body, msg) => act(async () => { await api(`/projects/${id}/prs/${pr.number}/${action}`, { method: 'POST', body }); }, msg, rerender);
-  const merge = act(async () => { if (!confirm(`Merge #${pr.number} into ${pr.base}?`)) return; await api(`/projects/${id}/prs/${pr.number}/merge`, { method: 'POST', body: {} }); }, 'Merged', rerender);
+  const post = (action, body, msg) => act(async () => { await api(`/projects/${id}/prs/${pr.number}/${action}`, { method: 'POST', body: typeof body === 'function' ? body() : body }); }, msg, rerender);
+  const merge = act(async () => { if (!confirm(`Merge #${pr.number} into ${pr.base}? Its ticket closes with it.`)) return; await api(`/projects/${id}/prs/${pr.number}/merge`, { method: 'POST', body: {} }); }, 'Merged', rerender);
   const open = pr.state === 'open';
   return [h('button', { class: 'btn', onclick: back }, 'Back'),
     card(h('div', { class: 'row between' }, h('h1', {}, `#${pr.number} ${pr.title}`), h('span', { class: `stamp ${TAG[pr.state] ?? ''}` }, pr.state)),
       h('p', { class: 'small muted' }, `${pr.branch} → ${pr.base} · opened ${ago(pr.createdAt)}`),
       pr.stale ? h('div', { class: 'note warn' }, 'The branch has changed since the factory last verified it. Merge is blocked until it is re-run.') : null,
       h('pre', { class: 'log-pre' }, pr.body || ''),
-      open ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: pr.stale, onclick: merge }, 'Merge'), h('button', { class: 'btn', title: 'Serve this branch on your machine so you can click around the site before merging', onclick: act(async () => { const r = await api(`/projects/${id}/live`, { method: 'POST', body: { pr: pr.number } }); window.open(r.url, '_blank', 'noopener'); }, 'Preview opened in a new tab (only this machine can see it)', rerender) }, icon('play', 13), 'Preview this branch'), h('button', { class: 'btn', onclick: post('close', {}, 'Closed') }, 'Close without merging'))
+      open ? h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', disabled: pr.stale, onclick: merge }, 'Merge and close the ticket'), h('button', { class: 'btn', title: 'Serve this branch on your machine so you can click around the site before merging', onclick: act(async () => { const r = await api(`/projects/${id}/live`, { method: 'POST', body: { pr: pr.number } }); window.open(r.url, '_blank', 'noopener'); }, 'Preview opened in a new tab (only this machine can see it)', rerender) }, icon('play', 13), 'Preview this branch'), h('button', { class: 'btn danger', title: 'The ticket is NOT done: it goes back to failed, and anything waiting on it keeps waiting. Your comment below goes on the ticket.', onclick: post('close', () => ({ reason: text.value.trim() || undefined }), 'Rejected: the ticket is marked failed') }, 'Reject (close without merging)'))
         : pr.state === 'merged' ? h('p', { class: 'small muted' }, `Merged as ${String(pr.mergedSha).slice(0, 10)}.`) : null),
     card(h('h2', {}, `Files changed (${d.files.length})`), h('ul', { class: 'plain' }, d.files.map((f) => h('li', { class: 'row between' }, h('code', {}, f.path), h('span', { class: 'small mono' }, f.added === null ? 'binary' : `+${f.added} −${f.removed}`)))),
       d.diff ? diffView(d.diff) : h('p', { class: 'muted small' }, d.note ?? 'No changes.'), d.truncated ? h('p', { class: 'small muted' }, 'The diff was cut at 400 KB.') : null),

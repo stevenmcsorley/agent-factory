@@ -45,6 +45,7 @@ import { livePreviewMethods } from './engine-livepreview.mjs';
 import { agentMethods } from './engine-agents.mjs';
 import { limitMethods } from './engine-limit.mjs';
 import { presetMethods } from './engine-presets.mjs';
+import { reviewMethods } from './engine-review.mjs';
 
 const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
 
@@ -253,7 +254,7 @@ export class Engine {
       for (const t of mine) {
         const state = stateOf(t.labels); const item = { project: p.id, id: t.id, title: t.title, url: t.url, state, kind: state === 'review' ? 'review' : 'decision', updatedAt: t.updatedAt };
         const run = runs.find((r) => r.project === p.id && String(r.ticket) === String(t.id)); if (run) item.run = { id: run.id, status: run.status, error: run.error, finished: run.finished };
-        if (state === 'review') { const pr = prs.find((x) => x.branch.startsWith(`agent/${t.id}-`)); if (pr) item.pr = pr; }
+        if (state === 'review') { const pr = prs.find((x) => x.branch.startsWith(`agent/${t.id}-`)); if (pr) item.pr = pr; item.local = hostKind(p) === 'local'; item.assess = this._assessment(p, run, pr?.number); }
         else if (budget-- > 0) { try { const d = await this._cached(`d:${p.id}:${t.id}`, 20000, () => this.deps(p).tickets.get(t.id)); item.body = d.body; item.comments = d.comments.slice(-4); } catch (e) { item.detailError = String(e.message).slice(0, 120); } }
         items.push(item);
       }
@@ -292,7 +293,7 @@ export class Engine {
     this.cache.delete(`t:${projectId}`); this.cache.delete(`d:${projectId}:${ticketId}`);
     if (action === 'comment') { await adapter.comment(ticketId, text(payload.text)); return { commented: true }; }
     if (action === 'update') { if (payload.title === undefined && payload.body === undefined) throw bad('Nothing to update'); await adapter.update(ticketId, { ...(payload.title !== undefined ? { title: text(payload.title, 200) } : {}), ...(payload.body !== undefined ? { body: text(payload.body) } : {}) }); return { updated: true }; }
-    if (action === 'close') { await adapter.close(ticketId); return { closed: true }; }
+    if (action === 'close') { await this.assertNoOpenPr(p, ticketId); await adapter.close(ticketId); return { closed: true }; }
     if (action === 'reopen') { if (typeof adapter.reopen !== 'function') throw bad('This tracker cannot reopen tickets from here; reopen it there'); await adapter.reopen(ticketId); this.cache.delete(`t:${projectId}`); return { reopened: true }; }
     if (action === 'requeue') {
       const cur = await adapter.get(ticketId); const details = payload.details === undefined || payload.details === '' ? '' : text(payload.details);
@@ -370,7 +371,7 @@ export class Engine {
   prDetail(id, n) { return this._forge(this.project(id)).diff(n); }
   async prAction(id, n, action, body = {}) {
     const f = this._forge(this.project(id)); this.cache.delete(`p:${id}`);
-    if (action === 'merge') return f.merge(n); if (action === 'close') return f.close(n); if (action === 'comment') return f.comment(n, body.text);
+    if (action === 'merge') return this.mergePr(id, n); if (action === 'close') return this.rejectPr(id, n, body); if (action === 'comment') return f.comment(n, body.text);
     throw Object.assign(new Error('Unknown action'), { status: 400 });
   }
   async setPublishTarget(id, { kind, repo: input, fields = {}, token }) {
@@ -601,9 +602,12 @@ export class Engine {
     const dir = this._packDir(id); const pack = pk.loadPack(dir); if (pack.plan?.status !== 'launched') return pack;
     // fresh read: dependents are released the moment a ticket closes
     this.cache.delete(`t:${id}`); const live = await this.listTickets(id).catch(() => null); if (!live) return pack; const byId = new Map(live.map((t) => [String(t.id), t])); let changed = false;
+    // On a local forge a ticket can be closed while its pull request is still open (closed by hand). That is not done: the code is not in the base branch, so nothing that depends on it may start.
+    const openBranches = hostKind(this.project(id)) === 'local' ? (await this.deps(this.project(id)).host.listAgentPrs().catch(() => [])).map((x) => String(x.branch ?? '')) : [];   // asked of the forge directly, not the cached list
     for (const e of pack.plan.epics) for (const t of e.tickets) {
       if (!t.ticketId) continue; const tk = byId.get(String(t.ticketId)); if (!tk) continue;
-      const next = tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels); const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
+      const unmerged = tk.state === 'CLOSED' && openBranches.some((b) => b.startsWith(`agent/${t.ticketId}-`));
+      const next = unmerged ? 'review' : tk.state === 'CLOSED' ? 'done' : stateOf(tk.labels); const status = next === 'ready' ? 'queued' : next; if (t.status !== status || t.url !== tk.url) { t.status = status; t.url = tk.url ?? t.url; changed = true; }
     }
     if (pack.plan.epics.every((e) => e.tickets.every((t) => t.status === 'done')) && pack.plan.status !== 'complete') { pack.plan.status = 'complete'; changed = true; }
     if (changed) pk.savePack(dir, pack); return pack;
@@ -901,4 +905,4 @@ export class Engine {
   }
 }
 
-Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods);
+Object.assign(Engine.prototype, scheduleMethods, roleMethods, autonomyMethods, designMethods, visualMethods, notifyMethods, livePreviewMethods, agentMethods, limitMethods, presetMethods, reviewMethods);

@@ -384,3 +384,4 @@ input[type=search] { max-width: 320px; }
 .ub-track { display: flex; height: 14px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; } .ub-track i { display: block; height: 100%; } .ub-track .f, .sw.ub-f { background: var(--orange); } .ub-track .c, .sw.ub-c { background: var(--blue); } .ub-track .o, .sw.ub-o { background: var(--amber); }
 @media (max-width: 720px) { .ubar { grid-template-columns: 1fr; gap: 4px; } }
 .setup-detail { margin: 10px 0; } .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 10px 0; font-size: 13px; } .kv dt { color: var(--muted); font: 600 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; padding-top: 2px; } .kv dd { margin: 0; }
+.assess { display: grid; gap: 8px; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); background: var(--panel-2); } .assess-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }

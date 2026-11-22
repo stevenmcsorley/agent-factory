@@ -166,13 +166,30 @@ function decisionCard(it, ctx) {
       ext(it.url, [icon('arrow', 12), ' Open in tracker'], 'btn ghost'),
       h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Close “${it.title}”? You can reopen it in your tracker.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', rerender)(); } }, 'Close ticket')));
 }
+// A pull request ready for a person. On a local forge it can be reviewed, merged or rejected right here; the reviewers' findings are shown so the decision is informed.
+const goPr = (id, n) => { projTab = 'prs'; openPrNo = n; location.hash = `#/project/${id}`; };
+const SEV_CLASS = { blocker: 'bad', major: 'bad', minor: 'warn' };
+function assessPanel(a) {
+  if (!a) return null; const rv = a.reviewer; const bits = [];
+  if (rv) bits.push(h('div', { class: 'assess-row' }, h('span', { class: `pill2 ${rv.verdict === 'approve' ? 'solid' : rv.verdict === 'changes' ? 'bad' : 'warn'}` }, rv.verdict === 'approve' ? 'reviewers approved' : rv.verdict === 'changes' ? 'reviewers asked for changes' : 'review did not finish'), rv.summary ? h('span', { class: 'small' }, ` ${rv.summary}`) : null));
+  if (rv?.findings?.length) bits.push(h('ul', { class: 'reasons' }, rv.findings.map((f) => h('li', {}, h('span', { class: `pill2 ${SEV_CLASS[f.severity] ?? ''}` }, f.severity), ' ', h('b', {}, `${f.source !== 'reviewer' ? `${f.source} · ` : ''}${f.file ?? ''}${f.line ? `:${f.line}` : ''}`), h('div', { class: 'small' }, f.issue), f.fix ? h('div', { class: 'small muted' }, `Suggested: ${f.fix}`) : null))));
+  if (a.visual) bits.push(h('div', { class: 'assess-row' }, h('span', { class: `pill2 ${a.visual.status === 'pass' ? 'solid' : a.visual.status === 'fail' ? 'bad' : 'warn'}` }, `visual check ${a.visual.status}`), h('span', { class: 'small muted' }, ` ${a.visual.summary}`)));
+  if (a.tests) bits.push(h('div', { class: 'assess-row' }, h('span', { class: `pill2 ${a.tests.status === 'added' ? 'solid' : 'warn'}` }, a.tests.status === 'added' ? `tester added ${a.tests.files.length} test file${a.tests.files.length === 1 ? '' : 's'}` : 'tester\'s work was undone'), a.tests.summary ? h('span', { class: 'small muted' }, ` ${a.tests.summary}`) : null));
+  if (a.held?.length) bits.push(h('div', { class: 'note warn' }, icon('alert', 14), h('div', {}, h('b', {}, 'Autonomous mode is holding this back: '), a.held.join('; '))));
+  return bits.length ? h('div', { class: 'assess' }, ...bits) : null;
+}
 function reviewCard(it, ctx) {
-  const base = `/projects/${it.project}/tickets/${it.id}`;
+  const base = `/projects/${it.project}/tickets/${it.id}`; const reason = h('input', { placeholder: 'Why? (optional; it goes on the ticket)', maxlength: 300, 'aria-label': 'Reason for rejecting' });
+  const prBase = it.pr ? `/projects/${it.project}/prs/${it.pr.number}` : null; const local = it.local && it.pr;
   return h('article', { class: 'slip ok' },
     h('div', { class: 'slip-top' }, h('span', { class: 'stamp ok' }, 'Ready to review'), ext(it.url, `#${it.id}`, 'tid'), h('span', { class: 'tag' }, it.project), h('span', { class: 'muted small mono' }, ago(it.updatedAt)), it.run?.id ? h('a', { class: 'small', href: `#/run/${it.run.id}` }, 'Work order →') : null),
-    h('h3', {}, it.title),
-    h('div', { class: 'row gap-t' }, it.pr ? ext(it.pr.url, [icon('pr', 13), ` Review PR #${it.pr.number}`], 'btn primary') : h('span', { class: 'muted small' }, 'PR link unavailable (it may have been merged or closed)'),
-      h('button', { class: 'btn', onclick: async () => { if (confirm(`Mark “${it.title}” done by closing the ticket? Merge the PR first.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', ctx.rerender)(); } }, 'Done: close ticket')));
+    h('h3', {}, it.title), assessPanel(it.assess),
+    local ? h('div', {}, h('div', { class: 'row gap-t' }, h('button', { class: 'btn primary', onclick: () => goPr(it.project, it.pr.number) }, icon('pr', 13), `Review the changes (PR #${it.pr.number})`),
+      h('button', { class: 'btn', title: 'Merge it into the main branch. The ticket closes with it, and whatever was waiting on it can start.', onclick: async () => { if (confirm(`Merge #${it.pr.number} “${it.title}” into the main branch? The ticket closes with it.`)) await act(() => api(`${prBase}/merge`, { method: 'POST', body: {} }), 'Merged. The ticket is closed.', ctx.rerender)(); } }, 'Merge'),
+      h('button', { class: 'btn danger', title: 'Close the pull request without merging. The ticket is NOT done: it goes back to failed, and anything waiting on it keeps waiting.', onclick: async () => { if (confirm(`Reject #${it.pr.number} “${it.title}”? It is closed without merging and the ticket goes back to failed.`)) await act(() => api(`${prBase}/close`, { method: 'POST', body: { reason: reason.value } }), 'Rejected. The ticket is marked failed; requeue it to try again.', ctx.rerender)(); } }, 'Reject')),
+      h('div', { class: 'row nowrap gap-t' }, reason), h('p', { class: 'small muted' }, 'Merging closes the ticket. Rejecting does not: nothing that depends on this ticket starts until it is merged.'))
+      : h('div', { class: 'row gap-t' }, it.pr ? ext(it.pr.url, [icon('pr', 13), ` Review PR #${it.pr.number}`], 'btn primary') : h('span', { class: 'muted small' }, 'PR link unavailable (it may have been merged or closed)'),
+        h('button', { class: 'btn', onclick: async () => { if (confirm(`Mark “${it.title}” done by closing the ticket? Merge the PR first.`)) await act(() => api(`${base}/close`, { method: 'POST', body: {} }), 'Ticket closed.', ctx.rerender)(); } }, 'Done: close ticket')));
 }
 // A pipeline on a project's base branch is failing after a merge (see src/deploywatch.mjs). It clears itself when a later run of that workflow goes green.
 function deployCard(it) {
