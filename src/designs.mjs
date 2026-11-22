@@ -127,12 +127,13 @@ export function removeDesign(packDir, id) { dirOf(packDir, id); fs.rmSync(dirOf(
 
 const styleOf = (html) => [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1].trim()).join('\n');
 // What the builder is told about approved designs: a short brief per design plus the stylesheet (colours, type, spacing live there), and where the full file is.
-export function designContext(packDir) {
+// slim: when a ticket is told exactly which screen it builds, the other screens are listed (title, path) and only ONE stylesheet is included (the shared tokens), not every screen's.
+export function designContext(packDir, { slim = false } = {}) {
   const approved = listDesigns(packDir).filter((d) => d.status === 'approved' && d.approvedVersion).slice(0, MAX_IN_USE); if (!approved.length) return '';   // most recently updated first; inUse() reports anything beyond the cap
-  const screens = approved.filter((d) => d.kind !== 'assets'); const sets = approved.filter((d) => d.kind === 'assets'); const out = [];
-  if (screens.length) out.push(`### Approved designs (follow these: same look, same patterns. They are the owner's decision, not a suggestion)\n${screens.slice(0, MAX_IN_USE).map((d) => { let css = ''; try { css = styleOf(readHtml(packDir, d.id, d.approvedVersion)).slice(0, 2500); } catch { /* skip */ }
+  const screens = approved.filter((d) => d.kind !== 'assets'); const sets = approved.filter((d) => d.kind === 'assets'); const out = []; const shared = (screens.find((d) => d.area === 'index' || d.area === 'home') ?? screens[0])?.id;
+  if (screens.length) out.push(`### Approved designs (follow these: same look, same patterns. They are the owner's decision, not a suggestion)\n${screens.slice(0, MAX_IN_USE).map((d) => { let css = ''; if (!slim || d.id === shared) try { css = styleOf(readHtml(packDir, d.id, d.approvedVersion)).slice(0, 2500); } catch { /* skip */ }
     const v = d.versions.find((x) => x.n === d.approvedVersion);
-    return `#### ${d.title}\nWhat it is: ${d.request.slice(0, 400)}\n${v?.rationale ? `Designer's notes: ${v.rationale}\n` : ''}Full mockup: .factory-context/designs/${d.id}.html\n${css ? `Its stylesheet (the colours, type and spacing to reuse):\n\`\`\`css\n${css}\n\`\`\`` : ''}`; }).join('\n\n')}`);
+    return `#### ${d.title}\nWhat it is: ${d.request.slice(0, slim ? 160 : 400)}\n${v?.rationale && !slim ? `Designer's notes: ${v.rationale}\n` : ''}Full mockup: .factory-context/designs/${d.id}.html\n${css ? `Its stylesheet (the colours, type and spacing to reuse):\n\`\`\`css\n${css}\n\`\`\`` : ''}`; }).join('\n\n')}`);
   if (sets.length) out.push(`### Approved artwork (use these files; do not draw your own logo, icons or illustrations)\n${sets.slice(0, MAX_IN_USE).map((d) => { const v = d.versions.find((x) => x.n === d.approvedVersion); const where = d.published?.dir ? `already in the repository at ${d.published.dir}/` : `in .factory-context/designs/${d.id}/ (copy into the project where it belongs, for example public/ or src/assets/)`;
     return `#### ${d.title}\nWhat it is: ${d.request.slice(0, 300)}\nFiles (${where}): ${(v?.files ?? []).map((f) => `${f}.svg`).join(', ')}`; }).join('\n\n')}`);
   return out.join('\n\n');

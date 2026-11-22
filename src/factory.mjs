@@ -187,7 +187,7 @@ async function processTicket(t, { tickets, sandbox, agent, vcs, config, stateDir
       // Optional second opinion: another agent reads the change. Blocking findings go back to the builder once per attempt; on the last attempt the PR still opens, flagged.
       if (config.review) {
         run.phase('review', 'a second agent reads the change');
-        let rv; try { rv = await config.review({ ws, ticket: t, context: config.contextFor?.(t), role: (n, d) => run.role(n, d), meta: { run: rec.id, ticket: t.id } }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
+        let rv; try { rv = await config.review({ ws, ticket: t, context: (config.reviewContextFor ?? config.contextFor)?.(t), role: (n, d) => run.role(n, d), meta: { run: rec.id, ticket: t.id } }); } catch (e) { rv = { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; }
         run.note('review', rv);
         if (rv.verdict === 'changes' && a < (cfg.maxAttempts ?? 2)) { rec.status = 'review-changes'; feedback = feedbackFromReview(rv); continue; }
       }

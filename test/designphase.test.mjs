@@ -22,7 +22,7 @@ function world() {
   const sandbox = { create: async ({ cloneUrl, branch, base, newBranch }) => { const dir = fs.mkdtempSync(path.join(root, 'ws-')); execFileSync('git', ['clone', '-q', '--branch', newBranch === false && branch !== 'design' && branch !== 'screens' ? branch : base, cloneUrl, dir]); return { dir, cloneUrl, destroy() {} }; }, exec: async () => ({ code: 0, out: '' }) };
   const agent = { run: async (_sb, ws, prompt) => { if (!/## What to (design|draw)/.test(prompt)) return { out: 'ok', costUsd: 0 }; prompts.push(prompt); const out = path.join(ws.dir, '.factory-design');
     if (/## What to draw/.test(prompt)) { write(path.join(out, 'assets', 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'); write(path.join(out, 'assets', 'hero.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle r="4"/></svg>'); }
-    else write(path.join(out, 'design.html'), page(/the (\S+\.html) page/.exec(prompt)?.[1] ?? 'page')); return { out: 'designed', costUsd: 0 }; } };
+    else write(path.join(out, 'design.html'), page(/the (\S+\.html) page/.exec(prompt)?.[1] ?? 'page').replace('<header>', '<style>body { margin: 0; color: #222 }</style><header>')); return { out: 'designed', costUsd: 0 }; } };
   const e = new Engine(withDefaults({ stateDir: path.join(root, 's'), agent: { kind: 'shell' }, sandbox: { kind: 'local' }, projects: [] }), { configPath: path.join(root, 'c.json'), env: {}, factories: { sandbox, agent } });
   return { e, root, prompts };
 }
@@ -106,4 +106,18 @@ test('restyle: designs the new direction for the key pages from what exists, app
 
 test('design phase over MCP: status, mode and the new operations exist', async () => {
   const w = world(); await project(w); const s = await callOp(w.e, 'design_phase_status', { project: 'app' }); assert.equal(s.mode, 'auto'); assert.equal(s.wants, true); assert.equal((await callOp(w.e, 'set_design_phase', { project: 'app', mode: 'off' })).mode, 'off');
+});
+
+test('token economy: a ticket told which screen it builds gets the slim design context (one shared stylesheet, no designer chatter); other tickets get the full one', async () => {
+  const w = world(); await project(w, { unattended: true }); await w.e.launchPlan('app'); await settle(w); const p = w.e.project('app'); const dir = w.e._packDir('app');
+  const css = (s) => (s.match(/```css/g) ?? []).length; const full = ds.designContext(dir); const slim = ds.designContext(dir, { slim: true });
+  assert.equal(css(full), 2, 'full: a stylesheet per screen'); assert.equal(css(slim), 1, 'slim: only the shared one'); assert.ok(slim.length < full.length); assert.match(slim, /Full mockup: \.factory-context\/designs\//, 'every screen is still listed with its mockup path');
+  const withPage = w.e.deps(p).config.contextFor({ id: 1, title: 'Foundation', body: EPICS[0].tickets[0].body }); const noPage = w.e.deps(p).config.contextFor({ id: 2, title: 'Sort', body: 'Add sorting in sort.js.' });
+  assert.equal(css(withPage), 1); assert.equal(css(noPage), 2);
+});
+
+test('token economy: reviewers get what they need (brief, this ticket\'s screen and sources) and not the builder\'s skills, parts or every stylesheet', async () => {
+  const w = world(); await project(w, { unattended: true }); await w.e.launchPlan('app'); await settle(w); const p = w.e.project('app'); const cfg = w.e.deps(p).config; const t = { id: 1, title: 'Foundation', body: EPICS[0].tickets[0].body };
+  const builder = cfg.contextFor(t); const reviewer = cfg.reviewContextFor(t);
+  assert.match(reviewer, /Project brief/); assert.match(reviewer, /This ticket builds a designed screen/); assert.doesNotMatch(reviewer, /```css/); assert.ok(reviewer.length < builder.length, 'smaller than the builder\'s');
 });

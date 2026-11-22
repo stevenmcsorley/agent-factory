@@ -17,7 +17,7 @@ export const designMethods = {
   designAssets(id, did, version) { return ds.readAssets(this._designDir(id), did, version); },
   designHtml(id, did, version) { return ds.readHtml(this._designDir(id), did, version); },
   _materializeDesigns(id, wsDir) { try { ds.materializeDesigns(this._designDir(id), wsDir); } catch { /* context is a helper, never a blocker */ } },
-  _designContext(id) { try { return ds.designContext(this._designDir(id)); } catch { return ''; } },
+  _designContext(id, opts) { try { return ds.designContext(this._designDir(id), opts); } catch { return ''; } },
 
   startDesign(id, { title, request, kind, area } = {}) {
     this.assertAgentAvailable();

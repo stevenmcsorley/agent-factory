@@ -25,7 +25,8 @@ function boot(over = {}) {
 
 test('the first sign of the limit, from any agent, pauses every project until it lifts, and says why', async () => {
   const { e } = boot(); assert.equal(e.planLimit(), null); assert.equal(e._dueProjects().length, 2);
-  e._noteLimit({ message: 'You have hit your usage limit', retryAt: '3:28 AM' }, at(2026, 11, 21, 22, 0));
+  const now = Date.now(); const future = new Date(now + 2 * 3_600_000); const hh = future.getHours() % 12 || 12; const clock = `${hh}:${String(future.getMinutes()).padStart(2, '0')} ${future.getHours() >= 12 ? 'PM' : 'AM'}`;   // two hours from the real now, so this never expires under the test
+  e._noteLimit({ message: 'You have hit your usage limit', retryAt: clock }, now);
   const l = e.planLimit(); assert.ok(l, 'recorded'); assert.equal(l.autoResume, true); assert.deepEqual(e._dueProjects(), []); assert.equal((await callOp(e, 'why_waiting', { project: 'a' })).reasons.find((r) => r.code === 'plan-limit').code, 'plan-limit');
   assert.match(e.status().limit.message, /usage limit/); assert.throws(() => e.startDesign('a', { title: 'x', request: 'a design that cannot start now' }), /usage limit is reached/); assert.throws(() => e.startPlanning('a'), /usage limit is reached/);
   assert.equal((await callOp(e, 'agent_plan_status', {})).autoResume, true);

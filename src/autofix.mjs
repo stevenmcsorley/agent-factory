@@ -18,7 +18,7 @@ export const fixPrompt = (pr, findings) => [
 export async function reviewFixRound({ host, sandbox, agent, vcs, config, stateDir }, pr, { run, ticket, reviewFirst = false, round = 1 }) {
   const t = startRun({ prNumber: pr.number, title: `Fix reviewer findings on #${pr.number}: ${pr.title ?? ''}`.trim(), round: 'review-fix', repo: config.repo, costUsd: 0 }, { onEvent: config.onEvent, project: config.projectId });
   const rec = t.rec; let ws; let rv = run?.review ?? null; let pushable = false; let changed = false;
-  const review = async () => { t.phase('review', 'the reviewers read the branch'); try { return await config.review({ ws, ticket, context: config.contextFor?.(ticket), role: (n, d) => t.role(n, d), meta: { run: rec.id, ticket: ticket?.id } }); } catch (e) { return { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; } };
+  const review = async () => { t.phase('review', 'the reviewers read the branch'); try { return await config.review({ ws, ticket, context: (config.reviewContextFor ?? config.contextFor)?.(ticket), role: (n, d) => t.role(n, d), meta: { run: rec.id, ticket: ticket?.id } }); } catch (e) { return { verdict: 'error', summary: String(e.message ?? e).slice(0, 200), findings: [] }; } };
   try {
     t.phase('sandbox', 'cloning the PR branch');
     ws = await sandbox.create({ cloneUrl: config.cloneUrl, branch: pr.branch, base: pr.branch, newBranch: false, gitEnv: config.gitEnv });
