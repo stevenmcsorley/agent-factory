@@ -1,6 +1,7 @@
 // The Code tab: an explorer for what the analysis found. Overview, Findings (with the code line, why it matters and how to fix it),
 // Files, Repeated code, Tests and Ignored. Filters and sorting update the list in place, so typing never loses focus.
 import { h, icon, api, toast, ago, num, ext, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 
 const SEV = ['BLOCKER', 'CRITICAL', 'MAJOR', 'MINOR', 'INFO'];
 const SEV_LABEL = { BLOCKER: 'Blocker', CRITICAL: 'Critical', MAJOR: 'Major', MINOR: 'Minor', INFO: 'Info' };
@@ -119,7 +120,7 @@ function findings({ pr, proj, q, go, onFix, onIgnore }) {
     return h('article', { class: `finding sev-${f.severity}` },
       h('div', { class: 'f-head' }, sevPill(f.severity), h('b', { class: 'f-title' }, r.title), pill(TYPE_LABEL[f.type]?.replace(/s$/, '') ?? f.type, 'muted'), where(proj, f.file, f.line, 'loc')),
       f.message && f.message !== r.title ? h('p', { class: 'f-msg' }, f.message) : null,
-      f.snippet ? h('pre', { class: 'code' }, h('span', { class: 'ln' }, String(f.line)), h('code', {}, f.snippet)) : null,
+      f.snippet ? codeBlock(f.snippet, { path: f.file, start: Number(f.line) || 1, label: 'Snippet' }) : null,
       h('div', { class: 'f-foot' }, r.why ? h('details', { class: 'why' }, h('summary', {}, 'Why it matters & how to fix'), h('p', {}, h('b', {}, 'Why: '), r.why), h('p', {}, h('b', {}, 'Fix: '), r.fix)) : h('span', {}), h('div', { class: 'row' }, cpB, ignB, fixB)));
   };
   const paint = () => {

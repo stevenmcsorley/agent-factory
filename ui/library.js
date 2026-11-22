@@ -1,5 +1,6 @@
 // The Library page: the catalog of reusable parts shared by every project, the repeated code that should become parts, and upgrades.
 import { h, icon, api, toast, ago, num, ext, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 
 const op = (name, body = {}) => api(`/op/${name}`, { method: 'POST', body });
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
@@ -68,11 +69,11 @@ function partsTab({ parts, projects, ctx, redraw }) {
 
 function partDetail(p, projects, ctx, close) {
   const body = h('div', {}); const fileBox = h('div', {}); let full = null;
-  const showFile = () => { if (!full) return; const f = full.files[view.file] ?? full.files[0]; fileBox.replaceChildren(h('div', { class: 'tabs2' }, full.files.map((x, i) => h('button', { class: `chip ${i === view.file ? 'on' : ''}`, onclick: () => { view.file = i; showFile(); } }, x.path, x.role === 'test' ? ' (test)' : ''))), h('pre', { class: 'code big' }, h('code', {}, f?.content ?? '')), h('div', { class: 'row' }, h('button', { class: 'btn small ghost', onclick: () => copy(f.content, 'File') }, icon('copy', 12), 'Copy file'))); };
+  const showFile = () => { if (!full) return; const f = full.files[view.file] ?? full.files[0]; fileBox.replaceChildren(h('div', { class: 'tabs2' }, full.files.map((x, i) => h('button', { class: `chip ${i === view.file ? 'on' : ''}`, onclick: () => { view.file = i; showFile(); } }, x.path, x.role === 'test' ? ' (test)' : ''))), codeBlock(f?.content ?? '', { path: f?.path, label: 'File', maxHeight: 520 })); };
   const proj = h('select', { 'aria-label': 'Project' }, [h('option', { value: '' }, 'Choose a project…'), ...projects.map((x) => h('option', { value: x.id }, x.id))]); const note = h('input', { placeholder: 'What do you need it for? (optional)', 'aria-label': 'Purpose' });
   const use = act(async () => { if (!proj.value) throw new Error('Choose a project first'); await op('use_part', { part: p.slug, project: proj.value, note: note.value.trim() || undefined }); }, 'Ticket queued: the agent will add the part', null);
   op('library_get', { part: p.slug }).then((r) => { full = r; showFile(); body.replaceChildren(...[
-    r.usage ? h('div', {}, h('h3', {}, 'Usage'), h('pre', { class: 'code' }, h('code', {}, r.usage)), h('button', { class: 'btn small ghost', onclick: () => copy(r.usage, 'Usage') }, icon('copy', 12), 'Copy')) : null,
+    r.usage ? h('div', {}, h('h3', {}, 'Usage'), codeBlock(r.usage, { lang: 'js', title: 'Usage', label: 'Usage' })) : null,
     r.exports.length ? h('div', {}, h('h3', {}, 'API'), h('ul', { class: 'plain' }, r.exports.map((e) => h('li', {}, h('code', {}, e.signature || e.name), h('span', { class: 'muted small' }, ` ${e.kind}`))))) : null,
     tryBox(r),
     h('h3', {}, 'Files'), fileBox,
@@ -88,9 +89,9 @@ function tryBox(r) {
   const fns = r.exports.filter((e) => e.kind === 'function'); const src = r.files.filter((f) => f.role === 'source');
   if (!fns.length || !src.every((f) => /\.(m?js|cjs)$/.test(f.path))) return null;
   const sel = h('select', { 'aria-label': 'Function' }, fns.map((f) => h('option', { value: f.name }, f.signature || f.name))); const args = h('textarea', { rows: 2, placeholder: 'Arguments as a JSON array, e.g. ["draft-*"]  or  [["a.sql","b.js"], 2]', spellcheck: 'false', 'aria-label': 'Arguments' }, '[]');
-  const out = h('pre', { class: 'code' }, h('code', {}, 'Run it to see the result.'));
-  const run = async (e) => { let a; try { a = JSON.parse(args.value || '[]'); if (!Array.isArray(a)) throw new Error('not an array'); } catch { out.firstChild.textContent = 'Arguments must be a JSON array, e.g. ["text", 2]'; return; }
-    const b = e.currentTarget; b.disabled = true; out.firstChild.textContent = 'Running…'; try { const x = await op('library_try', { part: r.slug, fn: sel.value, args: a }); out.firstChild.textContent = x.ok ? `${JSON.stringify(x.result, null, 2)}\n\n(${x.ms} ms, in a sandbox with no network or files)` : `Error: ${x.error}`; } catch (err) { out.firstChild.textContent = `Error: ${err.message}`; } finally { b.disabled = false; } };
+  const out = codeBlock('Run it to see the result.', { numbers: false, title: 'Result', label: 'Result' });
+  const run = async (e) => { let a; try { a = JSON.parse(args.value || '[]'); if (!Array.isArray(a)) throw new Error('not an array'); } catch { out.setText('Arguments must be a JSON array, e.g. ["text", 2]'); return; }
+    const b = e.currentTarget; b.disabled = true; out.setText('Running…'); try { const x = await op('library_try', { part: r.slug, fn: sel.value, args: a }); out.setText(x.ok ? `${JSON.stringify(x.result, null, 2)}\n\n(${x.ms} ms, in a sandbox with no network or files)` : `Error: ${x.error}`); } catch (err) { out.setText(`Error: ${err.message}`); } finally { b.disabled = false; } };
   return h('div', { class: 'tryit' }, h('h3', {}, 'Try it'), h('p', { class: 'muted small' }, 'Runs the function in a sandbox: no network, no files, 3 seconds.'), h('div', { class: 'toolbar' }, sel), args, h('div', { class: 'row gap-t' }, h('button', { class: 'btn', onclick: run }, icon('arrow', 13), 'Run')), out);
 }
 
@@ -150,5 +151,5 @@ function howTab() {
       ['Every build starts with "you already have these".', 'The factory searches the catalog against the ticket and project stack and tells the agent which parts fit, with their files. The agent copies them (keeping a provenance header) instead of writing new code.'],
       ['Reuse is recorded.', 'The PR lists the parts used and the project’s .factory/parts.lock.json records the version. New code that rewrites a part is flagged once, then sent back to the agent.'],
       ['Updates reach everyone.', 'Bump a part’s version and the Upgrades tab lists the projects still on the old one; one click opens an upgrade ticket in each.']].map(([t, x]) => h('li', {}, h('b', {}, t), h('p', { class: 'muted small' }, x)))),
-    h('p', { class: 'muted small' }, 'From a terminal or an AI agent: '), h('pre', { class: 'code' }, h('code', {}, 'agent-factory library search "format money"\nagent-factory library promote my-app src/money.js --name="Money Format" --tags=currency\nagent-factory library use money-format other-app --note="cart totals"\nagent-factory library upgrades')))];
+    h('p', { class: 'muted small' }, 'From a terminal or an AI agent: '), codeBlock('agent-factory library search "format money"\nagent-factory library promote my-app src/money.js --name="Money Format" --tags=currency\nagent-factory library use money-format other-app --note="cart totals"\nagent-factory library upgrades', { lang: 'sh', title: 'Terminal', label: 'Commands' }))];
 }

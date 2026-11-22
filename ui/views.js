@@ -1,6 +1,7 @@
 import { h, icon, api, toast, ago, dur, num, pct, ext, pill, act, STAGES, CORE_STAGES, OPTIONAL_STAGES, STATES, session, keyed, persist } from './lib.js';
 export { act };
 import { codeTab, openCode } from './code.js';
+import { codeBlock } from './codeblock.js';
 import { briefTab, planTab, attachments, uploadAttachments } from './pack.js';
 import { designsTab, loadDesigns } from './designs.js';
 import { autopilotTab, loadAutopilot, visualRunCard } from './autopilot.js';
@@ -395,7 +396,7 @@ export const connect = {
     const origin = location.origin; const tok = session.token; let shown = false;
     const copy = (text, label) => h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(text); toast(`${label} copied`, 'ok'); } catch { toast('Copy failed: select and copy manually', 'bad'); } } }, icon('copy', 13), 'Copy');
     // The snippet SHOWS a placeholder but COPIES the real token, so the secret is never on screen by accident.
-    const code = (text) => h('div', { class: 'snip' }, h('pre', {}, text.split(tok).join('<your-token>')), copy(text, 'Snippet (with your token)'));
+    const code = (text) => codeBlock(text.split(tok).join('<your-token>'), { lang: text.trim().startsWith('{') ? 'json' : 'sh', title: text.trim().startsWith('{') ? 'JSON' : 'Terminal', copyText: text, label: 'Snippet (with your token)', numbers: false });
     const tokenView = h('code', { class: 'tok' }, '•'.repeat(24)); const reveal = h('button', { class: 'btn small', onclick: () => { shown = !shown; tokenView.textContent = shown ? tok : '•'.repeat(24); reveal.textContent = shown ? 'Hide' : 'Reveal'; } }, 'Reveal');
     const cmd = (path, name) => `claude mcp add --transport http ${name} ${origin}${path} --header "Authorization: Bearer ${tok}"`;
     const max = Math.max(info.directTokens, info.codeTokens);

@@ -1,5 +1,6 @@
 // The Scenarios page: custom workflows (prototype, ship, deploy to Cloudflare, your own), their runs with human approval gates, and the extensions that add steps.
 import { h, icon, api, toast, ago, ext, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 
 const op = (name, body = {}) => api(`/op/${name}`, { method: 'POST', body });
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
@@ -64,7 +65,7 @@ function extTab(d) {
     h('p', { class: 'muted small' }, 'Plugins add step types (deploy targets, notifiers), operations, quality rules, part kinds, ticket trackers and code hosts. They are trusted code, so enabling one is a deliberate, offline step: the factory records a hash of its files and refuses it if anything changes afterwards. Agents cannot enable plugins.'),
     P.plugins.length ? h('ul', { class: 'plain plugs' }, P.plugins.map((p) => { const [l, c] = PLUGIN[p.status] ?? [p.status, '']; return h('li', {}, h('div', { class: 'srow' }, h('b', {}, p.name), p.version ? h('span', { class: 'muted small mono' }, `v${p.version}`) : null, pill(l, c)), p.description ? h('p', { class: 'muted small' }, p.description) : null,
       p.provides?.length ? h('p', { class: 'small mono' }, `provides: ${p.provides.join(', ')}`) : null, p.secrets?.length ? h('p', { class: 'muted small mono' }, `secrets: ${p.secrets.join(', ')}`) : null, p.error ? h('div', { class: 'note bad' }, icon('alert', 14), ' ', p.error) : null,
-      p.status === 'available' ? h('pre', { class: 'code' }, h('code', {}, `agent-factory plugin enable ${p.name}   # then restart`)) : null); })) : h('p', { class: 'muted' }, 'No plugins found. Create one with: agent-factory plugin new my-plugin')),
+      p.status === 'available' ? codeBlock(`agent-factory plugin enable ${p.name}   # then restart`, { lang: 'sh', title: 'Terminal', label: 'Command', numbers: false }) : null); })) : h('p', { class: 'muted' }, 'No plugins found. Create one with: agent-factory plugin new my-plugin')),
   card('', h('h2', {}, 'Step types available to scenarios'), h('div', { class: 'chips' }, ['ticket', 'check', 'approve', 'http', 'note', ...P.stepTypes].map((t) => pill(t, t.includes('.') ? 'info' : 'muted'))), h('p', { class: 'muted small' }, 'Built in: ticket (queue work for the agent), check (is the project ready?), approve (a human says yes), http (an allow-listed HTTPS call), note. Plugin steps look like cloudflare.dns.')),
   card('', h('h2', {}, 'Change how it works'), h('ul', { class: 'plain' }, [['Scenarios', 'JSON files in the scenarios folder: your own workflows and gates.'], ['Plugins', 'plugins/<name>/ folders: new services and step types.'], ['Prompts', 'prompts/<name>.md next to your config: change what agents are told.'], ['Rules, ignore patterns, quality gate', 'In agent-factory.json or a repo’s .agent-factory.json.'], ['The whole app', 'The factory can manage its own repository; its security core is protected from self-edits.']].map(([a, b]) => h('li', { class: 'small' }, h('b', {}, `${a}: `), b))), h('p', { class: 'muted small' }, 'Full guide: docs/EXTENDING.md'))];
 }

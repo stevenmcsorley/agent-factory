@@ -2,6 +2,7 @@
 // A draft is only ever loaded into the editor for you to read and save; nothing is applied automatically.
 // SECURITY: all text through h().
 import { h, icon, api, toast, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
 const lbl = (text, ctl, help) => h('div', { class: 'sfield' }, h('label', {}, text), ctl, help ? h('small', { class: 'help muted' }, help) : null);
@@ -39,7 +40,7 @@ export const skillsPage = {
         h('button', { class: 'btn ghost', onclick: () => { current = null; banner = ''; preview = null; ctx.rerender(); } }, 'Close')),
       h('h3', {}, 'What would an agent get?'), h('p', { class: 'muted small' }, 'Pick a role and project to see the exact skill text that agent would receive, with the same limits applied.'),
       h('div', { class: 'row nowrap' }, pvRole, pvProj, h('button', { class: 'btn', onclick: act(async () => { preview = await api(`/skills/preview?role=${encodeURIComponent(pvRole.value)}${pvProj.value ? `&project=${encodeURIComponent(pvProj.value)}` : ''}`); preview.role = pvRole.value; }, null, ctx.rerender) }, 'Preview')),
-      preview ? h('div', {}, h('p', { class: 'small muted' }, preview.names.length ? `${preview.role} gets: ${preview.names.join(', ')}` : `${preview.role} gets no skills here.`), preview.text ? h('pre', { class: 'preview' }, preview.text) : null) : null);
+      preview ? h('div', {}, h('p', { class: 'small muted' }, preview.names.length ? `${preview.role} gets: ${preview.names.join(', ')}` : `${preview.role} gets no skills here.`), preview.text ? codeBlock(preview.text, { lang: 'md', title: `What ${preview.role} is given`, label: 'Skills text', maxHeight: 360, wrap: true, numbers: false }) : null) : null);
     return [h('a', { class: 'back', href: '#/skills', onclick: () => { current = null; banner = ''; preview = null; } }, icon('arrow', 12, 'flip'), 'All skills'), h('div', { class: 'two-col' }, list, h('div', {}, editor, writer))];
   },
 };

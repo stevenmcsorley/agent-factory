@@ -3,8 +3,8 @@
 import { h, icon } from './lib.js';
 
 const MAX_LINES = 6000, AUTO_COLLAPSE = 600;
-const EXT = (p) => (/\.([a-z0-9]+)$/i.exec(p)?.[1] ?? '').toLowerCase();
-const LANG = { js: 'js', mjs: 'js', cjs: 'js', ts: 'js', jsx: 'js', tsx: 'js', json: 'json', css: 'css', scss: 'css', html: 'html', htm: 'html', svg: 'html', xml: 'html', py: 'py', sh: 'sh', md: 'md', yml: 'yml', yaml: 'yml' };
+export const EXT = (p) => (/\.([a-z0-9]+)$/i.exec(p)?.[1] ?? '').toLowerCase();
+export const LANG = { js: 'js', mjs: 'js', cjs: 'js', ts: 'js', jsx: 'js', tsx: 'js', json: 'json', css: 'css', scss: 'css', html: 'html', htm: 'html', svg: 'html', xml: 'html', py: 'py', sh: 'sh', md: 'md', yml: 'yml', yaml: 'yml' };
 const KW = { js: 'const let var function return if else for while of in new class extends import export from default async await try catch throw switch case break continue typeof instanceof null undefined true false this static get set', py: 'def class return if elif else for while in import from as with try except raise lambda None True False pass yield not and or is async await', sh: 'if then else fi for do done while case esac function in export echo cd exit', css: '' };
 
 // ---- parse a unified diff into files > hunks > rows
@@ -36,7 +36,7 @@ function pairUp(rows) {   // mark ranges on consecutive removed/added blocks of 
 }
 
 // ---- light syntax colouring: strings, comments, numbers, keywords (tag/attr for markup). Returns spans.
-function tokens(line, lang) {
+export function tokens(line, lang) {
   if (!line) return [''];
   if (!lang || lang === 'md' || line.length > 600) return [line];
   const kw = new Set((KW[lang] ?? '').split(' ').filter(Boolean)); const out = []; let i = 0;

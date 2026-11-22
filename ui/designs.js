@@ -2,6 +2,7 @@
 // Only approved designs reach the builder. The mockup is shown in a frame with `sandbox=""` (no scripts) loaded from a short-lived address the server hands out.
 // SECURITY: all text through h(); the mockup itself never touches this page's DOM, only the frame.
 import { h, icon, api, toast, ago, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 import { shotImg } from './autopilot.js';
 
 const card = (...kids) => h('section', { class: 'card' }, ...kids);
@@ -99,8 +100,8 @@ function publishBox(id, d, rerender) {
 }
 
 function builderPanel(id, data, rerender) {
-  const u = data?.inUse; if (!u) return null; const box = h('pre', { class: 'preview' }, 'Loading…');
-  const det = h('details', { ontoggle: () => { if (det.open && box.textContent === 'Loading…') api(`/projects/${id}/designs/in-use`).then((r) => { box.textContent = r.text || '(nothing: no approved designs)'; }).catch((e) => { box.textContent = e.message; }); } }, h('summary', {}, 'Exactly what the builder is told'), h('p', { class: 'muted small' }, 'This text goes into every ticket\'s instructions, and the full files sit in the workspace.'), box);
+  const u = data?.inUse; if (!u) return null; const box = codeBlock('Loading…', { lang: 'css', title: 'What the builder is told', label: 'Builder instructions', maxHeight: 420, wrap: true });
+  const det = h('details', { ontoggle: () => { if (det.open && box.dataset.loaded !== '1') api(`/projects/${id}/designs/in-use`).then((r) => { box.dataset.loaded = '1'; box.setText(r.text || '(nothing: no approved designs)'); }).catch((e) => { box.setText(e.message); }); } }, h('summary', {}, 'Exactly what the builder is told'), h('p', { class: 'muted small' }, 'This text goes into every ticket\'s instructions, and the full files sit in the workspace.'), box);
   return card(h('div', { class: 'card-h' }, h('h2', {}, icon('check', 17), 'What the builder follows'), h('span', { class: `pill2 ${u.designs.length ? 'solid' : ''}` }, `${u.designs.length} in use`)),
     u.designs.length ? h('ul', { class: 'reasons' }, u.designs.map((x) => h('li', {}, h('button', { class: 'linklike', onclick: () => { selected = x.id; shownVersion = null; tab = 'preview'; rerender(); } }, h('b', {}, x.title)), h('span', { class: 'muted small' }, ` · ${x.kind === 'assets' ? 'artwork' : 'screen'}${x.area ? ` · ${x.area}` : ''} · v${x.version}`))))
       : h('p', { class: 'muted' }, 'Nothing yet. The builder only follows designs you have approved.'),

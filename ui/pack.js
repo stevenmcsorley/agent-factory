@@ -1,5 +1,6 @@
 // The Brief tab (what we are building, conventions, decisions, source material) and the Plan tab (brief -> epics -> tickets -> done).
 import { h, icon, api, toast, ago, num, ext, act } from './lib.js';
+import { codeBlock } from './codeblock.js';
 
 const card = (cls, ...kids) => h('section', { class: `card ${cls ?? ''}` }, ...kids);
 const pill = (text, cls = '') => h('span', { class: `pill2 ${cls}` }, text);
@@ -43,7 +44,7 @@ function hookCard(id) {
   const box = h('div', {}); const op = (name) => api(`/op/${name}`, { method: 'POST', body: { project: id } });
   const draw = (info) => { const url = `${location.origin}${info.path}`; const curl = `curl -X POST '${url}' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(info.example)}'`;
     box.replaceChildren(h('label', {}, 'Webhook URL (keep it private: it contains a secret)'), h('div', { class: 'snip2' }, h('code', {}, url), h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(url); toast('URL copied', 'ok'); } catch { toast('Copy failed', 'bad'); } } }, icon('copy', 12), 'Copy')),
-      h('details', {}, h('summary', {}, 'Example request'), h('pre', { class: 'code' }, h('code', {}, curl))), h('p', { class: 'muted small' }, `${info.received} alert${info.received === 1 ? '' : 's'} received in the last 24 hours. The server listens on this machine only: to receive alerts from the internet, put an HTTPS tunnel or reverse proxy in front of it.`),
+      h('details', {}, h('summary', {}, 'Example request'), codeBlock(curl, { lang: 'sh', title: 'curl', label: 'Request' })), h('p', { class: 'muted small' }, `${info.received} alert${info.received === 1 ? '' : 's'} received in the last 24 hours. The server listens on this machine only: to receive alerts from the internet, put an HTTPS tunnel or reverse proxy in front of it.`),
       h('div', { class: 'row gap-t' }, h('button', { class: 'btn small ghost', onclick: act(async () => draw(await op('webhook_rotate')), 'New secret generated; the old URL no longer works') }, 'Generate a new secret'))); };
   op('webhook_info').then(draw).catch((e) => box.replaceChildren(h('div', { class: 'note bad' }, e.message)));
   return card('', h('div', { class: 'card-h' }, h('h2', {}, 'Alerts become tickets')), h('p', { class: 'muted small' }, 'Point an error tracker, a monitor (Skylark, Vantage, Sentry…) or any script at this URL. Each alert is checked, de-duplicated by its key, and queued as a ticket the factory fixes; you still review every PR.'), box);
