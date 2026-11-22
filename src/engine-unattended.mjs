@@ -29,9 +29,10 @@ export const unattendedMethods = {
   // ---- unattended mode: one switch for "build this project start to finish without me".
   // It sets the roles that suit it (reviewer on; the tester and spec writer on; the security reviewer a choice), and puts the project in autonomous mode with fix rounds and
   // automatic conflict resolution. It still needs what autonomous mode needs (a test command, the factory-wide switch): it explains what is missing instead of half-applying.
+  // rounds, autoResolveConflicts and maxMergesPerDay are the values the engine will really use (defaults filled in)
   unattendedStatus(id) {
     const p = this.project(id); const a = p.autonomy; const on = a?.mode === 'merge' && !!this.cfg.autonomy?.allow;
-    return { project: id, on, rounds: a ? (a.fixReviewRounds ?? AUTONOMY_DEFAULTS.fixReviewRounds) : null, autoResolveConflicts: a ? (a.autoResolveConflicts ?? AUTONOMY_DEFAULTS.autoResolveConflicts) : null, maxMergesPerDay: a ? (a.maxMergesPerDay ?? AUTONOMY_DEFAULTS.maxMergesPerDay) : null,   // the values the engine will really use factorySwitch: !!this.cfg.autonomy?.allow, factoryMergesPerDay: this.cfg.autonomy?.maxMergesPerDay ?? 10,
+    return { project: id, on, rounds: a ? (a.fixReviewRounds ?? AUTONOMY_DEFAULTS.fixReviewRounds) : null, autoResolveConflicts: a ? (a.autoResolveConflicts ?? AUTONOMY_DEFAULTS.autoResolveConflicts) : null, maxMergesPerDay: a ? (a.maxMergesPerDay ?? AUTONOMY_DEFAULTS.maxMergesPerDay) : null, factorySwitch: !!this.cfg.autonomy?.allow, factoryMergesPerDay: this.cfg.autonomy?.maxMergesPerDay ?? 10,
       roles: Object.fromEntries(['reviewer', 'security', 'tester', 'spec-writer'].map((r) => [r, this._roleOn(p, r)])), hasTestCommand: !!(p.config?.verify || p.profile?.verify), needs: [!this.cfg.autonomy?.allow && 'Turn on autonomous merging for the factory (Settings, or set_autonomy_allowed)', !(p.config?.verify || p.profile?.verify) && 'Set a test command for the project (Code tab, or set_verify)'].filter(Boolean) };
   },
   setUnattended(id, { on = true, rounds = 2, security = false, maxMergesPerDay = 20 } = {}) {

@@ -68,7 +68,7 @@ test('unattended: one switch sets the roles and autonomous mode together, says w
   const w = world(); await w.e.addProject({ repo: 'app', id: 'app', host: { kind: 'local' } });
   assert.throws(() => w.e.setUnattended('app', {}), /autonomous merging for the factory.*test command|test command.*autonomous merging/s); assert.equal(w.e.project('app').autonomy, undefined, 'nothing was half-applied');
   w.e.setAutonomyAllowed({ allow: true }); assert.throws(() => w.e.setUnattended('app', {}), /test command/); w.e.setVerify('app', { verify: 'npm test' });
-  const s = w.e.setUnattended('app', { rounds: 3, security: false }); assert.equal(s.on, true); assert.equal(s.rounds, 3); assert.equal(s.autoResolveConflicts, true); assert.deepEqual(s.roles, { reviewer: true, security: false, tester: true, 'spec-writer': true }); assert.equal(s.maxMergesPerDay, 20);
+  const s = w.e.setUnattended('app', { rounds: 3, security: false }); assert.equal(s.on, true); assert.equal(s.rounds, 3); assert.equal(s.autoResolveConflicts, true); assert.deepEqual(s.roles, { reviewer: true, security: false, tester: true, 'spec-writer': true }); assert.equal(s.maxMergesPerDay, 20); assert.equal(s.factorySwitch, true); assert.equal(typeof s.factoryMergesPerDay, 'number'); assert.deepEqual(s.needs, []); assert.equal(s.hasTestCommand, true);
   assert.equal(w.e.setUnattended('app', { on: false }).on, false); assert.equal(w.e.project('app').autonomy.mode, 'off');
 });
 
